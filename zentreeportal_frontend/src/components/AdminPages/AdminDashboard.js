@@ -114,9 +114,9 @@ const AdminDashboard = () => {
   });
 
   return (
-    <Box sx={{ bgcolor: "background.default", minHeight: "100vh" }}>
+    <Box sx={{ bgcolor: "background.default", minHeight: "80vh" }}>
       {/* Navbar */}
-      <AppBar position="sticky" elevation={0} sx={{ background: "linear-gradient(135deg, #1a237e 0%, #283593 100%)" }}>
+      {/* <AppBar position="sticky" elevation={0} sx={{ background: "linear-gradient(135deg, #1a237e 0%, #283593 100%)" }}>
         <Toolbar sx={{ px: { xs: 2, md: 4 } }}>
           <AdminPanelSettings sx={{ mr: 1 }} />
           <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1 }}>ZentreeLabs Portal— Admin</Typography>
@@ -125,7 +125,7 @@ const AdminDashboard = () => {
             <IconButton color="inherit" onClick={handleLogout}><Logout /></IconButton>
           </Tooltip>
         </Toolbar>
-      </AppBar>
+      </AppBar> */}
 
       <Box sx={{ maxWidth: 1280, mx: "auto", px: { xs: 2, md: 4 }, py: 4 }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
