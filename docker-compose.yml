@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+
+  mongodb:
+    image: mongo:latest
+    container_name: zentreeportal-mongo
+    ports:
+      - "27017:27017"
+    networks:
+      - zentreelabs-network
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build: ./zentreeportal_backend
+    container_name: zentreeportal_backend
+    ports:
+      - "5000:5000"
+    networks:
+      - zentreelabs-network
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/zentreePortal
+      - SMTP_SERVER=smtp.sendgrid.net
+      - SMTP_USERNAME=apikey
+      - SECRET_KEY=${SECRET_KEY}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - FROM_EMAIL=${FROM_EMAIL}
+    depends_on:
+      - mongodb
+
+  frontend:
+    build: ./zentreeportal_frontend
+    container_name: zentreeportal_frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - zentreelabs-network
+    environment:
+      - REACT_APP_API_BASE_URL=http://10.10.2.60:5000/api
+      - REACT_APP_API_URL=http://10.10.2.60:5000/api/auth
+      - REACT_APP_REGISTER_URL=http://10.10.2.60:5000/api/auth/register
+      - REACT_APP_LOGIN_API=http://10.10.2.60:5000/api/auth/login
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
+
+networks:
+  zentreelabs-network:
+    driver: bridge
