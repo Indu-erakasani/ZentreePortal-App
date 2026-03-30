@@ -19,7 +19,8 @@ import { ProfilePage, ChangePasswordPage } from "./components/authonticationPage
 // ── Dashboard pages (role-based views rendered inside shared Layout) ──────────
 import AdminDashboard     from "./components/AdminPages/AdminDashboard";
 import RecruiterDashboard from "./components/RecruiterPages/RecruiterDashboard";
-import ManagerDashboard   from "./components/authonticationPages/ManagerDashboard";
+import ManagerDashboard   from "./components/ManagerPages/ManagerDashboard";
+import RecruiterReportsPage from "./components/ManagerPages/RecruiterReportsPage";
 
 // ── Feature pages (shared across roles, shown inside Layout sidebar) ──────────
 import Clients    from "./components/RecruiterPages/Clients";
@@ -83,6 +84,7 @@ const App = () => (
           <Route path="/placements" element={<Placements />} />
           <Route path="/skills"     element={<Skills />} />
           <Route path="/reports"    element={<Reports />} />  
+          <Route path="/manager/recruiters" element={<RecruiterReportsPage />} />
 
           {/* ── Profile & password ─────────────────────────────────────── */}
           <Route path="/profile"         element={<ProfilePage />} />

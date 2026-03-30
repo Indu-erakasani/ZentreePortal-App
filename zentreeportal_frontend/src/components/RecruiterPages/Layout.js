@@ -314,6 +314,7 @@ const DRAWER_MINI_WIDTH = 72;
 
 const NAV_ITEMS = [
   { label: "Dashboard",  icon: <Dashboard />,  paths: ["/admin/dashboard", "/recruiter/dashboard", "/manager/dashboard"] },
+  { label: "Recruiter analytics",    icon: <People />,     paths: ["/manager/recruiters"]     },
   { label: "Clients",    icon: <People />,     paths: ["/clients"]     },
   { label: "Jobs",       icon: <Work />,       paths: ["/jobs"]        },
   { label: "Resumes",    icon: <Description />,paths: ["/resumes"]     },
@@ -406,7 +407,7 @@ export default function Layout() {
       </Box>
 
       {/* User info strip */}
-      {!collapsed && (
+      {/* {!collapsed && (
         <Box sx={{ px: 2.5, py: 1.8, bgcolor: "#f0f4f8" }}>
           <Box display="flex" alignItems="center" gap={1.5}>
             <Avatar sx={{ width: 36, height: 36, bgcolor: "#1a237e", fontSize: 13, fontWeight: 700 }}>
@@ -422,7 +423,7 @@ export default function Layout() {
             </Box>
           </Box>
         </Box>
-      )}
+      )} */}
 
       <Divider />
 
