@@ -294,7 +294,7 @@
 // }
 
 
-// src/components/Layout.jsx
+
 import React, { useState } from "react";
 import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
 import {
@@ -306,22 +306,26 @@ import {
 import {
   Dashboard, People, Work, Assessment, Description, Psychology,
   Menu as MenuIcon, Logout, ChevronLeft, ChevronRight,
-  AccountTree, Stars, AccountCircle, Lock, KeyboardArrowDown,
+  AccountTree, Stars, AccountCircle, Lock, KeyboardArrowDown,PersonOutline, BadgeOutlined
+  
 } from "@mui/icons-material";
+
 
 const DRAWER_WIDTH      = 260;
 const DRAWER_MINI_WIDTH = 72;
 
 const NAV_ITEMS = [
-  { label: "Dashboard",  icon: <Dashboard />,  paths: ["/admin/dashboard", "/recruiter/dashboard", "/manager/dashboard"] },
-  { label: "Recruiter analytics",    icon: <People />,     paths: ["/manager/recruiters"]     },
-  { label: "Clients",    icon: <People />,     paths: ["/clients"]     },
-  { label: "Jobs",       icon: <Work />,       paths: ["/jobs"]        },
-  { label: "Resumes",    icon: <Description />,paths: ["/resumes"]     },
-  { label: "Tracking",   icon: <AccountTree />,paths: ["/tracking"]    },
-  { label: "Placements", icon: <Stars />,      paths: ["/placements"]  },
-  { label: "Skills",     icon: <Psychology />, paths: ["/skills"]      },
-  { label: "Reports",    icon: <Assessment />, paths: ["/reports"]     },
+  { label: "Dashboard",          icon: <Dashboard />,   paths: ["/admin/dashboard", "/recruiter/dashboard", "/manager/dashboard"] },
+  { label: "Recruiter analytics",icon: <People />,      paths: ["/manager/recruiters"] },
+  { label: "Clients",            icon: <People />,      paths: ["/clients"]      },
+  { label: "Jobs",               icon: <Work />,        paths: ["/jobs"]         },
+  { label: "Resumes",            icon: <Description />, paths: ["/resumes"]      },
+  { label: "Candidate Tracking", icon: <AccountTree />, paths: ["/tracking"]     },
+  { label: "Placements",         icon: <Stars />,       paths: ["/placements"]   },
+  { label: "Skills",             icon: <Psychology />,  paths: ["/skills"]       },
+  { label: "Bench People",       icon: <PersonOutline />, paths: ["/bench"]      },  // ← fixed
+  { label: "Employees",          icon: <BadgeOutlined />, paths: ["/employees"]  },  // ← fixed
+  { label: "Reports",            icon: <Assessment />,  paths: ["/reports"]      },
 ];
 
 const getUser = () => {

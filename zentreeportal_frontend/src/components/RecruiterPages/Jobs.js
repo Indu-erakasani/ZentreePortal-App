@@ -1413,19 +1413,19 @@ export default function Jobs() {
             </Typography>
             <Grid container spacing={2} mb={2}>
               <Grid item xs={12} sm={4}>
-                <TextField fullWidth size="small" required label="Job ID *" name="job_id"
+                <TextField fullWidth size="small" required label="Job ID" name="job_id"
                   value={formData.job_id} onChange={handleChange}
                   placeholder="e.g. JOB007" disabled={!!selected} />
               </Grid>
               <Grid item xs={12} sm={8}>
-                <TextField fullWidth size="small" required label="Job Title *" name="title"
+                <TextField fullWidth size="small" required label="Job Title" name="title"
                   value={formData.title} onChange={handleChange}
                   placeholder="e.g. Senior React Developer" />
               </Grid>
 
               {/* ── Client dropdown — shows company name, stores _id + name ── */}
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" required label="Client *"
+                <TextField select fullWidth size="small"  sx={{ width: "100%", minWidth: 200 }}required label="Client"
                   name="client_id" value={formData.client_id} onChange={handleChange}>
                   <MenuItem value="">Select Client</MenuItem>
                   {clients.map(c => (
@@ -1458,7 +1458,7 @@ export default function Jobs() {
               )}
 
               <Grid item xs={12} sm={formData.client_name ? 12 : 6}>
-                <TextField fullWidth size="small" required label="Location *" name="location"
+                <TextField fullWidth size="small" required label="Location " name="location"
                   value={formData.location} onChange={handleChange} />
               </Grid>
               <Grid item xs={6} sm={3}>
