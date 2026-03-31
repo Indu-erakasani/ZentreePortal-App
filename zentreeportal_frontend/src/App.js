@@ -30,6 +30,8 @@ import Tracking   from "./components/RecruiterPages/Tracking";
 import Placements from "./components/RecruiterPages/Placements";
 import Skills     from "./components/RecruiterPages/Skills";
 import Reports    from "./components/RecruiterPages/Report";
+import BenchPeople from "./components/RecruiterPages/Benchpeople";
+import Employees   from "./components/RecruiterPages/EmployeesPage";
 
 const App = () => (
   <ThemeProvider theme={theme}>
@@ -85,6 +87,8 @@ const App = () => (
           <Route path="/skills"     element={<Skills />} />
           <Route path="/reports"    element={<Reports />} />  
           <Route path="/manager/recruiters" element={<RecruiterReportsPage />} />
+          <Route path="/bench"     element={<BenchPeople />} />
+          <Route path="/employees" element={<Employees />} />
 
           {/* ── Profile & password ─────────────────────────────────────── */}
           <Route path="/profile"         element={<ProfilePage />} />

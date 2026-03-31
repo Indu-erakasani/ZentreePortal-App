@@ -366,3 +366,14 @@ def delete(rid):
 @jwt_required()
 def options():
     return jsonify(success=True, statuses=SCREENING_STATUSES, sources=SOURCES), 200
+
+# ── GET /api/resumes/by-skill/<skill_name> ────────────────────────────────────
+@resume_bp.route("/by-skill/<skill_name>", methods=["GET"])
+@jwt_required()
+def by_skill(skill_name):
+    docs = list(
+        mongo.db.resume_bank.find(
+            {"skills": {"$regex": skill_name.strip(), "$options": "i"}}
+        ).sort("created_at", -1)
+    )
+    return jsonify(success=True, data=[serialize_resume(d) for d in docs]), 200

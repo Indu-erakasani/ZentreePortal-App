@@ -29,6 +29,7 @@ const getAllTracking = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
   return fetch(`${BASE}/tracking/${qs ? "?" + qs : ""}`, { headers: getHeaders() }).then(handle);
 };
+
 // ── GET /api/tracking/:id ─────────────────────────────────────────────────────
 const getOneTracking = (id) =>
   fetch(`${BASE}/tracking/${id}`, { headers: getHeaders() }).then(handle);
@@ -405,15 +406,15 @@ export default function Tracking() {
           <DialogContent sx={{ pt: 3 }}>
             <Grid container spacing={2}>
               <Grid item xs={12}>
-                <TextField fullWidth size="small" required label="Candidate Name *"
+                <TextField sx={{ width: "100%", minWidth: 250 }} size="small" required label="Candidate Name"
                   name="candidate_name" value={formData.candidate_name} onChange={handleChange} />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" required label="Resume ID *"
+                <TextField sx={{ width: "100%", minWidth: 250 }} size="small" required label="Resume ID"
                   name="resume_id" value={formData.resume_id} onChange={handleChange} placeholder="e.g. RES001" />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" label="Job" name="job_id"
+                <TextField select sx={{ width: "100%", minWidth: 250 }} size="small" label="Job" name="job_id"
                   value={formData.job_id} onChange={e => {
                     const job = jobs.find(j => j._id === e.target.value);
                     setFormData(p => ({ ...p, job_id: e.target.value, job_title: job?.title || "", client_name: job?.client_name || "" }));
@@ -423,35 +424,35 @@ export default function Tracking() {
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" label="Client Name"
+                <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Client Name"
                   name="client_name" value={formData.client_name} onChange={handleChange} />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" label="Job Title"
+                <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Job Title"
                   name="job_title" value={formData.job_title} onChange={handleChange} />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" label="Stage" name="current_stage"
+                <TextField select sx={{ width: "100%", minWidth: 250 }} size="small" label="Stage" name="current_stage"
                   value={formData.current_stage} onChange={handleChange}>
                   {STAGES.map(s => <MenuItem key={s.id} value={s.id}>{s.label}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" label="Status" name="pipeline_status"
+                <TextField select sx={{ width: "100%", minWidth: 250 }} size="small" label="Status" name="pipeline_status"
                   value={formData.pipeline_status} onChange={handleChange}>
                   {PIPELINE_STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={12}>
-                <TextField fullWidth size="small" label="Recruiter"
+                <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Recruiter"
                   name="recruiter" value={formData.recruiter} onChange={handleChange} />
               </Grid>
               <Grid item xs={12}>
-                <TextField fullWidth size="small" label="Next Step"
+                <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Next Step"
                   name="next_step" value={formData.next_step} onChange={handleChange} />
               </Grid>
               <Grid item xs={12}>
-                <TextField fullWidth multiline rows={3} size="small" label="Notes"
+                <TextField sx={{ width: "100%", minWidth: 520 }} multiline rows={3} size="small" label="Notes"
                   name="notes" value={formData.notes} onChange={handleChange} />
               </Grid>
             </Grid>
@@ -476,38 +477,39 @@ export default function Tracking() {
           <DialogContent sx={{ pt: 3 }}>
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" required label="Interviewer *"
+                <TextField  sx={{ width: "100%", minWidth: 250 }} size="small" required label="Interviewer "
                   name="interviewer" value={ivData.interviewer} onChange={handleIvChange} />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" label="Interview Type"
+                <TextField select  sx={{ width: "100%", minWidth: 250 }} size="small" label="Interview Type"
                   name="interview_type" value={ivData.interview_type} onChange={handleIvChange}>
                   {INTERVIEW_TYPES.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" label="Rating (1–5)"
+                <TextField select  sx={{ width: "100%", minWidth: 250 }} size="small" label="Rating (1–5)"
                   name="feedback_score" value={ivData.feedback_score} onChange={handleIvChange}>
                   {[1,2,3,4,5].map(n => <MenuItem key={n} value={n}>{n} — {["Poor","Below Avg","Average","Good","Excellent"][n-1]}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" label="Recommendation"
+                <TextField select  sx={{ width: "100%", minWidth: 250 }} size="small" label="Recommendation"
                   name="recommendation" value={ivData.recommendation} onChange={handleIvChange}>
                   {RECOMMENDATIONS.map(r => <MenuItem key={r} value={r}>{r}</MenuItem>)}
                 </TextField>
               </Grid>
-              <Grid item xs={12}>
-                <TextField fullWidth multiline rows={2} size="small" label="Summary"
-                  name="feedback_summary" value={ivData.feedback_summary} onChange={handleIvChange} />
-              </Grid>
+
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" label="Strengths (comma-separated)"
+                <TextField  sx={{ width: "100%", minWidth: 250 }} size="small" label="Strengths (comma-separated)"
                   name="strengths" value={ivData.strengths} onChange={handleIvChange} />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" label="Weaknesses (comma-separated)"
+                <TextField  sx={{ width: "100%", minWidth: 250 }} size="small" label="Weaknesses (comma-separated)"
                   name="weaknesses" value={ivData.weaknesses} onChange={handleIvChange} />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField  sx={{ width: "100%", minWidth: 520 }} multiline rows={3} size="small" label="Enter the Summary"
+                  name="feedback_summary" value={ivData.feedback_summary} onChange={handleIvChange} />
               </Grid>
             </Grid>
           </DialogContent>

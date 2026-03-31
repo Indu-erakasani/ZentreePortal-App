@@ -78,8 +78,23 @@ def get_pipeline():
     ]))
     return jsonify(success=True, data=pipeline), 200
 
-
+# ── GET /api/tracking/by-resume/<resume_id> ───────────────────────────────────
+@tracking_bp.route("/by-resume/<resume_id>", methods=["GET"])
+@jwt_required()
+def get_by_resume(resume_id):
+    docs = list(
+        mongo.db.candidate_tracking
+        .find({
+            "resume_id": {
+                "$regex": f"^\\s*{resume_id.strip()}\\s*$",
+                "$options": "i"
+            }
+        })
+        .sort("created_at", -1)
+    )
+    return jsonify(success=True, data=[serialize_tracking(d) for d in docs]), 200
 # ── GET /api/tracking/:id ─────────────────────────────────────────────────────
+
 @tracking_bp.route("/<tid>", methods=["GET"])
 @jwt_required()
 def get_one(tid):

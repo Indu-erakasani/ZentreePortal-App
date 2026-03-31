@@ -83,7 +83,8 @@ from routes.Placement_routes import placement_bp
 from routes.Resume_routes    import resume_bp   
 from routes.Skills_routes    import skills_bp   
 from routes.Reports_routes import reports_bp
-
+from routes.Bench_routes import bench_bp
+from routes.Employee_routes import employee_bp
 app = Flask(__name__)
 app.config.from_object(Config)
 
@@ -120,6 +121,8 @@ app.register_blueprint(placement_bp, url_prefix="/api/placements")
 app.register_blueprint(resume_bp,    url_prefix="/api/resumes")  
 app.register_blueprint(skills_bp,    url_prefix="/api/skills")  
 app.register_blueprint(reports_bp,   url_prefix="/api/reports")
+app.register_blueprint(bench_bp,     url_prefix="/api/bench")
+app.register_blueprint(employee_bp,  url_prefix="/api/employees")
  
 
 # ── Health check ──────────────────────────────────────────────────────────────

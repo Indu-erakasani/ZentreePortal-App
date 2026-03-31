@@ -1,6 +1,4 @@
-"""
-Skills Matrix routes: /api/skills/...
-"""
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from bson import ObjectId
@@ -29,6 +27,7 @@ def _next_skill_id() -> str:
 
 
 # ── GET /api/skills/ ──────────────────────────────────────────────────────────
+
 @skills_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_all():
@@ -44,8 +43,32 @@ def get_all():
     if job_id:   query["job_id"]     = job_id
 
     docs = list(mongo.db.skills_matrix.find(query).sort("skill_name", 1))
-    return jsonify(success=True, data=[serialize_skill(d) for d in docs]), 200
 
+    # ── Dynamically compute candidate_count and job_count for each skill ──
+    result = []
+    for doc in docs:
+        skill_name = doc.get("skill_name", "")
+
+        # Count resumes whose skills field contains this skill name (case-insensitive)
+        candidate_count = mongo.db.resume_bank.count_documents({
+            "skills": {"$regex": skill_name, "$options": "i"}
+        })
+
+        # Count open jobs whose required_skills or title contains this skill name
+        job_count = mongo.db.jobs.count_documents({
+            "status": "Open",
+            "$or": [
+                {"required_skills": {"$regex": skill_name, "$options": "i"}},
+                {"skills":          {"$regex": skill_name, "$options": "i"}},
+            ]
+        })
+
+        serialized = serialize_skill(doc)
+        serialized["candidate_count"] = candidate_count
+        serialized["job_count"]       = job_count
+        result.append(serialized)
+
+    return jsonify(success=True, data=result), 200
 
 # ── GET /api/skills/by-job/:job_id ────────────────────────────────────────────
 @skills_bp.route("/by-job/<job_id>", methods=["GET"])
