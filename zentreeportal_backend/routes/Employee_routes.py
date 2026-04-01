@@ -1,4 +1,3 @@
-
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from bson import ObjectId
@@ -9,6 +8,7 @@ from models.Employee_model import (
     employee_schema, engagement_schema, serialize_employee,
     EMPLOYEE_STATUSES, EMPLOYMENT_TYPES, BILLING_CURRENCIES, DEPARTMENTS,
 )
+from models.Onboarding_model import *
 
 employee_bp = Blueprint("employees", __name__)
 
@@ -29,7 +29,6 @@ def _next_emp_id() -> str:
     return f"EMP{str(count + 1).zfill(3)}"
 
 
-# ── GET /api/employees/meta/options ─────────────────────────────────────────
 @employee_bp.route("/meta/options", methods=["GET"])
 @jwt_required()
 def options():
@@ -42,7 +41,6 @@ def options():
     ), 200
 
 
-# ── GET /api/employees/stats ─────────────────────────────────────────────────
 @employee_bp.route("/stats", methods=["GET"])
 @jwt_required()
 def get_stats():
@@ -57,13 +55,12 @@ def get_stats():
         {"status": "Active", "current_client": {"$ne": ""}},
     )
     return jsonify(success=True, data={
-        "by_status":      by_status,
-        "by_department":  by_dept,
+        "by_status":     by_status,
+        "by_department": by_dept,
         "active_clients": len(active_clients),
     }), 200
 
 
-# ── GET /api/employees/ ──────────────────────────────────────────────────────
 @employee_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_all():
@@ -97,7 +94,6 @@ def get_all():
                    total=total, page=page, per_page=per_page), 200
 
 
-# ── POST /api/employees/ ─────────────────────────────────────────────────────
 @employee_bp.route("/", methods=["POST"])
 @jwt_required()
 def create():
@@ -109,9 +105,15 @@ def create():
     if mongo.db.employees.find_one({"email": data["email"].lower().strip()}):
         return jsonify(success=False, message="An employee with this email already exists"), 409
 
+    #  Use user-provided emp_id, fall back to auto-generate only if blank
+    emp_id = data.get("emp_id", "").strip().upper() or _next_emp_id()
+
+    # Check uniqueness of the chosen ID
+    if mongo.db.employees.find_one({"emp_id": emp_id}):
+        return jsonify(success=False, message=f"Employee ID '{emp_id}' is already in use"), 409
+
     try:
-        emp_id = _next_emp_id()
-        doj    = None
+        doj = None
         if data.get("date_of_joining"):
             try:
                 doj = datetime.fromisoformat(data["date_of_joining"].replace("Z", "+00:00"))
@@ -119,28 +121,32 @@ def create():
                 doj = None
 
         doc = employee_schema(
-            name                  = data["name"],
-            email                 = data["email"],
-            emp_id                = emp_id,
-            phone                 = data.get("phone", ""),
-            designation           = data.get("designation", ""),
-            department            = data.get("department", "Engineering"),
-            employment_type       = data.get("employment_type", "Permanent"),
-            date_of_joining       = doj,
-            skills                = data.get("skills", ""),
-            experience            = data.get("experience", 0),
-            location              = data.get("location", ""),
-            reporting_manager     = data.get("reporting_manager", ""),
-            status                = data.get("status", "Active"),
-            current_client        = data.get("current_client", ""),
-            current_project       = data.get("current_project", ""),
-            current_billing_rate  = data.get("current_billing_rate", 0),
-            billing_currency      = data.get("billing_currency", "INR"),
-            salary                = data.get("salary", 0),
-            notes                 = data.get("notes", ""),
+            name                 = data["name"],
+            email                = data["email"],
+            emp_id               = emp_id,           # ← now uses the resolved emp_id
+            phone                = data.get("phone", ""),
+            designation          = data.get("designation", ""),
+            department           = data.get("department", "Engineering"),
+            employment_type      = data.get("employment_type", "Permanent"),
+            date_of_joining      = doj,
+            skills               = data.get("skills", ""),
+            experience           = data.get("experience", 0),
+            location             = data.get("location", ""),
+            reporting_manager    = data.get("reporting_manager", ""),
+            status               = data.get("status", "Active"),
+            current_client       = data.get("current_client", ""),
+            current_project      = data.get("current_project", ""),
+            current_billing_rate = data.get("current_billing_rate", 0),
+            billing_currency     = data.get("billing_currency", "INR"),
+            salary               = data.get("salary", 0),
+            notes                = data.get("notes", ""),
         )
-        result = mongo.db.employees.insert_one(doc)
+        result     = mongo.db.employees.insert_one(doc)
         doc["_id"] = result.inserted_id
+
+        ob = onboarding_schema(str(result.inserted_id), joining_date=doj)
+        mongo.db.onboarding.insert_one(ob)
+
         return jsonify(success=True, message="Employee created", data=serialize_employee(doc)), 201
     except ValueError as e:
         return jsonify(success=False, message=str(e)), 400
@@ -148,7 +154,6 @@ def create():
         return jsonify(success=False, message=str(e)), 500
 
 
-# ── GET /api/employees/<id> ──────────────────────────────────────────────────
 @employee_bp.route("/<eid>", methods=["GET"])
 @jwt_required()
 def get_one(eid):
@@ -158,7 +163,6 @@ def get_one(eid):
     return jsonify(success=True, data=serialize_employee(doc)), 200
 
 
-# ── PUT /api/employees/<id> ──────────────────────────────────────────────────
 @employee_bp.route("/<eid>", methods=["PUT"])
 @jwt_required()
 def update(eid):
@@ -188,7 +192,6 @@ def update(eid):
     return jsonify(success=True, message="Updated", data=serialize_employee(updated)), 200
 
 
-# ── DELETE /api/employees/<id> ───────────────────────────────────────────────
 @employee_bp.route("/<eid>", methods=["DELETE"])
 @jwt_required()
 def delete(eid):
@@ -196,10 +199,10 @@ def delete(eid):
     if err:
         return err
     mongo.db.employees.delete_one({"_id": doc["_id"]})
+    mongo.db.onboarding.delete_one({"employee_id": eid})   # clean up onboarding too
     return jsonify(success=True, message="Employee deleted"), 200
 
 
-# ── POST /api/employees/<id>/engagement — add client engagement ──────────────
 @employee_bp.route("/<eid>/engagement", methods=["POST"])
 @jwt_required()
 def add_engagement(eid):
@@ -210,8 +213,7 @@ def add_engagement(eid):
     if not data.get("client_name"):
         return jsonify(success=False, message="'client_name' is required"), 400
     try:
-        start = None
-        end   = None
+        start = end = None
         if data.get("start_date"):
             try:
                 start = datetime.fromisoformat(data["start_date"].replace("Z", "+00:00"))
@@ -221,7 +223,7 @@ def add_engagement(eid):
             try:
                 end = datetime.fromisoformat(data["end_date"].replace("Z", "+00:00"))
             except Exception:
-                end = None
+                pass
 
         eng = engagement_schema(
             client_name      = data["client_name"],
@@ -237,16 +239,14 @@ def add_engagement(eid):
         )
         mongo.db.employees.update_one(
             {"_id": doc["_id"]},
-            {
-                "$push": {"client_history": eng},
-                "$set":  {
-                    "updated_at":           datetime.utcnow(),
-                    "current_client":       data["client_name"] if not end else doc.get("current_client", ""),
-                    "current_project":      data.get("project_name", "") if not end else doc.get("current_project", ""),
-                    "current_billing_rate": data.get("billing_rate", 0) if not end else doc.get("current_billing_rate", 0),
-                    "billing_currency":     data.get("billing_currency", "INR") if not end else doc.get("billing_currency", "INR"),
-                },
-            },
+            {"$push": {"client_history": eng},
+             "$set": {
+                 "updated_at":           datetime.utcnow(),
+                 "current_client":       data["client_name"] if not end else doc.get("current_client", ""),
+                 "current_project":      data.get("project_name", "") if not end else doc.get("current_project", ""),
+                 "current_billing_rate": data.get("billing_rate", 0) if not end else doc.get("current_billing_rate", 0),
+                 "billing_currency":     data.get("billing_currency", "INR") if not end else doc.get("billing_currency", "INR"),
+             }},
         )
         updated = mongo.db.employees.find_one({"_id": doc["_id"]})
         return jsonify(success=True, message="Engagement added", data=serialize_employee(updated)), 200
@@ -254,7 +254,6 @@ def add_engagement(eid):
         return jsonify(success=False, message=str(e)), 500
 
 
-# ── PUT /api/employees/<id>/engagement/<idx> — mark engagement as ended ──────
 @employee_bp.route("/<eid>/engagement/<int:idx>", methods=["PUT"])
 @jwt_required()
 def end_engagement(eid, idx):
@@ -264,7 +263,7 @@ def end_engagement(eid, idx):
     history = doc.get("client_history", [])
     if idx >= len(history):
         return jsonify(success=False, message="Engagement index out of range"), 400
-    data = request.get_json(silent=True) or {}
+    data     = request.get_json(silent=True) or {}
     end_date = datetime.utcnow()
     if data.get("end_date"):
         try:
@@ -273,10 +272,7 @@ def end_engagement(eid, idx):
             pass
     mongo.db.employees.update_one(
         {"_id": doc["_id"]},
-        {"$set": {
-            f"client_history.{idx}.end_date": end_date,
-            "updated_at": datetime.utcnow(),
-        }},
+        {"$set": {f"client_history.{idx}.end_date": end_date, "updated_at": datetime.utcnow()}},
     )
     updated = mongo.db.employees.find_one({"_id": doc["_id"]})
     return jsonify(success=True, message="Engagement ended", data=serialize_employee(updated)), 200

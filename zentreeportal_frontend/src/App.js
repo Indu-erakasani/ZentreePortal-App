@@ -31,7 +31,7 @@ import Placements from "./components/RecruiterPages/Placements";
 import Skills     from "./components/RecruiterPages/Skills";
 import Reports    from "./components/RecruiterPages/Report";
 import BenchPeople from "./components/RecruiterPages/Benchpeople";
-import Employees   from "./components/RecruiterPages/EmployeesPage";
+import Employees   from "./components/RecruiterPages/EmployeePages/EmployeesPage";
 
 const App = () => (
   <ThemeProvider theme={theme}>
