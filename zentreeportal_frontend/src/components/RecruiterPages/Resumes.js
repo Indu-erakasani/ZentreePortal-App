@@ -6,7 +6,7 @@ import {
   MenuItem, Table, TableHead, TableBody, TableRow, TableCell,
   Paper, Chip, IconButton, Tooltip, CircularProgress, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions, Avatar,
-  InputAdornment, Divider, LinearProgress, Grid,
+  InputAdornment, Divider, LinearProgress, Grid,ListItemText
 } from "@mui/material";
 import {
   Add, Search, Edit, Delete, Visibility,
@@ -89,11 +89,12 @@ const STAGE_COLOR = {
   "Offer Declined": "error", Rejected: "error", Withdrawn: "error",
 };
 const SCORE_LABEL = ["", "Poor", "Below Avg", "Average", "Good", "Excellent"];
+
 const EMPTY_FORM = {
   name: "", email: "", phone: "", current_role: "", current_company: "",
   experience: "", skills: "", location: "", current_salary: "",
   expected_salary: "", notice_period: "30 days", source: "LinkedIn",
-  status: "New", linked_job_id: "", linked_job_title: "", notes: "",
+  status: "New", linked_job_id: "", linked_job_mongo_id: "", linked_job_title: "", notes: "",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -291,13 +292,18 @@ const STAGES = [
   "Offer Declined", "Joined", "Rejected", "Withdrawn",
 ];
 
-function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf }) {
+// function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf }) {
+function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf, recruiters = [] }) {
   const [tracking,    setTracking]    = React.useState([]);
   const [loadingT,    setLoadingT]    = React.useState(true);
   const [tab,         setTab]         = React.useState(0);
   const [addPipeline, setAddPipeline] = React.useState(false);
-  const [pipeForm,    setPipeForm]    = React.useState({
-    job_id: "", current_stage: "Screening", recruiter: "", notes: "", next_step: "",
+  const [pipeForm, setPipeForm] = React.useState({
+    job_id:        "",
+    current_stage: "Screening",
+    recruiter:     "",
+    notes:         "",
+    next_step:     "",
   });
   const [pipeError,  setPipeError]  = React.useState("");
   const [pipeSaving, setPipeSaving] = React.useState(false);
@@ -316,31 +322,60 @@ function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf })
 
   const handlePipeChange = e =>
     setPipeForm(p => ({ ...p, [e.target.name]: e.target.value }));
-
   const handleAddPipeline = async () => {
     if (!pipeForm.job_id) { setPipeError("Please select a job"); return; }
     setPipeSaving(true); setPipeError("");
     try {
       const job = jobs.find(j => j._id === pipeForm.job_id);
-      await createTracking({
-        resume_id:      candidate.resume_id?.trim(),
-        candidate_name: candidate.name,
-        job_id:         pipeForm.job_id,
-        job_title:      job?.title || "",
-        client_name:    job?.client_name || "",
-        current_stage:  pipeForm.current_stage,
-        recruiter:      pipeForm.recruiter,
-        notes:          pipeForm.notes,
-        next_step:      pipeForm.next_step,
+      const res = await createTracking({
+        resume_id:       candidate.resume_id?.trim(),
+        candidate_name:  candidate.name,
+        job_id:          job?.job_id    || "",
+        job_title:       job?.title     || "",
+        client_name:     job?.client_name || "",
+        current_stage:   pipeForm.current_stage,
+        recruiter:       pipeForm.recruiter,
+        notes:           pipeForm.notes,
+        next_step:       pipeForm.next_step,
         pipeline_status: "Active",
       });
       setAddPipeline(false);
       setPipeForm({ job_id: "", current_stage: "Screening", recruiter: "", notes: "", next_step: "" });
-      loadTracking();   // ← refresh pipeline tab
+  
+      // ← Show different message if it was an update vs new
+      if (res.was_updated) {
+        setPipeError("");   // clear errors
+        // optional: show a success note — you can use a Snackbar or just reload
+      }
+      loadTracking();
     } catch (err) {
       setPipeError(err?.message || "Failed to add to pipeline");
     } finally { setPipeSaving(false); }
   };
+  // const handleAddPipeline = async () => {
+  //   if (!pipeForm.job_id) { setPipeError("Please select a job"); return; }
+  //   setPipeSaving(true); setPipeError("");
+  //   try {
+  //     const job = jobs.find(j => j._id === pipeForm.job_id);
+  //     await createTracking({
+  //       resume_id:      candidate.resume_id?.trim(),
+  //       candidate_name: candidate.name,
+  //       job_id:         job?.job_id || "", 
+  //       job_title:      job?.title || "",
+  //       client_name:    job?.client_name || "",
+  //       current_stage:  pipeForm.current_stage,
+  //       recruiter:      pipeForm.recruiter,
+  //       notes:          pipeForm.notes,
+  //       next_step:      pipeForm.next_step,
+  //       pipeline_status: "Active",
+  //     });
+  //     setAddPipeline(false);
+  //     setPipeForm({ job_id: "", current_stage: "Screening", recruiter: "", notes: "", next_step: "" });
+  //     loadTracking();   // ← refresh pipeline tab
+  //   } catch (err) {
+  //     setPipeError(err?.message || "Failed to add to pipeline");
+  //   } finally { setPipeSaving(false); }
+  // };
 
   return (
     <>
@@ -470,7 +505,7 @@ function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf })
                       {jobs.map(j => (
                         <MenuItem key={j._id} value={j._id}>
                           <Box>
-                            <Typography fontSize={13} fontWeight={600}>{j.title}</Typography>
+                            <Typography fontSize={13} fontWeight={600}>{j.job_id} - {j.title}</Typography>
                             {j.client_name && <Typography fontSize={11} color="text.secondary">{j.client_name}</Typography>}
                           </Box>
                         </MenuItem>
@@ -484,9 +519,20 @@ function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf })
                     </TextField>
                   </Grid>
                   <Grid item xs={12} sm={6}>
-                    <TextField sx={{ width: "100%", minWidth: 350 }} size="small" label="Recruiter" name="recruiter"
-                      value={pipeForm.recruiter} onChange={handlePipeChange}
-                      placeholder="Recruiter name" />
+                    <TextField select sx={{ width: "100%", minWidth: 350 }} size="small" label="Recruiter" name="recruiter"
+                      value={pipeForm.recruiter} onChange={handlePipeChange}>
+                      <MenuItem value="">Select Recruiter</MenuItem>
+                      {recruiters.map(r => (
+                        <MenuItem key={r.id} value={`${r.first_name} ${r.last_name}`}>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Avatar sx={{ width: 22, height: 22, fontSize: 10, bgcolor: "#1a237e" }}>
+                              {r.first_name?.[0]}{r.last_name?.[0]}
+                            </Avatar>
+                            {r.first_name} {r.last_name}
+                          </Box>
+                        </MenuItem>
+                      ))}
+                    </TextField>
                   </Grid>
                   <Grid item xs={12}>
                     <TextField sx={{ width: "100%", minWidth: 350 }} size="small" label="Next Step" name="next_step"
@@ -541,7 +587,7 @@ function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf })
                   <Chip label={track.current_stage} color={STAGE_COLOR[track.current_stage] || "default"} size="small" sx={{ fontWeight: 700 }} />
                   <Chip label={track.pipeline_status} size="small" variant="outlined" />
                   {track.recruiter   && <Typography fontSize={12} color="text.secondary">Recruiter: <strong>{track.recruiter}</strong></Typography>}
-                  {track.job_title   && <Typography fontSize={12} color="text.secondary">Job: <strong>{track.job_title}</strong></Typography>}
+                  {track.job_title   && <Typography fontSize={12} color="text.secondary">Job: <strong>{track.job_id}-{track.job_title}</strong></Typography>}
                   {track.client_name && <Typography fontSize={12} color="text.secondary">Client: <strong>{track.client_name}</strong></Typography>}
                 </Box>
 
@@ -588,7 +634,7 @@ function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf })
                         <Box key={i} p={2} borderRadius={2} sx={{ border: "1px solid #e0e0e0", bgcolor: "#fafafa" }}>
                           <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
                             <Box>
-                              <Typography fontWeight={700} fontSize={13}>Round {i + 1} — {iv.interview_type}</Typography>
+                              <Typography fontWeight={700} fontSize={13}>{iv.stage} — {iv.interview_type}</Typography>
                               <Typography fontSize={11} color="text.secondary">{iv.interviewer} · {fmtDate(iv.interview_date)}</Typography>
                             </Box>
                             <Box display="flex" gap={1} alignItems="center">
@@ -695,317 +741,6 @@ function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf })
   );
 }
 
-// ── CandidateDetailContent ─────────────────────────────────────────────────────
-// IMPORTANT: defined OUTSIDE Resumes() — prevents React from recreating it on
-// every render, which was destroying the tracking state before it could load.
-function CandidateDetailContent1({ candidate, jobs, onClose, onEdit, onViewPdf }) {
-  const [tracking, setTracking] = React.useState([]);
-  const [loadingT, setLoadingT] = React.useState(true);
-  const [tab, setTab]           = React.useState(0); // 0 = Profile, 1 = Pipeline
-
-  React.useEffect(() => {
-    setLoadingT(true);
-    getTrackingByResume(candidate.resume_id)
-      .then(res => setTracking(res.data || []))
-      .catch(() => setTracking([]))
-      .finally(() => setLoadingT(false));
-  }, [candidate.resume_id]);
-
-  const activeTrack = tracking[0];
-
-  return (
-    <>
-      <DialogContent sx={{ p: 0 }}>
-
-        {/* ── Top header strip ── */}
-        <Box sx={{ px: 3, pt: 3, pb: 2, borderBottom: "1px solid #e0e0e0" }}>
-          <Box display="flex" alignItems="center" gap={2}>
-            <Avatar sx={{ width: 56, height: 56, bgcolor: "#1a237e", fontSize: "1.3rem", fontWeight: 700 }}>
-              {nameInitials(candidate.name)}
-            </Avatar>
-            <Box flex={1}>
-              <Typography variant="h5" fontWeight={800}>{candidate.name}</Typography>
-              <Typography color="text.secondary" fontSize={13}>
-                {candidate.current_role}{candidate.current_company ? ` · ${candidate.current_company}` : ""}
-              </Typography>
-              <Box display="flex" gap={1} mt={0.5} flexWrap="wrap">
-                <Chip label={candidate.status} color={STATUS_COLOR[candidate.status] || "default"} size="small" sx={{ fontWeight: 700 }} />
-                {activeTrack && (
-                  <Chip label={`Pipeline: ${activeTrack.current_stage}`}
-                    color={STAGE_COLOR[activeTrack.current_stage] || "default"}
-                    size="small" variant="outlined" sx={{ fontWeight: 600 }} />
-                )}
-                {activeTrack && (
-                  <Chip label={activeTrack.pipeline_status} size="small" sx={{ fontSize: 10, bgcolor: "#f5f5f5" }} />
-                )}
-              </Box>
-            </Box>
-          </Box>
-
-          {/* Tabs */}
-          <Box display="flex" mt={2}>
-            {["Profile & Resume", "Pipeline & Interviews"].map((label, i) => (
-              <Box key={i} onClick={() => setTab(i)} sx={{
-                px: 2, py: 1, cursor: "pointer",
-                fontWeight: tab === i ? 700 : 400, fontSize: 13,
-                borderBottom: tab === i ? "2px solid #1a237e" : "2px solid transparent",
-                color: tab === i ? "#1a237e" : "text.secondary",
-                transition: "all 0.15s",
-              }}>
-                {label}
-              </Box>
-            ))}
-          </Box>
-        </Box>
-
-        {/* ══ TAB 0 — Profile ══════════════════════════════════════════════════ */}
-        {tab === 0 && (
-          <Box p={3}>
-            <Grid container spacing={2} mb={2}>
-              {[
-                ["Email",          candidate.email],
-                ["Phone",          candidate.phone || "—"],
-                ["Location",       candidate.location || "—"],
-                ["Experience",     `${candidate.experience} years`],
-                ["Current Salary", fmtSalary(candidate.current_salary)],
-                ["Expected Salary",fmtSalary(candidate.expected_salary)],
-                ["Notice Period",  candidate.notice_period || "—"],
-                ["Source",         candidate.source || "—"],
-              ].map(([label, val]) => (
-                <Grid item xs={6} sm={4} key={label}>
-                  <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase">{label}</Typography>
-                  <Typography fontWeight={600} fontSize={13}>{val}</Typography>
-                </Grid>
-              ))}
-            </Grid>
-
-            {candidate.skills && (
-              <Box mb={2}>
-                <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={1}>Skills</Typography>
-                <Box display="flex" flexWrap="wrap" gap={0.8}>
-                  {candidate.skills.split(",").filter(Boolean).map((s, i) => (
-                    <Chip key={i} label={s.trim()} size="small" variant="outlined"
-                      sx={{ fontSize: 11, borderColor: "#1a237e", color: "#1a237e" }} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {candidate.linked_job_title && (
-              <Box p={1.5} bgcolor="#e8eaf6" borderRadius={2} mb={2}>
-                <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={0.3}>Applied For</Typography>
-                <Typography fontWeight={700} color="primary.dark">{candidate.linked_job_title}</Typography>
-              </Box>
-            )}
-
-            {candidate.notes && (
-              <Box p={1.5} bgcolor="#f5f5f5" borderRadius={2} mb={2}>
-                <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={0.3}>Notes</Typography>
-                <Typography fontSize={13}>{candidate.notes}</Typography>
-              </Box>
-            )}
-
-            {/* PDF section */}
-            <Box p={2} borderRadius={2} display="flex" alignItems="center" gap={2}
-              sx={{ bgcolor: "#f5f5f5", border: "1px solid #e0e0e0" }}>
-              <Box flex={1}>
-                <Typography fontWeight={700} fontSize={13} color={candidate.resume_file ? "success.dark" : "text.secondary"}>
-                  {candidate.resume_file ? "Original Resume PDF" : "No resume file uploaded"}
-                </Typography>
-                <Typography fontSize={11} color="text.secondary">
-                  {candidate.resume_file
-                    ? `Stored as ${candidate.resume_file} · click to view`
-                    : "Upload via drag-and-drop to attach the original resume"}
-                </Typography>
-              </Box>
-              {candidate.resume_file && (
-                <Button variant="contained" size="small" onClick={onViewPdf}>View PDF</Button>
-              )}
-            </Box>
-          </Box>
-        )}
-
-        {/* ══ TAB 1 — Pipeline & Interviews ════════════════════════════════════ */}
-        {tab === 1 && (
-          <Box p={3}>
-            {loadingT ? (
-              <Box display="flex" justifyContent="center" py={6}><CircularProgress size={32} /></Box>
-            ) : tracking.length === 0 ? (
-              <Box display="flex" flexDirection="column" alignItems="center" py={6} gap={1}>
-                <Typography color="text.secondary" fontWeight={600}>No pipeline records found</Typography>
-                <Typography fontSize={13} color="text.disabled">
-                  This candidate hasn't been added to a pipeline yet.
-                </Typography>
-              </Box>
-            ) : tracking.map((track, tIdx) => (
-              <Box key={track._id} mb={tIdx < tracking.length - 1 ? 4 : 0}>
-
-                {/* Track header */}
-                <Box display="flex" alignItems="center" gap={1} mb={2} flexWrap="wrap">
-                  <Chip label={track.current_stage} color={STAGE_COLOR[track.current_stage] || "default"} size="small" sx={{ fontWeight: 700 }} />
-                  <Chip label={track.pipeline_status} size="small" variant="outlined" />
-                  {track.recruiter   && <Typography fontSize={12} color="text.secondary">Recruiter: <strong>{track.recruiter}</strong></Typography>}
-                  {track.job_title   && <Typography fontSize={12} color="text.secondary">Job: <strong>{track.job_title}</strong></Typography>}
-                  {track.client_name && <Typography fontSize={12} color="text.secondary">Client: <strong>{track.client_name}</strong></Typography>}
-                </Box>
-
-                {/* Stage timeline */}
-                {track.stage_history?.length > 0 && (
-                  <Box mb={3}>
-                    <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={1.5}>Stage History</Typography>
-                    <Box display="flex" flexDirection="column" gap={0}>
-                      {track.stage_history.map((entry, i) => (
-                        <Box key={i} display="flex" gap={1.5} alignItems="flex-start">
-                          <Box display="flex" flexDirection="column" alignItems="center" sx={{ pt: 0.3 }}>
-                            <Box sx={{
-                              width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
-                              bgcolor: i === track.stage_history.length - 1 ? "#1a237e" : "#90caf9",
-                              border: "2px solid",
-                              borderColor: i === track.stage_history.length - 1 ? "#1a237e" : "#e3f2fd",
-                            }} />
-                            {i < track.stage_history.length - 1 && (
-                              <Box sx={{ width: 2, flexGrow: 1, minHeight: 20, bgcolor: "#e3f2fd", my: 0.3 }} />
-                            )}
-                          </Box>
-                          <Box pb={1.5}>
-                            <Typography fontWeight={600} fontSize={13}>{entry.stage}</Typography>
-                            <Typography fontSize={11} color="text.secondary">
-                              {fmtDate(entry.entered_at)}
-                              {entry.exited_at ? ` → ${fmtDate(entry.exited_at)}` : " · current"}
-                            </Typography>
-                            {entry.notes && <Typography fontSize={12} color="text.secondary" mt={0.3}>{entry.notes}</Typography>}
-                          </Box>
-                        </Box>
-                      ))}
-                    </Box>
-                  </Box>
-                )}
-
-                {/* Interviews */}
-                {track.interviews?.length > 0 && (
-                  <Box mb={3}>
-                    <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={1.5}>
-                      Interviews ({track.interviews.length})
-                    </Typography>
-                    <Box display="flex" flexDirection="column" gap={1.5}>
-                      {track.interviews.map((iv, i) => (
-                        <Box key={i} p={2} borderRadius={2} sx={{ border: "1px solid #e0e0e0", bgcolor: "#fafafa" }}>
-                          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
-                            <Box>
-                              <Typography fontWeight={700} fontSize={13}>Round {i + 1} — {iv.interview_type}</Typography>
-                              <Typography fontSize={11} color="text.secondary">{iv.interviewer} · {fmtDate(iv.interview_date)}</Typography>
-                            </Box>
-                            <Box display="flex" gap={1} alignItems="center">
-                              <Box display="flex" gap={0.4}>
-                                {[1, 2, 3, 4, 5].map(s => (
-                                  <Box key={s} sx={{
-                                    width: 12, height: 12, borderRadius: 1,
-                                    bgcolor: s <= (iv.feedback_score || 0) ? "#1a237e" : "#e0e0e0",
-                                  }} />
-                                ))}
-                              </Box>
-                              <Typography fontSize={11} fontWeight={700} color="#1a237e">
-                                {SCORE_LABEL[iv.feedback_score] || "—"}
-                              </Typography>
-                            </Box>
-                          </Box>
-
-                          {iv.feedback_summary && <Typography fontSize={12} mb={1}>{iv.feedback_summary}</Typography>}
-
-                          <Box display="flex" gap={2} flexWrap="wrap">
-                            {iv.strengths?.length > 0 && (
-                              <Box flex={1} minWidth={120}>
-                                <Typography fontSize={10} fontWeight={700} color="#2e7d32" textTransform="uppercase" mb={0.5}>Strengths</Typography>
-                                <Box display="flex" flexWrap="wrap" gap={0.4}>
-                                  {iv.strengths.map((s, si) => (
-                                    <Chip key={si} label={s} size="small" sx={{ fontSize: 10, height: 20, bgcolor: "#e8f5e9", color: "#1b5e20" }} />
-                                  ))}
-                                </Box>
-                              </Box>
-                            )}
-                            {iv.weaknesses?.length > 0 && (
-                              <Box flex={1} minWidth={120}>
-                                <Typography fontSize={10} fontWeight={700} color="#c62828" textTransform="uppercase" mb={0.5}>Areas to Improve</Typography>
-                                <Box display="flex" flexWrap="wrap" gap={0.4}>
-                                  {iv.weaknesses.map((w, wi) => (
-                                    <Chip key={wi} label={w} size="small" sx={{ fontSize: 10, height: 20, bgcolor: "#ffebee", color: "#b71c1c" }} />
-                                  ))}
-                                </Box>
-                              </Box>
-                            )}
-                          </Box>
-
-                          {iv.recommendation && (
-                            <Box mt={1}>
-                              <Chip label={`Recommendation: ${iv.recommendation}`} size="small"
-                                color={
-                                  iv.recommendation === "Strong Hire" ? "success"
-                                  : iv.recommendation === "Hire" ? "primary"
-                                  : iv.recommendation === "No Hire" ? "error"
-                                  : "default"
-                                }
-                                sx={{ fontSize: 10, fontWeight: 700 }} />
-                            </Box>
-                          )}
-                        </Box>
-                      ))}
-                    </Box>
-                  </Box>
-                )}
-
-                {/* Offer details */}
-                {(track.salary_offered > 0 || track.offer_status !== "Pending" || track.offer_date || track.joining_date) && (
-                  <Box mb={3} p={2} borderRadius={2} sx={{ bgcolor: "#f3f8ff", border: "1px solid #bbdefb" }}>
-                    <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={1.5}>Offer Details</Typography>
-                    <Grid container spacing={1.5}>
-                      {[
-                        ["Salary Offered", track.salary_offered ? fmtSalary(track.salary_offered) : "—"],
-                        ["Offer Status",   track.offer_status || "—"],
-                        ["Offer Date",     fmtDate(track.offer_date)],
-                        ["Joining Date",   fmtDate(track.joining_date)],
-                      ].map(([label, val]) => (
-                        <Grid item xs={6} key={label}>
-                          <Typography fontSize={11} color="text.secondary" fontWeight={600}>{label}</Typography>
-                          <Typography fontWeight={700} fontSize={13}>{val}</Typography>
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </Box>
-                )}
-
-                {/* Next step / rejection */}
-                {(track.next_step || track.rejection_reason) && (
-                  <Box display="flex" flexDirection="column" gap={1}>
-                    {track.next_step && (
-                      <Box p={1.5} bgcolor="#fffde7" borderRadius={2} sx={{ border: "1px solid #fff176" }}>
-                        <Typography fontSize={11} fontWeight={600} color="#f57f17" textTransform="uppercase">Next Step</Typography>
-                        <Typography fontSize={13}>{track.next_step}</Typography>
-                        {track.next_date && <Typography fontSize={11} color="text.secondary">Due: {fmtDate(track.next_date)}</Typography>}
-                      </Box>
-                    )}
-                    {track.rejection_reason && (
-                      <Box p={1.5} bgcolor="#ffebee" borderRadius={2} sx={{ border: "1px solid #ffcdd2" }}>
-                        <Typography fontSize={11} fontWeight={600} color="#c62828" textTransform="uppercase">Rejection Reason</Typography>
-                        <Typography fontSize={13}>{track.rejection_reason}</Typography>
-                      </Box>
-                    )}
-                  </Box>
-                )}
-
-                {tIdx < tracking.length - 1 && <Divider sx={{ mt: 3 }} />}
-              </Box>
-            ))}
-          </Box>
-        )}
-      </DialogContent>
-
-      <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
-        <Button onClick={onClose}>Close</Button>
-        <Button variant="contained" onClick={onEdit}>Edit</Button>
-      </DialogActions>
-    </>
-  );
-}
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function Resumes() {
@@ -1040,7 +775,8 @@ export default function Resumes() {
   const [bulkStep,   setBulkStep]   = useState(0);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkDone,   setBulkDone]   = useState(false);
-
+  const [recruiters, setRecruiters] = useState([]);
+  const [allTracking, setAllTracking] = useState([]);
   const load = useCallback(async () => {
     try {
       setLoading(true); setError("");
@@ -1061,17 +797,40 @@ export default function Resumes() {
     try { const res = await getAllClients(); setClients(res.data || []); }
     catch { setClients([]); }
   }, []);
+  const loadRecruiters = useCallback(async () => {
+    try {
+      const res  = await fetch(`${BASE}/user/`, { headers: getHeaders() });
+      const data = await res.json();
+      setRecruiters((data.data || []).filter(u => u.role === "recruiter"));
+    } catch { setRecruiters([]); }
+  }, []);
+  const loadAllTracking = useCallback(async () => {
+    try {
+      const res  = await fetch(`${BASE}/tracking/`, { headers: getHeaders() });
+      const data = await res.json();
+      setAllTracking(data.data || []);
+    } catch { setAllTracking([]); }
+  }, []);
 
-  useEffect(() => { load(); loadJobs(); loadClients(); }, [load, loadJobs, loadClients]);
+  const trackingMap = {};
+    allTracking.forEach(t => {
+      if (!trackingMap[t.resume_id]) {
+        trackingMap[t.resume_id] = t;
+      }
+    });
+  useEffect(() => { 
+    load(); loadJobs(); loadClients(); loadRecruiters(); loadAllTracking(); 
+  }, [load, loadJobs, loadClients, loadRecruiters, loadAllTracking]);
 
   const expBand = EXP_BANDS.find(b => b.label === expF);
-  const clientJobIds = clientF ? jobs.filter(j => j.client_id === clientF).map(j => j._id) : null;
+  const clientJobIds = clientF ? jobs.filter(j => j.client_id === clientF).map(j => j.job_id) : null;
 
   const filtered = resumes.filter(r => {
     const q  = search.toLowerCase();
     const mQ = !q || r.name?.toLowerCase().includes(q) || r.skills?.toLowerCase().includes(q) || r.resume_id?.toLowerCase().includes(q);
     const mS = !statusF || r.status === statusF;
-    const mJ = !jobF    || r.linked_job_id === jobF;
+    const selectedJob = jobs.find(j => j._id === jobF);
+    const mJ = !jobF || r.linked_job_id === selectedJob?.job_id;
     const mE = !expBand || expBand.label === "All Experience" ||
       (expBand.min === "10" ? r.experience >= 10 : r.experience >= Number(expBand.min) && r.experience <= Number(expBand.max));
     const mC = !clientJobIds || clientJobIds.includes(r.linked_job_id);
@@ -1091,16 +850,29 @@ export default function Resumes() {
   const openDelete = r  => { setSelected(r); setDeleteOpen(true); };
   const openPdf    = r  => { setSelected(r); setPdfOpen(true); };
 
+  // const handleChange = e => {
+  //   const { name, value } = e.target;
+  //   if (name === "linked_job_id") {
+  //     const job = jobs.find(j => j._id === value);
+  //     setFormData(p => ({ ...p, linked_job_id: value, linked_job_title: job?.title || "" }));
+  //   } else {
+  //     setFormData(p => ({ ...p, [name]: value }));
+  //   }
+  // };
   const handleChange = e => {
     const { name, value } = e.target;
     if (name === "linked_job_id") {
       const job = jobs.find(j => j._id === value);
-      setFormData(p => ({ ...p, linked_job_id: value, linked_job_title: job?.title || "" }));
+      setFormData(p => ({
+        ...p,
+        linked_job_id:    job?.job_id || "",   
+        linked_job_mongo_id: value,
+        linked_job_title: job?.title  || "",
+      }));
     } else {
       setFormData(p => ({ ...p, [name]: value }));
     }
   };
-
   const handleSave = async (e) => {
     e.preventDefault(); setSaving(true);
     try {
@@ -1274,7 +1046,7 @@ export default function Resumes() {
             <Table>
               <TableHead>
                 <TableRow sx={{ bgcolor: "#f5f7fa" }}>
-                  {["Candidate", "Current Role", "Exp", "Skills", "Expected Salary", "Notice", "Applied For", "Status", "Actions"].map(h => (
+                  {["Candidate", "Current Role", "Exp", "Skills", "Expected Salary", "Notice", "Applied For", "Pipeline Stage", "Status", "Actions"].map(h => (
                     <TableCell key={h} sx={{ fontWeight: 700, fontSize: 12, color: "#546e7a" }}>{h}</TableCell>
                   ))}
                 </TableRow>
@@ -1282,7 +1054,7 @@ export default function Resumes() {
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} align="center" sx={{ py: 6, color: "text.secondary" }}>
+                    <TableCell colSpan={10} align="center" sx={{ py: 6, color: "text.secondary" }}>
                       No candidates match your filters
                     </TableCell>
                   </TableRow>
@@ -1318,7 +1090,8 @@ export default function Resumes() {
                       {r.linked_job_title ? (
                         <Box>
                           {(() => {
-                            const linkedJob = jobs.find(j => j._id === r.linked_job_id);
+                            // ← match by job_id (human-readable) not _id
+                            const linkedJob = jobs.find(j => j.job_id === r.linked_job_id);
                             return linkedJob?.client_name ? (
                               <Typography fontSize={10} color="text.secondary" fontWeight={600}
                                 sx={{ display: "flex", alignItems: "center", gap: 0.4, mb: 0.2 }}>
@@ -1326,11 +1099,31 @@ export default function Resumes() {
                               </Typography>
                             ) : null;
                           })()}
-                          <Typography fontSize={12} color="#0277bd" fontWeight={600}>{r.linked_job_title}</Typography>
+                          <Typography fontSize={12} color="#0277bd" fontWeight={600}>{r.linked_job_id}</Typography>
+                          <Typography fontSize={11} color="text.secondary">{r.linked_job_title}</Typography>
                         </Box>
                       ) : (
                         <Typography fontSize={12} color="text.disabled">—</Typography>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const track = trackingMap[r.resume_id];
+                        if (!track) return <Typography fontSize={12} color="text.disabled">—</Typography>;
+                        return (
+                          <Box>
+                            <Chip
+                              label={track.current_stage}
+                              size="small"
+                              color={STAGE_COLOR[track.current_stage] || "default"}
+                              sx={{ fontWeight: 700, fontSize: 10, mb: 0.3 }}
+                            />
+                            <Typography fontSize={10} color="text.secondary">
+                              {track.pipeline_status}
+                            </Typography>
+                          </Box>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <Chip label={r.status} color={STATUS_COLOR[r.status] || "default"} size="small" sx={{ fontWeight: 700, fontSize: 11 }} />
@@ -1412,47 +1205,47 @@ export default function Resumes() {
                   <>
                     <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Personal Info</Typography>
                     <Grid container spacing={2} mb={2}>
-                      <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Full Name" name="name" value={currentEntry.formData.name} onChange={handleBulkChange} /></Grid>
-                      <Grid item xs={12} sm={6}><TextField fullWidth size="small" required type="email" label="Email" name="email" value={currentEntry.formData.email} onChange={handleBulkChange} /></Grid>
-                      <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Phone" name="phone" value={currentEntry.formData.phone} onChange={handleBulkChange} /></Grid>
-                      <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Location" name="location" value={currentEntry.formData.location} onChange={handleBulkChange} /></Grid>
+                      <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Full Name" name="name" value={currentEntry.formData.name} onChange={handleBulkChange} /></Grid>
+                      <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" required type="email" label="Email" name="email" value={currentEntry.formData.email} onChange={handleBulkChange} /></Grid>
+                      <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" label="Phone" name="phone" value={currentEntry.formData.phone} onChange={handleBulkChange} /></Grid>
+                      <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" label="Location" name="location" value={currentEntry.formData.location} onChange={handleBulkChange} /></Grid>
                     </Grid>
                     <Divider sx={{ my: 2 }} />
                     <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Professional Details</Typography>
                     <Grid container spacing={2} mb={2}>
-                      <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Current Role" name="current_role" value={currentEntry.formData.current_role} onChange={handleBulkChange} /></Grid>
-                      <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Current Company" name="current_company" value={currentEntry.formData.current_company} onChange={handleBulkChange} /></Grid>
-                      <Grid item xs={12} sm={4}><TextField fullWidth size="small" type="number" label="Experience (yrs)" name="experience" value={currentEntry.formData.experience} onChange={handleBulkChange} inputProps={{ min: 0 }} /></Grid>
+                      <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" label="Current Role" name="current_role" value={currentEntry.formData.current_role} onChange={handleBulkChange} /></Grid>
+                      <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" label="Current Company" name="current_company" value={currentEntry.formData.current_company} onChange={handleBulkChange} /></Grid>
+                      <Grid item xs={12} sm={4}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Experience (yrs)" name="experience" value={currentEntry.formData.experience} onChange={handleBulkChange} inputProps={{ min: 0 }} /></Grid>
                       <Grid item xs={12} sm={4}>
-                        <TextField select fullWidth size="small" label="Source" name="source" value={currentEntry.formData.source} onChange={handleBulkChange}>
+                        <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Source" name="source" value={currentEntry.formData.source} onChange={handleBulkChange}>
                           {SOURCES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
                         </TextField>
                       </Grid>
                       <Grid item xs={12} sm={4}>
-                        <TextField select fullWidth size="small" label="Status" name="status" value={currentEntry.formData.status} onChange={handleBulkChange}>
+                        <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Status" name="status" value={currentEntry.formData.status} onChange={handleBulkChange}>
                           {STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
                         </TextField>
                       </Grid>
-                      <Grid item xs={12}><TextField fullWidth size="small" label="Skills (comma-separated)" name="skills" value={currentEntry.formData.skills} onChange={handleBulkChange} placeholder="e.g. React, Node.js, MongoDB" /></Grid>
+                      <Grid item xs={12}><TextField sx={{ width: "100%", minWidth: 800 }} multiline rows={5} size="small" label="Skills (comma-separated)" name="skills" value={currentEntry.formData.skills} onChange={handleBulkChange} placeholder="e.g. React, Node.js, MongoDB" /></Grid>
                     </Grid>
                     <Divider sx={{ my: 2 }} />
                     <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Compensation &amp; Availability</Typography>
                     <Grid container spacing={2} mb={2}>
-                      <Grid item xs={12} sm={4}><TextField fullWidth size="small" type="number" label="Current Salary (₹)" name="current_salary" value={currentEntry.formData.current_salary} onChange={handleBulkChange} /></Grid>
-                      <Grid item xs={12} sm={4}><TextField fullWidth size="small" type="number" label="Expected Salary (₹)" name="expected_salary" value={currentEntry.formData.expected_salary} onChange={handleBulkChange} /></Grid>
+                      <Grid item xs={12} sm={4}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Current Salary (₹)" name="current_salary" value={currentEntry.formData.current_salary} onChange={handleBulkChange} /></Grid>
+                      <Grid item xs={12} sm={4}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Expected Salary (₹)" name="expected_salary" value={currentEntry.formData.expected_salary} onChange={handleBulkChange} /></Grid>
                       <Grid item xs={12} sm={4}>
-                        <TextField select fullWidth size="small" label="Notice Period" name="notice_period" value={currentEntry.formData.notice_period} onChange={handleBulkChange}>
+                        <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Notice Period" name="notice_period" value={currentEntry.formData.notice_period} onChange={handleBulkChange}>
                           {NOTICES.map(n => <MenuItem key={n} value={n}>{n}</MenuItem>)}
                         </TextField>
                       </Grid>
                       <Grid item xs={12}>
-                        <TextField select fullWidth size="small" label="Link to Job" name="linked_job_id" value={currentEntry.formData.linked_job_id} onChange={handleBulkChange}>
+                        <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Link to Job" name="linked_job_id" value={currentEntry.formData.linked_job_id} onChange={handleBulkChange}>
                           <MenuItem value="">No Job Linked</MenuItem>
-                          {jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.title}</MenuItem>)}
+                          {jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.job_id} - {j.title}</MenuItem>)}
                         </TextField>
                       </Grid>
                     </Grid>
-                    <TextField fullWidth multiline rows={2} size="small" label="Notes" name="notes" value={currentEntry.formData.notes} onChange={handleBulkChange} />
+                    <TextField sx={{ width: "100%", minWidth: 400 }} multiline rows={2} size="small" label="Notes" name="notes" value={currentEntry.formData.notes} onChange={handleBulkChange} />
                     {currentEntry.errorMsg && <Alert severity="warning" sx={{ mt: 2 }}>{currentEntry.errorMsg}</Alert>}
                   </>
                 )}
@@ -1495,49 +1288,64 @@ export default function Resumes() {
           <DialogContent sx={{ pt: 3 }}>
             <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Personal Info</Typography>
             <Grid container spacing={2} mb={2}>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Full Name" name="name" value={formData.name} onChange={handleChange} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" required type="email" label="Email" name="email" value={formData.email} onChange={handleChange} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Phone" name="phone" value={formData.phone} onChange={handleChange} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Location" name="location" value={formData.location} onChange={handleChange} /></Grid>
+              <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Full Name" name="name" value={formData.name} onChange={handleChange} /></Grid>
+              <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" required type="email" label="Email" name="email" value={formData.email} onChange={handleChange} /></Grid>
+              <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" label="Phone" name="phone" value={formData.phone} onChange={handleChange} /></Grid>
+              <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" label="Location" name="location" value={formData.location} onChange={handleChange} /></Grid>
             </Grid>
             <Divider sx={{ my: 2 }} />
             <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Professional Details</Typography>
             <Grid container spacing={2} mb={2}>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Current Role" name="current_role" value={formData.current_role} onChange={handleChange} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Current Company" name="current_company" value={formData.current_company} onChange={handleChange} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" type="number" label="Experience (years)" name="experience" value={formData.experience} onChange={handleChange} inputProps={{ min: 0 }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" label="Current Role" name="current_role" value={formData.current_role} onChange={handleChange} /></Grid>
+              <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" label="Current Company" name="current_company" value={formData.current_company} onChange={handleChange} /></Grid>
+              <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Experience (years)" name="experience" value={formData.experience} onChange={handleChange} inputProps={{ min: 0 }} /></Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" label="Source" name="source" value={formData.source} onChange={handleChange}>
+                <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Source" name="source" value={formData.source} onChange={handleChange}>
                   {SOURCES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={12}>
-                <TextField fullWidth multiline rows={2} label="Skills (comma-separated)" name="skills" value={formData.skills} onChange={handleChange} placeholder="e.g. React, Node.js, MongoDB" />
+                <TextField sx={{ width: "100%", minWidth: 820 }} multiline rows={2} label="Skills (comma-separated)" name="skills" value={formData.skills} onChange={handleChange} placeholder="e.g. React, Node.js, MongoDB" />
               </Grid>
             </Grid>
             <Divider sx={{ my: 2 }} />
             <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Compensation &amp; Availability</Typography>
             <Grid container spacing={2} mb={2}>
-              <Grid item xs={12} sm={4}><TextField fullWidth size="small" type="number" label="Current Salary (₹)" name="current_salary" value={formData.current_salary} onChange={handleChange} /></Grid>
-              <Grid item xs={12} sm={4}><TextField fullWidth size="small" type="number" label="Expected Salary (₹)" name="expected_salary" value={formData.expected_salary} onChange={handleChange} /></Grid>
+              <Grid item xs={12} sm={4}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Current Salary (₹)" name="current_salary" value={formData.current_salary} onChange={handleChange} /></Grid>
+              <Grid item xs={12} sm={4}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Expected Salary (₹)" name="expected_salary" value={formData.expected_salary} onChange={handleChange} /></Grid>
               <Grid item xs={12} sm={4}>
-                <TextField select fullWidth size="small" label="Notice Period" name="notice_period" value={formData.notice_period} onChange={handleChange}>
+                <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Notice Period" name="notice_period" value={formData.notice_period} onChange={handleChange}>
                   {NOTICES.map(n => <MenuItem key={n} value={n}>{n}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" label="Status" name="status" value={formData.status} onChange={handleChange}>
+                <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Status" name="status" value={formData.status} onChange={handleChange}>
                   {STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" label="Linked Job" name="linked_job_id" value={formData.linked_job_id} onChange={handleChange}>
+                {/* <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Linked Job" name="linked_job_id" value={formData.linked_job_id} onChange={handleChange}>
                   <MenuItem value="">No Job Linked</MenuItem>
-                  {jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.title}</MenuItem>)}
+                    {jobs.map(j => (
+                      <MenuItem key={j._id} value={j._id}>
+                        {j.job_id}  - {j.title} 
+                      </MenuItem>
+                    ))}
+                </TextField> */}
+                <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Linked Job"
+                  name="linked_job_id"
+                  value={formData.linked_job_mongo_id || ""}   
+                  onChange={handleChange}>
+                  <MenuItem value="">No Job Linked</MenuItem>
+                  {jobs.map(j => (
+                    <MenuItem key={j._id} value={j._id}>
+                      {j.job_id} - {j.title}
+                    </MenuItem>
+                  ))}
                 </TextField>
               </Grid>
             </Grid>
-            <TextField fullWidth multiline rows={3} size="small" label="Notes" name="notes" value={formData.notes} onChange={handleChange} />
+            <TextField sx={{ width: "100%", minWidth: 400 }} multiline rows={3} size="small" label="Notes" name="notes" value={formData.notes} onChange={handleChange} />
             <Divider sx={{ my: 2 }} />
             <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Resume File (PDF)</Typography>
             <Box onClick={() => formFileRef.current?.click()} sx={{
@@ -1589,6 +1397,7 @@ export default function Resumes() {
           <CandidateDetailContent
             candidate={selected}
             jobs={jobs}
+            recruiters={recruiters}
             onClose={() => setDetailOpen(false)}
             onEdit={() => { setDetailOpen(false); openEdit(selected); }}
             onViewPdf={() => { setDetailOpen(false); openPdf(selected); }}

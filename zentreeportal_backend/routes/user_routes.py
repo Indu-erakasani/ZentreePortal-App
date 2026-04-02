@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from models.user_model import User, is_valid_phone
 from middleware.auth_middleware import token_required, role_required
-
+from flask_jwt_extended import jwt_required
 user_bp = Blueprint("user", __name__)
 
 
@@ -73,3 +73,11 @@ def manager_dashboard():
             "message": "Welcome to the Manager Portal"
         }
     }), 200
+    
+    
+# In user_routes.py — change to match your other routes
+@user_bp.route("/", methods=["GET"])
+@token_required          # ← use same as other endpoints, not jwt_required()
+def get_all_users():
+    users = User.get_all_users()
+    return jsonify(success=True, data=[User.serialize(u) for u in users]), 200

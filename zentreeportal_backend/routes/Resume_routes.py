@@ -8,7 +8,7 @@ import os, json, base64, uuid, shutil
 import requests as http
 from extensions import mongo
 from models.Resume_model import resume_schema, serialize_resume, SCREENING_STATUSES, SOURCES
-
+import re
 resume_bp = Blueprint("resumes", __name__)
 
 # ── Upload directory setup ────────────────────────────────────────────────────
@@ -256,7 +256,18 @@ def get_one(rid):
         return err
     return jsonify(success=True, data=serialize_resume(doc)), 200
 
-
+def _resolve_job_id(val: str) -> str:
+    """If val looks like a MongoDB ObjectId, resolve it to human-readable job_id"""
+    if not val:
+        return val
+    if re.match(r'^[a-f0-9]{24}$', val.strip()):
+        try:
+            job = mongo.db.jobs.find_one({"_id": ObjectId(val)})
+            if job:
+                return job.get("job_id", val)   # e.g. "JD-123456"
+        except Exception:
+            pass
+    return val 
 # ── POST /api/resumes/ ────────────────────────────────────────────────────────
 @resume_bp.route("/", methods=["POST"])
 @jwt_required()
@@ -284,7 +295,7 @@ def create():
             notice_period    = data.get("notice_period", "30 days"),
             source           = data.get("source", "LinkedIn"),
             status           = data.get("status", "New"),
-            linked_job_id    = data.get("linked_job_id", ""),
+            linked_job_id    = _resolve_job_id(data.get("linked_job_id", "")),
             linked_job_title = data.get("linked_job_title", ""),
             notes            = data.get("notes", ""),
         )
@@ -318,6 +329,29 @@ def create():
 
 
 # ── PUT /api/resumes/<id> ─────────────────────────────────────────────────────
+# @resume_bp.route("/<rid>", methods=["PUT"])
+# @jwt_required()
+# def update(rid):
+#     doc, err = _find(rid)
+#     if err:
+#         return err
+
+#     data    = request.get_json(silent=True) or {}
+#     allowed = [
+#         "name", "phone", "current_role", "current_company", "experience",
+#         "skills", "location", "current_salary", "expected_salary",
+#         "notice_period", "source", "status", "linked_job_id",
+#         "linked_job_title", "notes",
+#     ]
+#     upd = {k: data[k] for k in allowed if k in data}
+#     if "status" in upd and upd["status"] not in SCREENING_STATUSES:
+#         return jsonify(success=False, message="Invalid status"), 400
+
+#     upd["updated_at"] = datetime.utcnow()
+#     mongo.db.resume_bank.update_one({"_id": doc["_id"]}, {"$set": upd})
+#     updated = mongo.db.resume_bank.find_one({"_id": doc["_id"]})
+#     return jsonify(success=True, message="Updated", data=serialize_resume(updated)), 200
+
 @resume_bp.route("/<rid>", methods=["PUT"])
 @jwt_required()
 def update(rid):
@@ -333,6 +367,11 @@ def update(rid):
         "linked_job_title", "notes",
     ]
     upd = {k: data[k] for k in allowed if k in data}
+    
+    # ← Resolve linked_job_id if it's an ObjectId
+    if "linked_job_id" in upd:
+        upd["linked_job_id"] = _resolve_job_id(upd["linked_job_id"])
+
     if "status" in upd and upd["status"] not in SCREENING_STATUSES:
         return jsonify(success=False, message="Invalid status"), 400
 
@@ -340,8 +379,6 @@ def update(rid):
     mongo.db.resume_bank.update_one({"_id": doc["_id"]}, {"$set": upd})
     updated = mongo.db.resume_bank.find_one({"_id": doc["_id"]})
     return jsonify(success=True, message="Updated", data=serialize_resume(updated)), 200
-
-
 # ── DELETE /api/resumes/<id> ──────────────────────────────────────────────────
 @resume_bp.route("/<rid>", methods=["DELETE"])
 @jwt_required()

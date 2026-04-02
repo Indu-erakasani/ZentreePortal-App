@@ -1,6 +1,4 @@
-"""
-Candidate Tracking routes: /api/tracking/...
-"""
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from bson import ObjectId
@@ -11,7 +9,7 @@ from models.Tracking_model import (
     tracking_schema, serialize_tracking,
     STAGES, PIPELINE_STATUSES,
 )
-
+import re
 tracking_bp = Blueprint("tracking", __name__)
 
 
@@ -103,7 +101,56 @@ def get_one(tid):
     return jsonify(success=True, data=serialize_tracking(doc)), 200
 
 
+
+
+def is_object_id(val: str) -> bool:
+    """Returns True if the value looks like a MongoDB ObjectId"""
+    return bool(re.match(r'^[a-f0-9]{24}$', (val or "").strip()))
+
 # ── POST /api/tracking/ ───────────────────────────────────────────────────────
+# @tracking_bp.route("/", methods=["POST"])
+# @jwt_required()
+# def create():
+#     data = request.get_json(silent=True) or {}
+#     required = ["resume_id", "candidate_name", "job_id"]
+#     for f in required:
+#         if not data.get(f):
+#             return jsonify(success=False, message=f"'{f}' is required"), 400
+
+#     job_id = data.get("job_id", "")
+
+#     # ── If job_id is a MongoDB ObjectId, resolve it to human-readable job_id ──
+#     if is_object_id(job_id):
+#         try:
+#             job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
+#             if job_doc:
+#                 job_id = job_doc.get("job_id", job_id)  # e.g. "JD-123456"
+#             else:
+#                 return jsonify(success=False, message="Job not found"), 404
+#         except Exception:
+#             return jsonify(success=False, message="Invalid job reference"), 400
+
+#     try:
+#         doc = tracking_schema(
+#             resume_id        = data["resume_id"],
+#             candidate_name   = data["candidate_name"],
+#             job_id           = job_id,                        # ← resolved human-readable
+#             client_name      = data.get("client_name", ""),
+#             job_title        = data.get("job_title", ""),
+#             current_stage    = data.get("current_stage", "Screening"),
+#             pipeline_status  = data.get("pipeline_status", "Active"),
+#             recruiter        = data.get("recruiter", ""),
+#             next_step        = data.get("next_step", ""),
+#             notes            = data.get("notes", ""),
+#         )
+#         result = mongo.db.candidate_tracking.insert_one(doc)
+#         doc["_id"] = result.inserted_id
+#         return jsonify(success=True, message="Tracking record created", data=serialize_tracking(doc)), 201
+#     except ValueError as e:
+#         return jsonify(success=False, message=str(e)), 400
+#     except Exception as e:
+#         return jsonify(success=False, message="Failed to create", error=str(e)), 500
+    
 @tracking_bp.route("/", methods=["POST"])
 @jwt_required()
 def create():
@@ -112,28 +159,94 @@ def create():
     for f in required:
         if not data.get(f):
             return jsonify(success=False, message=f"'{f}' is required"), 400
+
+    # ── Resolve job_id if ObjectId ────────────────────────────────────────────
+    job_id = data.get("job_id", "")
+    if is_object_id(job_id):
+        try:
+            job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
+            if job_doc:
+                job_id = job_doc.get("job_id", job_id)
+        except Exception:
+            pass
+
+    resume_id = data["resume_id"].strip()
+
+    # ── Check if record already exists for this resume + job ──────────────────
+    existing = mongo.db.candidate_tracking.find_one({
+        "resume_id": {"$regex": f"^\\s*{resume_id}\\s*$", "$options": "i"},
+        "job_id":    job_id,
+    })
+
+    new_stage  = data.get("current_stage", "Screening")
+    new_status = data.get("pipeline_status", "Active")
+
+    if existing:
+        # ── UPDATE existing record ────────────────────────────────────────────
+        upd = {
+            "pipeline_status": new_status,
+            "recruiter":       data.get("recruiter",  existing.get("recruiter", "")),
+            "next_step":       data.get("next_step",  ""),
+            "notes":           data.get("notes",      ""),
+            "updated_at":      datetime.utcnow(),
+        }
+
+        # Only push to stage_history if stage actually changed
+        if new_stage != existing.get("current_stage"):
+            upd["current_stage"] = new_stage
+            upd["stage_date"]    = datetime.utcnow()
+            upd["days_in_stage"] = 0
+            new_history_entry = {
+                "stage":      new_stage,
+                "entered_at": datetime.utcnow(),
+                "exited_at":  None,
+                "notes":      data.get("notes", ""),
+            }
+            mongo.db.candidate_tracking.update_one(
+                {"_id": existing["_id"]},
+                {"$set": upd, "$push": {"stage_history": new_history_entry}}
+            )
+        else:
+            mongo.db.candidate_tracking.update_one(
+                {"_id": existing["_id"]},
+                {"$set": upd}
+            )
+
+        updated = mongo.db.candidate_tracking.find_one({"_id": existing["_id"]})
+        return jsonify(
+            success=True,
+            message="Tracking record updated (already existed)",
+            data=serialize_tracking(updated),
+            was_updated=True,
+        ), 200
+
+    # ── CREATE new record ─────────────────────────────────────────────────────
     try:
         doc = tracking_schema(
-            resume_id        = data["resume_id"],
-            candidate_name   = data["candidate_name"],
-            job_id           = data["job_id"],
-            client_name      = data.get("client_name", ""),
-            job_title        = data.get("job_title", ""),
-            current_stage    = data.get("current_stage", "Screening"),
-            pipeline_status  = data.get("pipeline_status", "Active"),
-            recruiter        = data.get("recruiter", ""),
-            next_step        = data.get("next_step", ""),
-            notes            = data.get("notes", ""),
+            resume_id       = resume_id,
+            candidate_name  = data["candidate_name"],
+            job_id          = job_id,
+            client_name     = data.get("client_name",    ""),
+            job_title       = data.get("job_title",      ""),
+            current_stage   = new_stage,
+            pipeline_status = new_status,
+            recruiter       = data.get("recruiter",      ""),
+            next_step       = data.get("next_step",      ""),
+            notes           = data.get("notes",          ""),
         )
         result = mongo.db.candidate_tracking.insert_one(doc)
         doc["_id"] = result.inserted_id
-        return jsonify(success=True, message="Tracking record created", data=serialize_tracking(doc)), 201
+        return jsonify(
+            success=True,
+            message="Tracking record created",
+            data=serialize_tracking(doc),
+            was_updated=False,
+        ), 201
     except ValueError as e:
         return jsonify(success=False, message=str(e)), 400
     except Exception as e:
-        return jsonify(success=False, message="Failed to create", error=str(e)), 500
-
-
+        return jsonify(success=False, message="Failed to create", error=str(e)), 500    
+    
 # ── PUT /api/tracking/:id ─────────────────────────────────────────────────────
 @tracking_bp.route("/<tid>", methods=["PUT"])
 @jwt_required()
@@ -185,6 +298,7 @@ def add_interview(tid):
         return jsonify(success=False, message="'interviewer' is required"), 400
 
     interview = {
+        "stage":             doc.get("current_stage", ""), 
         "interviewer":       data.get("interviewer", ""),
         "interview_date":    datetime.utcnow(),
         "interview_type":    data.get("interview_type", "Video"),
