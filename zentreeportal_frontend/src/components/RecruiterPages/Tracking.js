@@ -13,7 +13,7 @@ import {
 } from "@mui/icons-material";
 
 // ── Inline API calls ──────────────────────────────────────────────────────────
-const BASE = "http://localhost:5000/api";
+const BASE = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000/api";
 const getHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
@@ -78,10 +78,12 @@ const PIPELINE_STATUSES = ["Active", "On Hold", "Completed", "Dropped"];
 const RECOMMENDATIONS   = ["Strong Hire", "Hire", "Maybe", "No Hire"];
 const INTERVIEW_TYPES   = ["Phone", "Video", "In-Person", "Panel"];
 
+
 const EMPTY_FORM = {
-  resume_id: "", candidate_name: "", job_id: "", client_name: "",
+  resume_id: "", candidate_name: "", job_id: "", job_mongo_id: "", client_name: "",
   job_title: "", current_stage: "Screening", pipeline_status: "Active",
   recruiter: "", next_step: "", notes: "",
+  salary_offered: "", joining_date: "", rejection_reason: "",
 };
 const EMPTY_INTERVIEW = {
   interviewer: "", interview_type: "Video", feedback_score: 3,
@@ -153,10 +155,14 @@ export default function Tracking() {
   const [jobs,       setJobs]       = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState("");
-  const [viewMode,   setViewMode]   = useState("kanban");
+  // const [viewMode,   setViewMode]   = useState("kanban");
+  const [viewMode, setViewMode] = useState("list");
   const [search,     setSearch]     = useState("");
   const [stageF,     setStageF]     = useState("");
   const [jobF,       setJobF]       = useState("");
+  const [clientF, setClientF]       = useState("");
+  const [recruiters, setRecruiters] = useState([]);
+  console.log("recruiters:::::::",recruiters)
 
   const [formOpen,  setFormOpen]  = useState(false);
   const [ivOpen,    setIvOpen]    = useState(false);
@@ -183,21 +189,36 @@ export default function Tracking() {
     try { const res = await getAllJobs(); setJobs(res.data || []); }
     catch { setJobs([]); }
   }, []);
-
-  useEffect(() => { load(); loadJobs(); }, [load, loadJobs]);
+  const loadRecruiters = useCallback(async () => {
+    try {
+      const res = await fetch(`${BASE}/user/`, { headers: getHeaders() });
+      const data = await res.json();
+      // ← filter only recruiter role
+      const onlyRecruiters = (data.data || []).filter(u => u.role === "recruiter");
+      setRecruiters(onlyRecruiters);
+    } catch { setRecruiters([]); }
+  }, []);
+  
+  // Add to useEffect
+  useEffect(() => { load(); loadJobs(); loadRecruiters(); }, [load, loadJobs, loadRecruiters]);
+  // useEffect(() => { load(); loadJobs(); }, [load, loadJobs]);
 
   const filtered = trackings.filter(t => {
     const q = search.toLowerCase();
-    const mQ = !q || t.candidate_name?.toLowerCase().includes(q) || t.job_title?.toLowerCase().includes(q);
+    const mQ = !q || 
+      t.candidate_name?.toLowerCase().includes(q) || 
+      t.job_title?.toLowerCase().includes(q) || 
+      t.client_name?.toLowerCase().includes(q);
     const mS = !stageF || t.current_stage === stageF;
+    const mC = !clientF || t.client_name === clientF;
     const mJ = !jobF   || t.job_id === jobF;
-    return mQ && mS && mJ;
+    return mQ && mS && mJ && mC;
   });
 
   const byStage = (id) => filtered.filter(t => t.current_stage === id);
 
   const stats = KANBAN_STAGES.map(s => ({ ...s, count: trackings.filter(t => t.current_stage === s.id).length }));
-
+  const uniqueClients = [...new Set(trackings.map(t => t.client_name).filter(Boolean))];
   // Modal helpers
   const openCreate = () => { setSelected(null); setFormData(EMPTY_FORM); setFormOpen(true); };
   const openEdit   = t  => { setSelected(t); setFormData({ ...EMPTY_FORM, ...t }); setFormOpen(true); };
@@ -231,6 +252,186 @@ export default function Tracking() {
     } catch (err) { setError(err?.message || "Failed to add feedback"); }
     finally { setSaving(false); }
   };
+
+
+
+
+// ── Stage-based feedback config ───────────────────────────────────────────────
+// ── Stage-based FORM field config (for Add to Pipeline) ──────────────────────
+const STAGE_FORM_CONFIG = {
+  "Screening": {
+    extraFields: [],  // no extra fields needed
+  },
+  "Technical Round 1": {
+    extraFields: ["next_step"],
+  },
+  "Technical Round 2": {
+    extraFields: ["next_step"],
+  },
+  "HR Round": {
+    extraFields: ["next_step"],
+  },
+  "Manager Round": {
+    extraFields: ["next_step"],
+  },
+  "Final Round": {
+    extraFields: ["next_step"],
+  },
+  "Offer Stage": {
+    extraFields: ["salary_offered", "next_step"],
+  },
+  "Negotiation": {
+    extraFields: ["salary_offered", "next_step"],
+  },
+  "Offer Accepted": {
+    extraFields: ["salary_offered", "joining_date"],
+  },
+  "Offer Declined": {
+    extraFields: ["rejection_reason"],
+  },
+  "Joined": {
+    extraFields: ["joining_date"],
+  },
+  "Rejected": {
+    extraFields: ["rejection_reason"],
+  },
+  "Withdrawn": {
+    extraFields: ["rejection_reason"],
+  },
+};
+const STAGE_FEEDBACK_CONFIG = {
+"Screening": {
+  label: "Screening Feedback",
+  color: "#757575",
+  fields: ["interviewer", "feedback_score", "recommendation", "feedback_summary"], 
+  hints: {
+    feedback_summary: "Initial impression, communication skills, basic fitment",
+  }
+},
+  "Technical Round 1": {
+    label: "Technical Round 1 Feedback",
+    color: "#0277bd",
+    fields: ["interviewer", "interview_type", "feedback_score", "recommendation", "strengths", "weaknesses", "feedback_summary"],
+    hints: {
+      strengths: "e.g. Strong in React, good problem solving",
+      weaknesses: "e.g. Weak in system design, needs SQL improvement",
+      feedback_summary: "Technical skills, coding ability, and overall assessment",
+    }
+  },
+  "Technical Round 2": {
+    label: "Technical Round 2 Feedback",
+    color: "#01579b",
+    fields: ["interviewer", "interview_type", "feedback_score", "recommendation", "strengths", "weaknesses", "feedback_summary"],
+    hints: {
+      strengths: "e.g. Excellent system design, distributed systems knowledge",
+      weaknesses: "e.g. Limited cloud infrastructure experience",
+      feedback_summary: "Advanced technical evaluation and architecture discussion",
+    }
+  },
+"HR Round": {
+  label: "HR Round Feedback",
+  color: "#e65100",
+  fields: ["interviewer", "feedback_score", "recommendation", "feedback_summary"], 
+  hints: {
+    feedback_summary: "Cultural fit, communication, salary expectations, notice period",
+  }
+},
+  "Manager Round": {
+    label: "Manager Round Feedback",
+    color: "#6a1b9a",
+    fields: ["interviewer", "interview_type", "feedback_score", "recommendation",  "feedback_summary"],
+    hints: {
+      strengths: "e.g. Leadership potential, ownership mindset",
+      weaknesses: "e.g. Needs mentoring on stakeholder management",
+      feedback_summary: "Leadership qualities, team fit, and managerial assessment",
+    }
+  },
+  "Final Round": {
+    label: "Final Round Feedback",
+    color: "#ad1457",
+    fields: ["interviewer", "interview_type", "feedback_score", "recommendation", "strengths", "weaknesses", "feedback_summary"],
+    hints: {
+      strengths: "e.g. Strong overall fit, ready to contribute",
+      weaknesses: "e.g. May need onboarding support",
+      feedback_summary: "Overall final assessment and hiring decision rationale",
+    }
+  },
+  "Offer Stage": {
+    label: "Offer Details",
+    color: "#1565c0",
+    fields: ["interviewer", "feedback_score", "recommendation", "feedback_summary"],
+    hints: {
+      feedback_summary: "Salary offered, joining date, and offer conditions",
+    }
+  },
+  "Negotiation": {
+    label: "Negotiation Notes",
+    color: "#f9a825",
+    fields: ["interviewer", "feedback_score", "recommendation", "feedback_summary"],
+    hints: {
+      feedback_summary: "Negotiation terms, counter offers, and current status",
+    }
+  },
+  "Offer Accepted": {
+    label: "Offer Acceptance Details",
+    color: "#2e7d32",
+    fields: ["interviewer", "feedback_score", "feedback_summary"],
+    hints: {
+      feedback_summary: "Confirmed joining date, final CTC agreed, and next steps",
+    }
+  },
+  "Offer Declined": {
+    label: "Offer Declined — Reason",
+    color: "#c62828",
+    fields: ["interviewer", "feedback_score", "feedback_summary"],
+    hints: {
+      feedback_summary: "Reason for declining — better offer, location, role mismatch, etc.",
+    }
+  },
+  "Joined": {
+    label: "Joining Confirmation",
+    color: "#1b5e20",
+    fields: ["interviewer", "feedback_summary"],
+    hints: {
+      feedback_summary: "Date of joining, team assigned, and onboarding notes",
+    }
+  },
+  "Rejected": {
+    label: "Rejection Feedback",
+    color: "#4e342e",
+    fields: ["interviewer", "feedback_score", "recommendation", "weaknesses", "feedback_summary"],
+    hints: {
+      weaknesses: "e.g. Skill gap, poor communication, attitude issues",
+      feedback_summary: "Reason for rejection and areas candidate needs to improve",
+    }
+  },
+  "Withdrawn": {
+    label: "Withdrawal Notes",
+    color: "#37474f",
+    fields: ["interviewer", "feedback_summary"],
+    hints: {
+      feedback_summary: "Reason candidate withdrew — personal reasons, competing offer, etc.",
+    }
+  },
+};
+
+// Fallback for stages not in config
+const getStageConfig = (stage) =>
+  STAGE_FEEDBACK_CONFIG[stage] || {
+    label: "Interview Feedback",
+    color: "#546e7a",
+    fields: ["interviewer", "interview_type", "feedback_score", "recommendation", "strengths", "weaknesses", "feedback_summary"],
+    hints: {},
+  };
+
+
+
+
+
+
+
+
+
 
   // ── PUT /api/tracking/:id (stage change from kanban) ───────────────────
   const handleStageChange = async (tracking, newStage) => {
@@ -279,7 +480,7 @@ export default function Tracking() {
       {/* Filters */}
       <Box display="flex" gap={2} flexWrap="wrap">
         <TextField
-          placeholder="Search candidate or job…" value={search}
+          placeholder="Search candidate, job or client…" value={search}
           onChange={e => setSearch(e.target.value)} size="small" sx={{ flexGrow: 1, minWidth: 220 }}
           InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" color="action" /></InputAdornment> }}
         />
@@ -289,8 +490,14 @@ export default function Tracking() {
         </TextField>
         <TextField select value={jobF} onChange={e => setJobF(e.target.value)} size="small" sx={{ minWidth: 180 }} label="Job">
           <MenuItem value="">All Jobs</MenuItem>
-          {jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.title}</MenuItem>)}
+          {jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.job_id} - {j.title} </MenuItem>)}
         </TextField>
+        <TextField select value={clientF} onChange={e => setClientF(e.target.value)} size="small" sx={{ minWidth: 180 }} label="Client">
+            <MenuItem value="">All Clients</MenuItem>
+            {uniqueClients.map(c => (
+              <MenuItem key={c} value={c}>{c}</MenuItem>
+            ))}
+          </TextField>
       </Box>
 
       {/* Empty state */}
@@ -405,6 +612,7 @@ export default function Tracking() {
         <form onSubmit={handleSave}>
           <DialogContent sx={{ pt: 3 }}>
             <Grid container spacing={2}>
+              {/* Always visible fields */}
               <Grid item xs={12}>
                 <TextField sx={{ width: "100%", minWidth: 250 }} size="small" required label="Candidate Name"
                   name="candidate_name" value={formData.candidate_name} onChange={handleChange} />
@@ -414,14 +622,22 @@ export default function Tracking() {
                   name="resume_id" value={formData.resume_id} onChange={handleChange} placeholder="e.g. RES001" />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField select sx={{ width: "100%", minWidth: 250 }} size="small" label="Job" name="job_id"
-                  value={formData.job_id} onChange={e => {
-                    const job = jobs.find(j => j._id === e.target.value);
-                    setFormData(p => ({ ...p, job_id: e.target.value, job_title: job?.title || "", client_name: job?.client_name || "" }));
-                  }}>
-                  <MenuItem value="">Select Job</MenuItem>
-                  {jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.title}</MenuItem>)}
-                </TextField>
+
+                  <TextField select sx={{ width: "100%", minWidth: 250 }} size="small" label="Job" name="job_id"
+                    value={formData.job_mongo_id || ""}          
+                    onChange={e => {
+                      const job = jobs.find(j => j._id === e.target.value);
+                      setFormData(p => ({
+                        ...p,
+                        job_id:       job?.job_id    || "",       
+                        job_mongo_id: e.target.value,         
+                        job_title:    job?.title     || "",
+                        client_name:  job?.client_name || "",
+                      }));
+                    }}>
+                    <MenuItem value="">Select Job</MenuItem>
+                    {jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.job_id} - {j.title}</MenuItem>)}
+                  </TextField>
               </Grid>
               <Grid item xs={12} sm={6}>
                 <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Client Name"
@@ -443,18 +659,66 @@ export default function Tracking() {
                   {PIPELINE_STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
                 </TextField>
               </Grid>
+
+              {/* Recruiter Dropdown */}
               <Grid item xs={12}>
-                <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Recruiter"
-                  name="recruiter" value={formData.recruiter} onChange={handleChange} />
+                <TextField select sx={{ width: "100%", minWidth: 250 }} size="small" label="Recruiter"
+                  name="recruiter" value={formData.recruiter} onChange={handleChange}>
+                  <MenuItem value="">Select Recruiter</MenuItem>
+                  {recruiters.map(r => (
+                    <MenuItem key={r.id} value={`${r.first_name} ${r.last_name}`}>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Avatar sx={{ width: 22, height: 22, fontSize: 10, bgcolor: "#1a237e" }}>
+                          {r.first_name?.[0]}{r.last_name?.[0]}
+                        </Avatar>
+                        {r.first_name} {r.last_name}
+                        <Chip label={r.role} size="small"
+                          sx={{ ml: "auto", fontSize: 10, height: 18, textTransform: "capitalize" }} />
+                      </Box>
+                    </MenuItem>
+                  ))}
+                </TextField>
               </Grid>
-              <Grid item xs={12}>
-                <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Next Step"
-                  name="next_step" value={formData.next_step} onChange={handleChange} />
-              </Grid>
+
+              {/* Stage-based extra fields */}
+              {(STAGE_FORM_CONFIG[formData.current_stage]?.extraFields || []).includes("next_step") && (
+                <Grid item xs={12}>
+                  <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Next Step"
+                    name="next_step" value={formData.next_step} onChange={handleChange}
+                    placeholder="e.g. Schedule Technical Round 2" />
+                </Grid>
+              )}
+
+              {(STAGE_FORM_CONFIG[formData.current_stage]?.extraFields || []).includes("salary_offered") && (
+                <Grid item xs={12} sm={6}>
+                  <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Salary Offered (LPA)"
+                    name="salary_offered" value={formData.salary_offered} onChange={handleChange}
+                    type="number" placeholder="e.g. 12.5" />
+                </Grid>
+              )}
+
+              {(STAGE_FORM_CONFIG[formData.current_stage]?.extraFields || []).includes("joining_date") && (
+                <Grid item xs={12} sm={6}>
+                  <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Joining Date"
+                    name="joining_date" value={formData.joining_date} onChange={handleChange}
+                    type="date" InputLabelProps={{ shrink: true }} />
+                </Grid>
+              )}
+
+              {(STAGE_FORM_CONFIG[formData.current_stage]?.extraFields || []).includes("rejection_reason") && (
+                <Grid item xs={12}>
+                  <TextField sx={{ width: "100%", minWidth: 250 }} size="small" label="Reason"
+                    name="rejection_reason" value={formData.rejection_reason} onChange={handleChange}
+                    placeholder="e.g. Skill mismatch, better offer elsewhere..." />
+                </Grid>
+              )}
+
+              {/* Notes — always visible */}
               <Grid item xs={12}>
                 <TextField sx={{ width: "100%", minWidth: 520 }} multiline rows={3} size="small" label="Notes"
                   name="notes" value={formData.notes} onChange={handleChange} />
               </Grid>
+
             </Grid>
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
@@ -467,61 +731,187 @@ export default function Tracking() {
         </form>
       </Dialog>
 
+
+
+
       {/* ── Interview Feedback Dialog ── */}
-      <Dialog open={ivOpen} onClose={() => setIvOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0" }}>
-          Add Interview Feedback
-          {selected && <Typography fontSize={13} color="text.secondary">for {selected.candidate_name}</Typography>}
-        </DialogTitle>
-        <form onSubmit={handleIvSave}>
-          <DialogContent sx={{ pt: 3 }}>
-            <Grid container spacing={2}>
+<Dialog open={ivOpen} onClose={() => setIvOpen(false)} maxWidth="sm" fullWidth>
+  <DialogTitle sx={{
+    fontWeight: 700,
+    borderBottom: "1px solid #e0e0e0",
+    borderTop: `4px solid ${getStageConfig(selected?.current_stage).color}`,
+    pb: 1.5,
+  }}>
+    <Box display="flex" alignItems="center" gap={1}>
+      <Chip
+        label={selected?.current_stage || ""}
+        size="small"
+        sx={{
+          bgcolor: getStageConfig(selected?.current_stage).color,
+          color: "#fff",
+          fontWeight: 700,
+          fontSize: 11,
+        }}
+      />
+      <Typography fontWeight={700} fontSize={16}>
+        {getStageConfig(selected?.current_stage).label}
+      </Typography>
+    </Box>
+    {selected && (
+      <Typography fontSize={13} color="text.secondary" mt={0.5}>
+        👤 {selected.candidate_name} &nbsp;·&nbsp; {selected.job_title} &nbsp;·&nbsp; {selected.client_name}
+      </Typography>
+    )}
+  </DialogTitle>
+
+  <form onSubmit={handleIvSave}>
+    <DialogContent sx={{ pt: 3 }}>
+      {(() => {
+        const config = getStageConfig(selected?.current_stage);
+        const show = (field) => config.fields.includes(field);
+        return (
+          <Grid container spacing={2}>
+
+            {/* Interviewer — Dropdown from Users */}
+            {show("interviewer") && (
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    sx={{ width: "100%", minWidth: 250 }}
+                    size="small"
+                    required
+                    label="Enter Your Name"
+                    name="interviewer"
+                    value={ivData.interviewer}
+                    onChange={handleIvChange}
+                    placeholder="Type your full name"
+                  />
+                </Grid>
+              )}
+
+            {/* Interview Type */}
+            {show("interview_type") && (
               <Grid item xs={12} sm={6}>
-                <TextField  sx={{ width: "100%", minWidth: 250 }} size="small" required label="Interviewer "
-                  name="interviewer" value={ivData.interviewer} onChange={handleIvChange} />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField select  sx={{ width: "100%", minWidth: 250 }} size="small" label="Interview Type"
-                  name="interview_type" value={ivData.interview_type} onChange={handleIvChange}>
+                <TextField
+                  select
+                  sx={{ width: "100%", minWidth: 250 }}
+                  size="small"
+                  label="Interview Type"
+                  name="interview_type"
+                  value={ivData.interview_type}
+                  onChange={handleIvChange}
+                >
                   {INTERVIEW_TYPES.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
                 </TextField>
               </Grid>
+            )}
+
+            {/* Rating */}
+            {show("feedback_score") && (
               <Grid item xs={12} sm={6}>
-                <TextField select  sx={{ width: "100%", minWidth: 250 }} size="small" label="Rating (1–5)"
-                  name="feedback_score" value={ivData.feedback_score} onChange={handleIvChange}>
-                  {[1,2,3,4,5].map(n => <MenuItem key={n} value={n}>{n} — {["Poor","Below Avg","Average","Good","Excellent"][n-1]}</MenuItem>)}
+                <TextField
+                  select
+                  sx={{ width: "100%", minWidth: 250 }}
+                  size="small"
+                  label="Rating (1–5)"
+                  name="feedback_score"
+                  value={ivData.feedback_score}
+                  onChange={handleIvChange}
+                >
+                  {[1,2,3,4,5].map(n => (
+                    <MenuItem key={n} value={n}>
+                      {n} — {["Poor","Below Avg","Average","Good","Excellent"][n-1]}
+                    </MenuItem>
+                  ))}
                 </TextField>
               </Grid>
+            )}
+
+            {/* Recommendation */}
+            {show("recommendation") && (
               <Grid item xs={12} sm={6}>
-                <TextField select  sx={{ width: "100%", minWidth: 250 }} size="small" label="Recommendation"
-                  name="recommendation" value={ivData.recommendation} onChange={handleIvChange}>
+                <TextField
+                  select
+                  sx={{ width: "100%", minWidth: 250 }}
+                  size="small"
+                  label="Recommendation"
+                  name="recommendation"
+                  value={ivData.recommendation}
+                  onChange={handleIvChange}
+                >
                   {RECOMMENDATIONS.map(r => <MenuItem key={r} value={r}>{r}</MenuItem>)}
                 </TextField>
               </Grid>
+            )}
 
+            {/* Strengths */}
+            {show("strengths") && (
               <Grid item xs={12} sm={6}>
-                <TextField  sx={{ width: "100%", minWidth: 250 }} size="small" label="Strengths (comma-separated)"
-                  name="strengths" value={ivData.strengths} onChange={handleIvChange} />
+                <TextField
+                  sx={{ width: "100%", minWidth: 250 }}
+                  size="small"
+                  label="Strengths (comma-separated)"
+                  name="strengths"
+                  value={ivData.strengths}
+                  onChange={handleIvChange}
+                  placeholder={config.hints.strengths || "e.g. Communication, Problem Solving"}
+                  helperText={config.hints.strengths}
+                />
               </Grid>
+            )}
+
+            {/* Weaknesses */}
+            {show("weaknesses") && (
               <Grid item xs={12} sm={6}>
-                <TextField  sx={{ width: "100%", minWidth: 250 }} size="small" label="Weaknesses (comma-separated)"
-                  name="weaknesses" value={ivData.weaknesses} onChange={handleIvChange} />
+                <TextField
+                  sx={{ width: "100%", minWidth: 250 }}
+                  size="small"
+                  label="Weaknesses (comma-separated)"
+                  name="weaknesses"
+                  value={ivData.weaknesses}
+                  onChange={handleIvChange}
+                  placeholder={config.hints.weaknesses || "e.g. System Design, Leadership"}
+                  helperText={config.hints.weaknesses}
+                />
               </Grid>
+            )}
+
+            {/* Feedback Summary */}
+            {show("feedback_summary") && (
               <Grid item xs={12}>
-                <TextField  sx={{ width: "100%", minWidth: 520 }} multiline rows={3} size="small" label="Enter the Summary"
-                  name="feedback_summary" value={ivData.feedback_summary} onChange={handleIvChange} />
+                <TextField
+                  sx={{ width: "100%", minWidth: 520 }}
+                  multiline
+                  rows={4}
+                  size="small"
+                  label="Feedback Summary"
+                  name="feedback_summary"
+                  value={ivData.feedback_summary}
+                  onChange={handleIvChange}
+                  placeholder={config.hints.feedback_summary || "Enter detailed feedback..."}
+                  helperText={config.hints.feedback_summary}
+                />
               </Grid>
-            </Grid>
-          </DialogContent>
-          <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
-            <Button onClick={() => setIvOpen(false)}>Cancel</Button>
-            <Button type="submit" variant="contained" disabled={saving}>
-              {saving ? <CircularProgress size={18} sx={{ mr: 1 }} /> : null}
-              Submit Feedback
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
+            )}
+
+          </Grid>
+        );
+      })()}
+    </DialogContent>
+
+    <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
+      <Button onClick={() => setIvOpen(false)}>Cancel</Button>
+      <Button
+        type="submit"
+        variant="contained"
+        disabled={saving}
+        sx={{ bgcolor: getStageConfig(selected?.current_stage).color }}
+      >
+        {saving ? <CircularProgress size={18} sx={{ mr: 1 }} /> : null}
+        Submit Feedback
+      </Button>
+    </DialogActions>
+  </form>
+</Dialog>
     </Box>
   );
 }
