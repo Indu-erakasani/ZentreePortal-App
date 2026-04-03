@@ -6,7 +6,7 @@ import {
   MenuItem, Table, TableHead, TableBody, TableRow, TableCell,
   Paper, Chip, IconButton, Tooltip, CircularProgress, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions, Avatar,
-  InputAdornment, Divider, LinearProgress, Grid,ListItemText
+  InputAdornment, Divider, LinearProgress, Grid,
 } from "@mui/material";
 import {
   Add, Search, Edit, Delete, Visibility,
@@ -14,6 +14,9 @@ import {
   CloudUpload, CheckCircle, Done, NavigateBefore,
   Close as CloseIcon, PictureAsPdf, OpenInNew, Business,
 } from "@mui/icons-material";
+
+// ── Shared detail component ───────────────────────────────────────────────────
+import CandidateDetailContent, { nameInitials, fmtSalary, STATUS_COLOR, STAGE_COLOR } from "./Candidatedetailcontent";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 const BASE = process.env.REACT_APP_API_BASE_URL;
@@ -33,8 +36,6 @@ const getAllResumes = (p = {}) => {
   const qs = new URLSearchParams(p).toString();
   return fetch(`${BASE}/resumes/${qs ? "?" + qs : ""}`, { headers: getHeaders() }).then(handle);
 };
-const getTrackingByResume = (resume_id) =>
-  fetch(`${BASE}/tracking/by-resume/${resume_id}`, { headers: getHeaders() }).then(handle);
 const createResume = (payload) =>
   fetch(`${BASE}/resumes/`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
 const updateResume = (id, payload) =>
@@ -65,9 +66,9 @@ const toBase64 = (file) =>
   });
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const STATUSES = ["New", "In Review", "Shortlisted", "Interviewed", "Offered", "Hired", "Rejected", "On Hold"];
-const SOURCES  = ["LinkedIn", "Naukri", "Indeed", "Referral", "Job Portal", "Direct", "Other"];
-const NOTICES  = ["Immediate", "15 days", "30 days", "60 days", "90 days"];
+const STATUSES  = ["New", "In Review", "Shortlisted", "Interviewed", "Offered", "Hired", "Rejected", "On Hold"];
+const SOURCES   = ["LinkedIn", "Naukri", "Indeed", "Referral", "Job Portal", "Direct", "Other"];
+const NOTICES   = ["Immediate", "15 days", "30 days", "60 days", "90 days"];
 const EXP_BANDS = [
   { label: "All Experience", min: "",   max: ""   },
   { label: "0–2 years",      min: "0",  max: "2"  },
@@ -75,39 +76,12 @@ const EXP_BANDS = [
   { label: "6–10 years",     min: "6",  max: "10" },
   { label: "10+ years",      min: "10", max: ""   },
 ];
-const STATUS_COLOR = {
-  New: "default", "In Review": "info", Shortlisted: "primary",
-  Interviewed: "warning", Offered: "success", Hired: "success",
-  Rejected: "error", "On Hold": "warning",
-};
-const STAGE_COLOR = {
-  Screening: "default",
-  "Technical Round 1": "info", "Technical Round 2": "info",
-  "HR Round": "primary", "Manager Round": "primary", "Final Round": "primary",
-  "Offer Stage": "warning", Negotiation: "warning",
-  "Offer Accepted": "success", Joined: "success",
-  "Offer Declined": "error", Rejected: "error", Withdrawn: "error",
-};
-const SCORE_LABEL = ["", "Poor", "Below Avg", "Average", "Good", "Excellent"];
 
 const EMPTY_FORM = {
   name: "", email: "", phone: "", current_role: "", current_company: "",
   experience: "", skills: "", location: "", current_salary: "",
   expected_salary: "", notice_period: "30 days", source: "LinkedIn",
   status: "New", linked_job_id: "", linked_job_mongo_id: "", linked_job_title: "", notes: "",
-};
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const fmtSalary = (v) => {
-  if (!v) return "—";
-  if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L`;
-  return `₹${Number(v).toLocaleString("en-IN")}`;
-};
-const nameInitials = (name = "") =>
-  name.split(" ").filter(Boolean).map(w => w[0]).join("").toUpperCase().slice(0, 2) || "?";
-const fmtDate = (iso) => {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 };
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
@@ -253,7 +227,7 @@ const PdfViewerDialog = ({ open, onClose, candidate }) => {
           </Box>
         </Box>
       </DialogTitle>
-      <DialogContent sx={{ p: 0, flex: 1, overflow: "hidden", position: "relative" }}>
+      <DialogContent sx={{ p: 0, flex: 1, overflow: "hidden" }}>
         {fetching && (
           <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100%" gap={2}>
             <CircularProgress size={40} />
@@ -280,523 +254,58 @@ const PdfViewerDialog = ({ open, onClose, candidate }) => {
     </Dialog>
   );
 };
-const createTracking = (payload) =>
-  fetch(`${BASE}/tracking/`, {
-    method: "POST", headers: getHeaders(),
-    body: JSON.stringify(payload),
-  }).then(handle);
-const STAGES = [
-  "Screening", "Technical Round 1", "Technical Round 2",
-  "HR Round", "Manager Round", "Final Round",
-  "Offer Stage", "Negotiation", "Offer Accepted",
-  "Offer Declined", "Joined", "Rejected", "Withdrawn",
-];
-
-// function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf }) {
-function CandidateDetailContent({ candidate, jobs, onClose, onEdit, onViewPdf, recruiters = [] }) {
-  const [tracking,    setTracking]    = React.useState([]);
-  const [loadingT,    setLoadingT]    = React.useState(true);
-  const [tab,         setTab]         = React.useState(0);
-  const [addPipeline, setAddPipeline] = React.useState(false);
-  const [pipeForm, setPipeForm] = React.useState({
-    job_id:        "",
-    current_stage: "Screening",
-    recruiter:     "",
-    notes:         "",
-    next_step:     "",
-  });
-  const [pipeError,  setPipeError]  = React.useState("");
-  const [pipeSaving, setPipeSaving] = React.useState(false);
-
-  const loadTracking = React.useCallback(() => {
-    setLoadingT(true);
-    getTrackingByResume(candidate.resume_id)
-      .then(res => setTracking(res.data || []))
-      .catch(() => setTracking([]))
-      .finally(() => setLoadingT(false));
-  }, [candidate.resume_id]);
-
-  React.useEffect(() => { loadTracking(); }, [loadTracking]);
-
-  const activeTrack = tracking[0];
-
-  const handlePipeChange = e =>
-    setPipeForm(p => ({ ...p, [e.target.name]: e.target.value }));
-  const handleAddPipeline = async () => {
-    if (!pipeForm.job_id) { setPipeError("Please select a job"); return; }
-    setPipeSaving(true); setPipeError("");
-    try {
-      const job = jobs.find(j => j._id === pipeForm.job_id);
-      const res = await createTracking({
-        resume_id:       candidate.resume_id?.trim(),
-        candidate_name:  candidate.name,
-        job_id:          job?.job_id    || "",
-        job_title:       job?.title     || "",
-        client_name:     job?.client_name || "",
-        current_stage:   pipeForm.current_stage,
-        recruiter:       pipeForm.recruiter,
-        notes:           pipeForm.notes,
-        next_step:       pipeForm.next_step,
-        pipeline_status: "Active",
-      });
-      setAddPipeline(false);
-      setPipeForm({ job_id: "", current_stage: "Screening", recruiter: "", notes: "", next_step: "" });
-  
-      // ← Show different message if it was an update vs new
-      if (res.was_updated) {
-        setPipeError("");   // clear errors
-        // optional: show a success note — you can use a Snackbar or just reload
-      }
-      loadTracking();
-    } catch (err) {
-      setPipeError(err?.message || "Failed to add to pipeline");
-    } finally { setPipeSaving(false); }
-  };
-  // const handleAddPipeline = async () => {
-  //   if (!pipeForm.job_id) { setPipeError("Please select a job"); return; }
-  //   setPipeSaving(true); setPipeError("");
-  //   try {
-  //     const job = jobs.find(j => j._id === pipeForm.job_id);
-  //     await createTracking({
-  //       resume_id:      candidate.resume_id?.trim(),
-  //       candidate_name: candidate.name,
-  //       job_id:         job?.job_id || "", 
-  //       job_title:      job?.title || "",
-  //       client_name:    job?.client_name || "",
-  //       current_stage:  pipeForm.current_stage,
-  //       recruiter:      pipeForm.recruiter,
-  //       notes:          pipeForm.notes,
-  //       next_step:      pipeForm.next_step,
-  //       pipeline_status: "Active",
-  //     });
-  //     setAddPipeline(false);
-  //     setPipeForm({ job_id: "", current_stage: "Screening", recruiter: "", notes: "", next_step: "" });
-  //     loadTracking();   // ← refresh pipeline tab
-  //   } catch (err) {
-  //     setPipeError(err?.message || "Failed to add to pipeline");
-  //   } finally { setPipeSaving(false); }
-  // };
-
-  return (
-    <>
-      <DialogContent sx={{ p: 0 }}>
-
-        {/* ── Header strip ── */}
-        <Box sx={{ px: 3, pt: 3, pb: 2, borderBottom: "1px solid #e0e0e0" }}>
-          <Box display="flex" alignItems="center" gap={2}>
-            <Avatar sx={{ width: 56, height: 56, bgcolor: "#1a237e", fontSize: "1.3rem", fontWeight: 700 }}>
-              {nameInitials(candidate.name)}
-            </Avatar>
-            <Box flex={1}>
-              <Typography variant="h5" fontWeight={800}>{candidate.name}</Typography>
-              <Typography color="text.secondary" fontSize={13}>
-                {candidate.current_role}{candidate.current_company ? ` · ${candidate.current_company}` : ""}
-              </Typography>
-              <Box display="flex" gap={1} mt={0.5} flexWrap="wrap">
-                <Chip label={candidate.status} color={STATUS_COLOR[candidate.status] || "default"} size="small" sx={{ fontWeight: 700 }} />
-                {activeTrack && (
-                  <Chip label={`Pipeline: ${activeTrack.current_stage}`}
-                    color={STAGE_COLOR[activeTrack.current_stage] || "default"}
-                    size="small" variant="outlined" sx={{ fontWeight: 600 }} />
-                )}
-                {activeTrack && (
-                  <Chip label={activeTrack.pipeline_status} size="small" sx={{ fontSize: 10, bgcolor: "#f5f5f5" }} />
-                )}
-              </Box>
-            </Box>
-          </Box>
-
-          {/* Tabs */}
-          <Box display="flex" mt={2}>
-            {["Profile & Resume", "Pipeline & Interviews"].map((label, i) => (
-              <Box key={i} onClick={() => { setTab(i); setAddPipeline(false); }} sx={{
-                px: 2, py: 1, cursor: "pointer",
-                fontWeight: tab === i ? 700 : 400, fontSize: 13,
-                borderBottom: tab === i ? "2px solid #1a237e" : "2px solid transparent",
-                color: tab === i ? "#1a237e" : "text.secondary",
-                transition: "all 0.15s",
-              }}>
-                {label}
-              </Box>
-            ))}
-          </Box>
-        </Box>
-
-        {/* ══ TAB 0 — Profile ═════════════════════════════════════════════════ */}
-        {tab === 0 && (
-          <Box p={3}>
-            <Grid container spacing={2} mb={2}>
-              {[
-                ["Email",           candidate.email],
-                ["Phone",           candidate.phone || "—"],
-                ["Location",        candidate.location || "—"],
-                ["Experience",      `${candidate.experience} years`],
-                ["Current Salary",  fmtSalary(candidate.current_salary)],
-                ["Expected Salary", fmtSalary(candidate.expected_salary)],
-                ["Notice Period",   candidate.notice_period || "—"],
-                ["Source",          candidate.source || "—"],
-              ].map(([label, val]) => (
-                <Grid item xs={6} sm={4} key={label}>
-                  <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase">{label}</Typography>
-                  <Typography fontWeight={600} fontSize={13}>{val}</Typography>
-                </Grid>
-              ))}
-            </Grid>
-
-            {candidate.skills && (
-              <Box mb={2}>
-                <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={1}>Skills</Typography>
-                <Box display="flex" flexWrap="wrap" gap={0.8}>
-                  {candidate.skills.split(",").filter(Boolean).map((s, i) => (
-                    <Chip key={i} label={s.trim()} size="small" variant="outlined"
-                      sx={{ fontSize: 11, borderColor: "#1a237e", color: "#1a237e" }} />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {candidate.linked_job_title && (
-              <Box p={1.5} bgcolor="#e8eaf6" borderRadius={2} mb={2}>
-                <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={0.3}>Applied For</Typography>
-                <Typography fontWeight={700} color="primary.dark">{candidate.linked_job_title}</Typography>
-              </Box>
-            )}
-
-            {candidate.notes && (
-              <Box p={1.5} bgcolor="#f5f5f5" borderRadius={2} mb={2}>
-                <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={0.3}>Notes</Typography>
-                <Typography fontSize={13}>{candidate.notes}</Typography>
-              </Box>
-            )}
-
-            <Box p={2} borderRadius={2} display="flex" alignItems="center" gap={2}
-              sx={{ bgcolor: "#f5f5f5", border: "1px solid #e0e0e0" }}>
-              <Box flex={1}>
-                <Typography fontWeight={700} fontSize={13} color={candidate.resume_file ? "success.dark" : "text.secondary"}>
-                  {candidate.resume_file ? "Original Resume PDF" : "No resume file uploaded"}
-                </Typography>
-                <Typography fontSize={11} color="text.secondary">
-                  {candidate.resume_file ? `Stored as ${candidate.resume_file} · click to view` : "Upload via drag-and-drop to attach the original resume"}
-                </Typography>
-              </Box>
-              {candidate.resume_file && (
-                <Button variant="contained" size="small" onClick={onViewPdf}>View PDF</Button>
-              )}
-            </Box>
-          </Box>
-        )}
-
-        {/* ══ TAB 1 — Pipeline & Interviews ═══════════════════════════════════ */}
-        {tab === 1 && (
-          <Box p={3}>
-
-            {/* ── Add to Pipeline form ── */}
-            {addPipeline ? (
-              <Box mb={3} p={2.5} borderRadius={2}
-                sx={{ border: "1.5px solid #1a237e", bgcolor: "#f8f9ff" }}>
-                <Typography fontWeight={700} fontSize={14} color="#1a237e" mb={2}>
-                  Add to Pipeline
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <TextField select  sx={{ width: "100%", minWidth: 350 }} size="small" required label="Select Job" name="job_id"
-                      value={pipeForm.job_id} onChange={handlePipeChange}>
-                      <MenuItem value="">— Select a job —</MenuItem>
-                      {jobs.map(j => (
-                        <MenuItem key={j._id} value={j._id}>
-                          <Box>
-                            <Typography fontSize={13} fontWeight={600}>{j.job_id} - {j.title}</Typography>
-                            {j.client_name && <Typography fontSize={11} color="text.secondary">{j.client_name}</Typography>}
-                          </Box>
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField select sx={{ width: "100%", minWidth: 350 }} size="small" label="Starting Stage" name="current_stage"
-                      value={pipeForm.current_stage} onChange={handlePipeChange}>
-                      {STAGES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField select sx={{ width: "100%", minWidth: 350 }} size="small" label="Recruiter" name="recruiter"
-                      value={pipeForm.recruiter} onChange={handlePipeChange}>
-                      <MenuItem value="">Select Recruiter</MenuItem>
-                      {recruiters.map(r => (
-                        <MenuItem key={r.id} value={`${r.first_name} ${r.last_name}`}>
-                          <Box display="flex" alignItems="center" gap={1}>
-                            <Avatar sx={{ width: 22, height: 22, fontSize: 10, bgcolor: "#1a237e" }}>
-                              {r.first_name?.[0]}{r.last_name?.[0]}
-                            </Avatar>
-                            {r.first_name} {r.last_name}
-                          </Box>
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <TextField sx={{ width: "100%", minWidth: 350 }} size="small" label="Next Step" name="next_step"
-                      value={pipeForm.next_step} onChange={handlePipeChange}
-                      placeholder="e.g. Schedule technical interview" />
-                  </Grid>
-                  <Grid item xs={12}>
-                    <TextField sx={{ width: "100%", minWidth: 700 }} multiline rows={2} size="small" label="Notes" name="notes"
-                      value={pipeForm.notes} onChange={handlePipeChange} />
-                  </Grid>
-                </Grid>
-
-                {pipeError && <Alert severity="error" sx={{ mt: 1.5 }}>{pipeError}</Alert>}
-
-                <Box display="flex" gap={1} mt={2} justifyContent="flex-end">
-                  <Button size="small" onClick={() => { setAddPipeline(false); setPipeError(""); }}
-                    sx={{ textTransform: "none", color: "#64748b" }}>
-                    Cancel
-                  </Button>
-                  <Button size="small" variant="contained" onClick={handleAddPipeline}
-                    disabled={pipeSaving || !pipeForm.job_id}
-                    sx={{ textTransform: "none", fontWeight: 700, bgcolor: "#1a237e", "&:hover": { bgcolor: "#0d1757" } }}
-                    endIcon={pipeSaving ? <CircularProgress size={14} color="#fff" /> : null}>
-                    {pipeSaving ? "Adding…" : "Add to Pipeline"}
-                  </Button>
-                </Box>
-              </Box>
-            ) : (
-              <Box display="flex" justifyContent="flex-end" mb={2}>
-                <Button size="small" variant="outlined" onClick={() => setAddPipeline(true)}
-                  sx={{ textTransform: "none", fontWeight: 700, borderColor: "#1a237e", color: "#1a237e" }}>
-                  + Add to Pipeline
-                </Button>
-              </Box>
-            )}
-
-            {/* ── Pipeline records ── */}
-            {loadingT ? (
-              <Box display="flex" justifyContent="center" py={6}><CircularProgress size={32} /></Box>
-            ) : tracking.length === 0 ? (
-              <Box display="flex" flexDirection="column" alignItems="center" py={6} gap={1}>
-                <Typography color="text.secondary" fontWeight={600}>No pipeline records found</Typography>
-                <Typography fontSize={13} color="text.disabled">
-                  Click "Add to Pipeline" above to start tracking this candidate.
-                </Typography>
-              </Box>
-            ) : tracking.map((track, tIdx) => (
-              <Box key={track._id} mb={tIdx < tracking.length - 1 ? 4 : 0}>
-
-                {/* Track header */}
-                <Box display="flex" alignItems="center" gap={1} mb={2} flexWrap="wrap">
-                  <Chip label={track.current_stage} color={STAGE_COLOR[track.current_stage] || "default"} size="small" sx={{ fontWeight: 700 }} />
-                  <Chip label={track.pipeline_status} size="small" variant="outlined" />
-                  {track.recruiter   && <Typography fontSize={12} color="text.secondary">Recruiter: <strong>{track.recruiter}</strong></Typography>}
-                  {track.job_title   && <Typography fontSize={12} color="text.secondary">Job: <strong>{track.job_id}-{track.job_title}</strong></Typography>}
-                  {track.client_name && <Typography fontSize={12} color="text.secondary">Client: <strong>{track.client_name}</strong></Typography>}
-                </Box>
-
-                {/* Stage timeline */}
-                {track.stage_history?.length > 0 && (
-                  <Box mb={3}>
-                    <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={1.5}>Stage History</Typography>
-                    <Box display="flex" flexDirection="column" gap={0}>
-                      {track.stage_history.map((entry, i) => (
-                        <Box key={i} display="flex" gap={1.5} alignItems="flex-start">
-                          <Box display="flex" flexDirection="column" alignItems="center" sx={{ pt: 0.3 }}>
-                            <Box sx={{
-                              width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
-                              bgcolor: i === track.stage_history.length - 1 ? "#1a237e" : "#90caf9",
-                              border: "2px solid",
-                              borderColor: i === track.stage_history.length - 1 ? "#1a237e" : "#e3f2fd",
-                            }} />
-                            {i < track.stage_history.length - 1 && (
-                              <Box sx={{ width: 2, flexGrow: 1, minHeight: 20, bgcolor: "#e3f2fd", my: 0.3 }} />
-                            )}
-                          </Box>
-                          <Box pb={1.5}>
-                            <Typography fontWeight={600} fontSize={13}>{entry.stage}</Typography>
-                            <Typography fontSize={11} color="text.secondary">
-                              {fmtDate(entry.entered_at)}
-                              {entry.exited_at ? ` → ${fmtDate(entry.exited_at)}` : " · current"}
-                            </Typography>
-                            {entry.notes && <Typography fontSize={12} color="text.secondary" mt={0.3}>{entry.notes}</Typography>}
-                          </Box>
-                        </Box>
-                      ))}
-                    </Box>
-                  </Box>
-                )}
-
-                {/* Interviews */}
-                {track.interviews?.length > 0 && (
-                  <Box mb={3}>
-                    <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={1.5}>
-                      Interviews ({track.interviews.length})
-                    </Typography>
-                    <Box display="flex" flexDirection="column" gap={1.5}>
-                      {track.interviews.map((iv, i) => (
-                        <Box key={i} p={2} borderRadius={2} sx={{ border: "1px solid #e0e0e0", bgcolor: "#fafafa" }}>
-                          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
-                            <Box>
-                              <Typography fontWeight={700} fontSize={13}>{iv.stage} — {iv.interview_type}</Typography>
-                              <Typography fontSize={11} color="text.secondary">{iv.interviewer} · {fmtDate(iv.interview_date)}</Typography>
-                            </Box>
-                            <Box display="flex" gap={1} alignItems="center">
-                              <Box display="flex" gap={0.4}>
-                                {[1, 2, 3, 4, 5].map(s => (
-                                  <Box key={s} sx={{
-                                    width: 12, height: 12, borderRadius: 1,
-                                    bgcolor: s <= (iv.feedback_score || 0) ? "#1a237e" : "#e0e0e0",
-                                  }} />
-                                ))}
-                              </Box>
-                              <Typography fontSize={11} fontWeight={700} color="#1a237e">
-                                {SCORE_LABEL[iv.feedback_score] || "—"}
-                              </Typography>
-                            </Box>
-                          </Box>
-                          {iv.feedback_summary && <Typography fontSize={12} mb={1}>{iv.feedback_summary}</Typography>}
-                          <Box display="flex" gap={2} flexWrap="wrap">
-                            {iv.strengths?.length > 0 && (
-                              <Box flex={1} minWidth={120}>
-                                <Typography fontSize={10} fontWeight={700} color="#2e7d32" textTransform="uppercase" mb={0.5}>Strengths</Typography>
-                                <Box display="flex" flexWrap="wrap" gap={0.4}>
-                                  {iv.strengths.map((s, si) => (
-                                    <Chip key={si} label={s} size="small" sx={{ fontSize: 10, height: 20, bgcolor: "#e8f5e9", color: "#1b5e20" }} />
-                                  ))}
-                                </Box>
-                              </Box>
-                            )}
-                            {iv.weaknesses?.length > 0 && (
-                              <Box flex={1} minWidth={120}>
-                                <Typography fontSize={10} fontWeight={700} color="#c62828" textTransform="uppercase" mb={0.5}>Areas to Improve</Typography>
-                                <Box display="flex" flexWrap="wrap" gap={0.4}>
-                                  {iv.weaknesses.map((w, wi) => (
-                                    <Chip key={wi} label={w} size="small" sx={{ fontSize: 10, height: 20, bgcolor: "#ffebee", color: "#b71c1c" }} />
-                                  ))}
-                                </Box>
-                              </Box>
-                            )}
-                          </Box>
-                          {iv.recommendation && (
-                            <Box mt={1}>
-                              <Chip label={`Recommendation: ${iv.recommendation}`} size="small"
-                                color={iv.recommendation === "Strong Hire" ? "success" : iv.recommendation === "Hire" ? "primary" : iv.recommendation === "No Hire" ? "error" : "default"}
-                                sx={{ fontSize: 10, fontWeight: 700 }} />
-                            </Box>
-                          )}
-                        </Box>
-                      ))}
-                    </Box>
-                  </Box>
-                )}
-
-                {/* Offer details */}
-                {(track.salary_offered > 0 || track.offer_status !== "Pending" || track.offer_date || track.joining_date) && (
-                  <Box mb={3} p={2} borderRadius={2} sx={{ bgcolor: "#f3f8ff", border: "1px solid #bbdefb" }}>
-                    <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={1.5}>Offer Details</Typography>
-                    <Grid container spacing={1.5}>
-                      {[
-                        ["Salary Offered", track.salary_offered ? fmtSalary(track.salary_offered) : "—"],
-                        ["Offer Status",   track.offer_status || "—"],
-                        ["Offer Date",     fmtDate(track.offer_date)],
-                        ["Joining Date",   fmtDate(track.joining_date)],
-                      ].map(([label, val]) => (
-                        <Grid item xs={6} key={label}>
-                          <Typography fontSize={11} color="text.secondary" fontWeight={600}>{label}</Typography>
-                          <Typography fontWeight={700} fontSize={13}>{val}</Typography>
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </Box>
-                )}
-
-                {/* Next step / rejection */}
-                {(track.next_step || track.rejection_reason) && (
-                  <Box display="flex" flexDirection="column" gap={1}>
-                    {track.next_step && (
-                      <Box p={1.5} bgcolor="#fffde7" borderRadius={2} sx={{ border: "1px solid #fff176" }}>
-                        <Typography fontSize={11} fontWeight={600} color="#f57f17" textTransform="uppercase">Next Step</Typography>
-                        <Typography fontSize={13}>{track.next_step}</Typography>
-                        {track.next_date && <Typography fontSize={11} color="text.secondary">Due: {fmtDate(track.next_date)}</Typography>}
-                      </Box>
-                    )}
-                    {track.rejection_reason && (
-                      <Box p={1.5} bgcolor="#ffebee" borderRadius={2} sx={{ border: "1px solid #ffcdd2" }}>
-                        <Typography fontSize={11} fontWeight={600} color="#c62828" textTransform="uppercase">Rejection Reason</Typography>
-                        <Typography fontSize={13}>{track.rejection_reason}</Typography>
-                      </Box>
-                    )}
-                  </Box>
-                )}
-
-                {tIdx < tracking.length - 1 && <Divider sx={{ mt: 3 }} />}
-              </Box>
-            ))}
-          </Box>
-        )}
-      </DialogContent>
-
-      <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
-        <Button onClick={onClose}>Close</Button>
-        <Button variant="contained" onClick={onEdit}>Edit</Button>
-      </DialogActions>
-    </>
-  );
-}
-
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function Resumes() {
-  const [resumes,    setResumes]    = useState([]);
-  const [jobs,       setJobs]       = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState("");
-  const [search,     setSearch]     = useState("");
-  const [statusF,    setStatusF]    = useState("");
-  const [expF,       setExpF]       = useState("");
-  const [jobF,       setJobF]       = useState("");
-  const [clientF,    setClientF]    = useState("");
-  const [clients,    setClients]    = useState([]);
+  const [resumes,     setResumes]     = useState([]);
+  const [jobs,        setJobs]        = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState("");
+  const [search,      setSearch]      = useState("");
+  const [statusF,     setStatusF]     = useState("");
+  const [expF,        setExpF]        = useState("");
+  const [jobF,        setJobF]        = useState("");
+  const [clientF,     setClientF]     = useState("");
+  const [clients,     setClients]     = useState([]);
 
-  const [formOpen,   setFormOpen]   = useState(false);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [pdfOpen,    setPdfOpen]    = useState(false);
-  const [selected,   setSelected]   = useState(null);
-  const [formData,   setFormData]   = useState(EMPTY_FORM);
-  const [saving,     setSaving]     = useState(false);
+  const [formOpen,    setFormOpen]    = useState(false);
+  const [detailOpen,  setDetailOpen]  = useState(false);
+  const [deleteOpen,  setDeleteOpen]  = useState(false);
+  const [pdfOpen,     setPdfOpen]     = useState(false);
+  const [selected,    setSelected]    = useState(null);
+  const [formData,    setFormData]    = useState(EMPTY_FORM);
+  const [saving,      setSaving]      = useState(false);
 
-  const [addFile,    setAddFile]    = useState(null);
+  const [addFile,     setAddFile]     = useState(null);
   const formFileRef = useRef(null);
 
   const [inlineFiles, setInlineFiles] = useState([]);
   const [showParsing, setShowParsing] = useState(false);
   const inlineRef = useRef(null);
 
-  const [bulkOpen,   setBulkOpen]   = useState(false);
-  const [bulkFiles,  setBulkFiles]  = useState([]);
-  const [bulkStep,   setBulkStep]   = useState(0);
-  const [bulkSaving, setBulkSaving] = useState(false);
-  const [bulkDone,   setBulkDone]   = useState(false);
-  const [recruiters, setRecruiters] = useState([]);
+  const [bulkOpen,    setBulkOpen]    = useState(false);
+  const [bulkFiles,   setBulkFiles]   = useState([]);
+  const [bulkStep,    setBulkStep]    = useState(0);
+  const [bulkSaving,  setBulkSaving]  = useState(false);
+  const [bulkDone,    setBulkDone]    = useState(false);
+  const [recruiters,  setRecruiters]  = useState([]);
   const [allTracking, setAllTracking] = useState([]);
+
+  // ── Loaders ────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
-    try {
-      setLoading(true); setError("");
-      const res = await getAllResumes();
-      setResumes(res.data || []);
-    } catch (err) {
-      setError(err?.message || "Failed to load candidates");
-      setResumes([]);
-    } finally { setLoading(false); }
+    try { setLoading(true); setError(""); const res = await getAllResumes(); setResumes(res.data || []); }
+    catch (err) { setError(err?.message || "Failed to load candidates"); setResumes([]); }
+    finally { setLoading(false); }
   }, []);
 
   const loadJobs = useCallback(async () => {
-    try { const res = await getAllJobs(); setJobs(res.data || []); }
-    catch { setJobs([]); }
+    try { const res = await getAllJobs(); setJobs(res.data || []); } catch { setJobs([]); }
   }, []);
 
   const loadClients = useCallback(async () => {
-    try { const res = await getAllClients(); setClients(res.data || []); }
-    catch { setClients([]); }
+    try { const res = await getAllClients(); setClients(res.data || []); } catch { setClients([]); }
   }, []);
+
   const loadRecruiters = useCallback(async () => {
     try {
       const res  = await fetch(`${BASE}/user/`, { headers: getHeaders() });
@@ -804,6 +313,7 @@ export default function Resumes() {
       setRecruiters((data.data || []).filter(u => u.role === "recruiter"));
     } catch { setRecruiters([]); }
   }, []);
+
   const loadAllTracking = useCallback(async () => {
     try {
       const res  = await fetch(`${BASE}/tracking/`, { headers: getHeaders() });
@@ -812,28 +322,27 @@ export default function Resumes() {
     } catch { setAllTracking([]); }
   }, []);
 
-  const trackingMap = {};
-    allTracking.forEach(t => {
-      if (!trackingMap[t.resume_id]) {
-        trackingMap[t.resume_id] = t;
-      }
-    });
-  useEffect(() => { 
-    load(); loadJobs(); loadClients(); loadRecruiters(); loadAllTracking(); 
+  useEffect(() => {
+    load(); loadJobs(); loadClients(); loadRecruiters(); loadAllTracking();
   }, [load, loadJobs, loadClients, loadRecruiters, loadAllTracking]);
 
-  const expBand = EXP_BANDS.find(b => b.label === expF);
+  // Build a resume_id → latest tracking record map for the table column
+  const trackingMap = {};
+  allTracking.forEach(t => { if (!trackingMap[t.resume_id]) trackingMap[t.resume_id] = t; });
+
+  // ── Filtering ──────────────────────────────────────────────────────────────
+  const expBand      = EXP_BANDS.find(b => b.label === expF);
   const clientJobIds = clientF ? jobs.filter(j => j.client_id === clientF).map(j => j.job_id) : null;
 
   const filtered = resumes.filter(r => {
-    const q  = search.toLowerCase();
-    const mQ = !q || r.name?.toLowerCase().includes(q) || r.skills?.toLowerCase().includes(q) || r.resume_id?.toLowerCase().includes(q);
-    const mS = !statusF || r.status === statusF;
+    const q   = search.toLowerCase();
+    const mQ  = !q || r.name?.toLowerCase().includes(q) || r.skills?.toLowerCase().includes(q) || r.resume_id?.toLowerCase().includes(q);
+    const mS  = !statusF || r.status === statusF;
     const selectedJob = jobs.find(j => j._id === jobF);
-    const mJ = !jobF || r.linked_job_id === selectedJob?.job_id;
-    const mE = !expBand || expBand.label === "All Experience" ||
+    const mJ  = !jobF || r.linked_job_id === selectedJob?.job_id;
+    const mE  = !expBand || expBand.label === "All Experience" ||
       (expBand.min === "10" ? r.experience >= 10 : r.experience >= Number(expBand.min) && r.experience <= Number(expBand.max));
-    const mC = !clientJobIds || clientJobIds.includes(r.linked_job_id);
+    const mC  = !clientJobIds || clientJobIds.includes(r.linked_job_id);
     return mQ && mS && mJ && mE && mC;
   });
 
@@ -844,35 +353,28 @@ export default function Resumes() {
     interviewed: resumes.filter(r => r.status === "Interviewed").length,
   };
 
+  // ── Dialog helpers ─────────────────────────────────────────────────────────
   const openCreate = () => { setSelected(null); setFormData(EMPTY_FORM); setAddFile(null); setFormOpen(true); };
   const openEdit   = r  => { setSelected(r); setFormData({ ...EMPTY_FORM, ...r }); setAddFile(null); setFormOpen(true); };
   const openDetail = r  => { setSelected(r); setDetailOpen(true); };
   const openDelete = r  => { setSelected(r); setDeleteOpen(true); };
   const openPdf    = r  => { setSelected(r); setPdfOpen(true); };
 
-  // const handleChange = e => {
-  //   const { name, value } = e.target;
-  //   if (name === "linked_job_id") {
-  //     const job = jobs.find(j => j._id === value);
-  //     setFormData(p => ({ ...p, linked_job_id: value, linked_job_title: job?.title || "" }));
-  //   } else {
-  //     setFormData(p => ({ ...p, [name]: value }));
-  //   }
-  // };
   const handleChange = e => {
     const { name, value } = e.target;
     if (name === "linked_job_id") {
       const job = jobs.find(j => j._id === value);
       setFormData(p => ({
         ...p,
-        linked_job_id:    job?.job_id || "",   
+        linked_job_id:       job?.job_id || "",
         linked_job_mongo_id: value,
-        linked_job_title: job?.title  || "",
+        linked_job_title:    job?.title  || "",
       }));
     } else {
       setFormData(p => ({ ...p, [name]: value }));
     }
   };
+
   const handleSave = async (e) => {
     e.preventDefault(); setSaving(true);
     try {
@@ -899,6 +401,7 @@ export default function Resumes() {
     catch (err) { setError(err?.message || "Delete failed"); }
   };
 
+  // ── Inline PDF upload & parsing ────────────────────────────────────────────
   const handleFileSelect = async (e) => {
     const files = Array.from(e.target.files || []).filter(f => f.type === "application/pdf" || f.name.endsWith(".pdf"));
     if (!files.length) return;
@@ -962,11 +465,7 @@ export default function Resumes() {
   const currentEntry = bulkFiles[bulkStep];
 
   if (loading)
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-        <CircularProgress size={48} />
-      </Box>
-    );
+    return <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh"><CircularProgress size={48} /></Box>;
 
   return (
     <Box display="flex" flexDirection="column" gap={3}>
@@ -1090,7 +589,6 @@ export default function Resumes() {
                       {r.linked_job_title ? (
                         <Box>
                           {(() => {
-                            // ← match by job_id (human-readable) not _id
                             const linkedJob = jobs.find(j => j.job_id === r.linked_job_id);
                             return linkedJob?.client_name ? (
                               <Typography fontSize={10} color="text.secondary" fontWeight={600}
@@ -1112,15 +610,10 @@ export default function Resumes() {
                         if (!track) return <Typography fontSize={12} color="text.disabled">—</Typography>;
                         return (
                           <Box>
-                            <Chip
-                              label={track.current_stage}
-                              size="small"
+                            <Chip label={track.current_stage} size="small"
                               color={STAGE_COLOR[track.current_stage] || "default"}
-                              sx={{ fontWeight: 700, fontSize: 10, mb: 0.3 }}
-                            />
-                            <Typography fontSize={10} color="text.secondary">
-                              {track.pipeline_status}
-                            </Typography>
+                              sx={{ fontWeight: 700, fontSize: 10, mb: 0.3 }} />
+                            <Typography fontSize={10} color="text.secondary">{track.pipeline_status}</Typography>
                           </Box>
                         );
                       })()}
@@ -1159,6 +652,25 @@ export default function Resumes() {
 
       {/* PDF Viewer */}
       <PdfViewerDialog open={pdfOpen} onClose={() => setPdfOpen(false)} candidate={selected} />
+
+      {/* ── Candidate Detail Dialog — uses shared component ─────────────────── */}
+      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} maxWidth="md" fullWidth
+        PaperProps={{ sx: { minHeight: "70vh" } }}>
+        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0" }}>
+          Candidate Details
+        </DialogTitle>
+        {selected && (
+          <CandidateDetailContent
+            candidate={selected}
+            jobs={jobs}
+            recruiters={recruiters}
+            onClose={() => setDetailOpen(false)}
+            onEdit={() => { setDetailOpen(false); openEdit(selected); }}
+            onViewPdf={() => { setDetailOpen(false); openPdf(selected); }}
+            // No placementData here — Resumes page doesn't need the Billing tab
+          />
+        )}
+      </Dialog>
 
       {/* Bulk Review Dialog */}
       <Dialog open={bulkOpen} onClose={closeBulk} maxWidth="md" fullWidth PaperProps={{ sx: { minHeight: "80vh" } }}>
@@ -1226,7 +738,7 @@ export default function Resumes() {
                           {STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
                         </TextField>
                       </Grid>
-                      <Grid item xs={12}><TextField sx={{ width: "100%", minWidth: 800 }} multiline rows={5} size="small" label="Skills (comma-separated)" name="skills" value={currentEntry.formData.skills} onChange={handleBulkChange} placeholder="e.g. React, Node.js, MongoDB" /></Grid>
+                      <Grid item xs={12}><TextField sx={{ width: "100%", minWidth: 400 }} multiline rows={3} size="small" label="Skills (comma-separated)" name="skills" value={currentEntry.formData.skills} onChange={handleBulkChange} placeholder="e.g. React, Node.js, MongoDB" /></Grid>
                     </Grid>
                     <Divider sx={{ my: 2 }} />
                     <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Compensation &amp; Availability</Typography>
@@ -1305,7 +817,7 @@ export default function Resumes() {
                 </TextField>
               </Grid>
               <Grid item xs={12}>
-                <TextField sx={{ width: "100%", minWidth: 820 }} multiline rows={2} label="Skills (comma-separated)" name="skills" value={formData.skills} onChange={handleChange} placeholder="e.g. React, Node.js, MongoDB" />
+                <TextField sx={{ width: "100%", minWidth: 400 }} multiline rows={2} label="Skills (comma-separated)" name="skills" value={formData.skills} onChange={handleChange} placeholder="e.g. React, Node.js, MongoDB" />
               </Grid>
             </Grid>
             <Divider sx={{ my: 2 }} />
@@ -1324,24 +836,10 @@ export default function Resumes() {
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={6}>
-                {/* <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Linked Job" name="linked_job_id" value={formData.linked_job_id} onChange={handleChange}>
-                  <MenuItem value="">No Job Linked</MenuItem>
-                    {jobs.map(j => (
-                      <MenuItem key={j._id} value={j._id}>
-                        {j.job_id}  - {j.title} 
-                      </MenuItem>
-                    ))}
-                </TextField> */}
                 <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Linked Job"
-                  name="linked_job_id"
-                  value={formData.linked_job_mongo_id || ""}   
-                  onChange={handleChange}>
+                  name="linked_job_id" value={formData.linked_job_mongo_id || ""} onChange={handleChange}>
                   <MenuItem value="">No Job Linked</MenuItem>
-                  {jobs.map(j => (
-                    <MenuItem key={j._id} value={j._id}>
-                      {j.job_id} - {j.title}
-                    </MenuItem>
-                  ))}
+                  {jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.job_id} - {j.title}</MenuItem>)}
                 </TextField>
               </Grid>
             </Grid>
@@ -1385,24 +883,6 @@ export default function Resumes() {
             </Button>
           </DialogActions>
         </form>
-      </Dialog>
-
-      {/* Candidate Detail Dialog */}
-      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} maxWidth="md" fullWidth
-        PaperProps={{ sx: { minHeight: "70vh" } }}>
-        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0" }}>
-          Candidate Details
-        </DialogTitle>
-        {selected && (
-          <CandidateDetailContent
-            candidate={selected}
-            jobs={jobs}
-            recruiters={recruiters}
-            onClose={() => setDetailOpen(false)}
-            onEdit={() => { setDetailOpen(false); openEdit(selected); }}
-            onViewPdf={() => { setDetailOpen(false); openPdf(selected); }}
-          />
-        )}
       </Dialog>
 
       {/* Delete Confirm */}

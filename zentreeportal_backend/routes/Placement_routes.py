@@ -1,6 +1,4 @@
-"""
-Placement routes: /api/placements/...
-"""
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from bson import ObjectId
@@ -11,6 +9,7 @@ from models.Placement_model import (
     placement_schema, serialize_placement,
     PAYMENT_STATUSES, CANDIDATE_STATUSES,
 )
+from models.Tracking_model import serialize_tracking
 
 placement_bp = Blueprint("placements", __name__)
 
@@ -36,6 +35,56 @@ def _next_invoice_number() -> str:
     return f"INV-{datetime.utcnow().year}-{str(count + 1).zfill(3)}"
 
 
+# ── GET /api/placements/pending-from-tracking ─────────────────────────────────
+@placement_bp.route("/pending-from-tracking", methods=["GET"])
+@jwt_required()
+def pending_from_tracking():
+    """
+    Finds every candidate_tracking doc whose current_stage == 'Joined'
+    and for which no placement document shares the same resume_id + job_id pair.
+
+    Example response item:
+    {
+      "_id": "...",
+      "resume_id": "RES001",
+      "candidate_name": "John Doe",
+      "job_id": "JOB-001",
+      "client_name": "Acme Corp",
+      "job_title": "Backend Engineer",
+      "recruiter": "Alice",
+      "joining_date": "2024-06-01T00:00:00",
+      ...
+    }
+    """
+    # 1. Grab every "Joined" tracking record
+    joined_docs = list(
+        mongo.db.candidate_tracking.find({"current_stage": "Joined"})
+    )
+
+    if not joined_docs:
+        return jsonify(success=True, data=[]), 200
+
+    # 2. Build a set of (resume_id, job_id) pairs already in placements
+    existing_placements = mongo.db.placements.find(
+        {}, {"resume_id": 1, "job_id": 1, "_id": 0}
+    )
+    placed_pairs = {
+        (p.get("resume_id", "").strip().lower(), p.get("job_id", "").strip().lower())
+        for p in existing_placements
+    }
+
+    # 3. Filter out already-placed candidates
+    pending = [
+        t for t in joined_docs
+        if (
+            t.get("resume_id", "").strip().lower(),
+            t.get("job_id",    "").strip().lower(),
+        ) not in placed_pairs
+    ]
+
+    return jsonify(success=True, data=[serialize_tracking(t) for t in pending]), 200
+
+
 # ── GET /api/placements/ ──────────────────────────────────────────────────────
 @placement_bp.route("/", methods=["GET"])
 @jwt_required()
@@ -43,6 +92,7 @@ def get_all():
     client_name    = request.args.get("client_name", "")
     recruiter      = request.args.get("recruiter", "")
     payment_status = request.args.get("payment_status", "")
+    job_id         = request.args.get("job_id", "").strip()   # ← NEW
     start_date     = request.args.get("start_date", "")
     end_date       = request.args.get("end_date", "")
     q              = request.args.get("q", "").strip()
@@ -50,14 +100,16 @@ def get_all():
     per_page       = int(request.args.get("per_page", 20))
 
     query = {}
-    if client_name:    query["client_name"]    = {"$regex": client_name, "$options": "i"}
-    if recruiter:      query["recruiter"]       = recruiter
-    if payment_status: query["payment_status"]  = payment_status
+    if client_name:    query["client_name"]   = {"$regex": client_name, "$options": "i"}
+    if recruiter:      query["recruiter"]      = recruiter
+    if payment_status: query["payment_status"] = payment_status
+    if job_id:         query["job_id"]         = {"$regex": job_id, "$options": "i"}  # ← NEW
     if q:
         query["$or"] = [
             {"candidate_name": {"$regex": q, "$options": "i"}},
             {"job_title":      {"$regex": q, "$options": "i"}},
             {"client_name":    {"$regex": q, "$options": "i"}},
+            {"placement_id":   {"$regex": q, "$options": "i"}},
         ]
     if start_date or end_date:
         query["joining_date"] = {}
@@ -71,8 +123,11 @@ def get_all():
         .skip((page - 1) * per_page)
         .limit(per_page)
     )
-    return jsonify(success=True, data=[serialize_placement(d) for d in docs],
-                   total=total, page=page, per_page=per_page), 200
+    return jsonify(
+        success=True,
+        data=[serialize_placement(d) for d in docs],
+        total=total, page=page, per_page=per_page
+    ), 200
 
 
 # ── GET /api/placements/stats ─────────────────────────────────────────────────
@@ -96,7 +151,7 @@ def get_stats():
         {"$sort": {"revenue": -1}},
     ]))
     return jsonify(success=True, data={
-        "overall":     overall[0] if overall else {},
+        "overall":      overall[0] if overall else {},
         "by_recruiter": by_recruiter,
         "by_client":    by_client,
     }), 200
@@ -142,7 +197,6 @@ def create():
             notes                 = data.get("notes", ""),
             time_to_fill          = int(data.get("time_to_fill", 0)),
         )
-        # Add placement ID
         doc["placement_id"] = _next_placement_id()
         result = mongo.db.placements.insert_one(doc)
         doc["_id"] = result.inserted_id
@@ -176,7 +230,6 @@ def update(pid):
     if "candidate_status" in upd and upd["candidate_status"] not in CANDIDATE_STATUSES:
         return jsonify(success=False, message="Invalid candidate_status"), 400
 
-    # Recalculate guarantee_end_date if joining_date or guarantee_period changes
     joining = doc.get("joining_date", datetime.utcnow())
     if "joining_date" in upd:
         joining = datetime.fromisoformat(upd["joining_date"]) if isinstance(upd["joining_date"], str) else upd["joining_date"]
