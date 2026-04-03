@@ -211,6 +211,7 @@ def get_all():
             {"name":         {"$regex": q, "$options": "i"}},
             {"skills":       {"$regex": q, "$options": "i"}},
             {"current_role": {"$regex": q, "$options": "i"}},
+            {"resume_id":    {"$regex": q, "$options": "i"}},
         ]
     if status:  query["status"]        = status
     if source:  query["source"]        = source
