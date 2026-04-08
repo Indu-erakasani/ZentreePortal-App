@@ -50,7 +50,7 @@ def get_all():
         skill_name = doc.get("skill_name", "")
 
         # Count resumes whose skills field contains this skill name (case-insensitive)
-        candidate_count = mongo.db.resume_bank.count_documents({
+        candidate_count = mongo.db.candidate_processing.count_documents({
             "skills": {"$regex": skill_name, "$options": "i"}
         })
 

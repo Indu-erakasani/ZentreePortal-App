@@ -42,7 +42,7 @@ def get_dashboard():
     active_clients    = mongo.db.clients.count_documents({"relationship_status": "Active"})
     open_jobs         = mongo.db.jobs.count_documents({"status": "Open"})
     total_jobs        = mongo.db.jobs.count_documents({})
-    total_candidates  = mongo.db.resume_bank.count_documents({})
+    total_candidates  = mongo.db.candidate_processing.count_documents({})
     placements_mtd    = mongo.db.placements.count_documents(
         {"joining_date": {"$gte": month_start}}
     )
@@ -65,8 +65,8 @@ def get_dashboard():
     ]))
     avg_days = round(ttf[0]["avg"], 1) if ttf else 0
 
-    # ── Candidate pipeline (resume_bank status counts) ────────────────────────
-    pipeline_raw = list(mongo.db.resume_bank.aggregate([
+    # ── Candidate pipeline (candidate_processing status counts) ────────────────────────
+    pipeline_raw = list(mongo.db.candidate_processing.aggregate([
         {"$group": {"_id": "$status", "count": {"$sum": 1}}},
     ]))
     pipeline = {r["_id"]: r["count"] for r in pipeline_raw if r["_id"]}
@@ -189,7 +189,7 @@ def get_dashboard():
         ).sort("joining_date", -1).limit(3)
     )
     recent_candidates = list(
-        mongo.db.resume_bank.find(
+        mongo.db.candidate_processing.find(
             {}, {"name":1, "current_role":1, "source":1, "created_at":1}
         ).sort("created_at", -1).limit(3)
     )
@@ -284,7 +284,7 @@ def get_recruiter_dashboard():
 
     # My recent candidates
     my_candidates = list(
-        mongo.db.resume_bank.find(
+        mongo.db.candidate_processing.find(
             {"linked_job_id": {"$in": [str(j["_id"]) for j in my_jobs]}},
             {"name":1, "status":1, "linked_job_title":1, "created_at":1}
         ).sort("created_at", -1).limit(8)
