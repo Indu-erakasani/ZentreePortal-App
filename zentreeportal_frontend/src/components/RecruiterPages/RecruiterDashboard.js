@@ -143,7 +143,7 @@ export default function RecruiterDashboard() {
   // ── Destructure real data with safe fallbacks ──────────────────────────────
   const kpis            = dash?.kpis             || {};
   const stageCountsRaw  = dash?.stage_counts     || [];   // [{stage, count}] — tracking
-  const pipelineRaw     = dash?.pipeline         || {};   // {status:count} — resume_bank
+  const pipelineRaw     = dash?.pipeline         || {};   // {status:count} — candidate_processing
   const highPriorityJobs= dash?.high_priority_jobs || [];
   const recruiterPerf   = dash?.recruiter_perf   || [];
   const clientRevenue   = dash?.client_revenue   || [];
@@ -155,7 +155,7 @@ export default function RecruiterDashboard() {
   const myCandidates = myData?.my_candidates || [];
   const myJobs       = myData?.my_jobs     || [];
 
-  // Build pipeline display — prefer tracking stage_counts, fallback to resume_bank pipeline
+  // Build pipeline display — prefer tracking stage_counts, fallback to candidate_processing pipeline
   const pipelineDisplay = stageCountsRaw.length > 0
     ? stageCountsRaw
     : Object.entries(pipelineRaw).map(([stage, count]) => ({ stage, count }));

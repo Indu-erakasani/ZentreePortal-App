@@ -37,7 +37,7 @@ def overview():
 
     total_jobs       = mongo.db.jobs.count_documents({})
     open_jobs        = mongo.db.jobs.count_documents({"status": "Open"})
-    total_candidates = mongo.db.resume_bank.count_documents({})
+    total_candidates = mongo.db.candidate_processing.count_documents({})
     total_placements = mongo.db.placements.count_documents(pmatch)
 
     fill_rate = round(total_placements / open_jobs * 100, 1) if open_jobs else 0
@@ -58,7 +58,7 @@ def overview():
         {"$group": {"_id": "$status", "count": {"$sum": 1}}},
     ]) if r["_id"]}
 
-    candidate_counts = {r["_id"]: r["count"] for r in mongo.db.resume_bank.aggregate([
+    candidate_counts = {r["_id"]: r["count"] for r in mongo.db.candidate_processing.aggregate([
         {"$group": {"_id": "$status", "count": {"$sum": 1}}},
     ]) if r["_id"]}
 
@@ -79,11 +79,11 @@ def overview():
 @reports_bp.route("/funnel", methods=["GET"])
 @jwt_required()
 def funnel():
-    status_map = {r["_id"]: r["count"] for r in mongo.db.resume_bank.aggregate([
+    status_map = {r["_id"]: r["count"] for r in mongo.db.candidate_processing.aggregate([
         {"$group": {"_id": "$status", "count": {"$sum": 1}}},
     ]) if r["_id"]}
 
-    total = mongo.db.resume_bank.count_documents({})
+    total = mongo.db.candidate_processing.count_documents({})
 
     def pct(num, denom):
         return f"{round(num / denom * 100, 1)}%" if denom else "0%"
@@ -291,7 +291,7 @@ def time_to_fill():
 @reports_bp.route("/source-effectiveness", methods=["GET"])
 @jwt_required()
 def source_effectiveness():
-    result = list(mongo.db.resume_bank.aggregate([
+    result = list(mongo.db.candidate_processing.aggregate([
         {"$group": {
             "_id":         "$source",
             "candidates":  {"$sum": 1},

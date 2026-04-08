@@ -1,7 +1,4 @@
-"""
-Resume Bank schema helpers for pymongo.
-All documents stored in the 'resume_bank' collection.
-"""
+
 from datetime import datetime
 
 SCREENING_STATUSES = ["New", "In Review", "Shortlisted", "Interviewed", "Offered", "Hired", "Rejected", "On Hold"]

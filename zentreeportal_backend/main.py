@@ -87,6 +87,7 @@ from routes.Bench_routes import bench_bp
 from routes.Employee_routes import employee_bp
 from routes.onboarding_routes import onboarding_bp
 from routes.export_routes     import export_bp
+from routes.Score_routes import score_bp
 app = Flask(__name__)
 app.config.from_object(Config)
 
@@ -125,8 +126,10 @@ app.register_blueprint(skills_bp,    url_prefix="/api/skills")
 app.register_blueprint(reports_bp,   url_prefix="/api/reports")
 app.register_blueprint(bench_bp,     url_prefix="/api/bench")
 app.register_blueprint(employee_bp,  url_prefix="/api/employees")
-app.register_blueprint(onboarding_bp, url_prefix="/api/onboarding")
-app.register_blueprint(export_bp,     url_prefix="/api/export")
+app.register_blueprint(onboarding_bp,url_prefix="/api/onboarding")
+app.register_blueprint(export_bp,    url_prefix="/api/export")
+app.register_blueprint(score_bp,     url_prefix="/api/score")
+
  
 
 # ── Health check ──────────────────────────────────────────────────────────────
