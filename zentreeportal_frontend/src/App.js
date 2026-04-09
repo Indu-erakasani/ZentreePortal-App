@@ -32,6 +32,7 @@ import Skills     from "./components/RecruiterPages/Skills";
 import Reports    from "./components/RecruiterPages/Report";
 import BenchPeople from "./components/RecruiterPages/Benchpeople";
 import Employees   from "./components/RecruiterPages/EmployeePages/EmployeesPage";
+import ExamPage from "./components/RecruiterPages/ExamPage";
 
 const App = () => (
   <ThemeProvider theme={theme}>
@@ -43,7 +44,7 @@ const App = () => (
         <Route path="/login"        element={<LoginPage />} />
         <Route path="/register"     element={<RegisterPage />} />
         <Route path="/unauthorized" element={<UnauthorizedPage />} />
-
+        <Route path="/exam/:token" element={<ExamPage />} />
         {/* ── Protected shell — renders sidebar Layout for all roles ──── */}
         <Route
           element={
