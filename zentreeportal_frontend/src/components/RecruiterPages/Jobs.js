@@ -3505,6 +3505,16 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -3533,6 +3543,21 @@ const deleteJob    = (id)     => fetch(`${BASE}/jobs/${id}`, { method: "DELETE",
 const getAllClients = ()       => fetch(`${BASE}/clients/`,   { headers: getHeaders() }).then(handle);
 const getAllJDs     = (p = {}) => fetch(`${BASE}/jobs/jd/${new URLSearchParams(p).toString() ? "?" + new URLSearchParams(p).toString() : ""}`, { headers: getHeaders() }).then(handle);
 const getCurrentUserName = () => { try { const u = JSON.parse(localStorage.getItem("user") || "{}"); return `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || "Unknown"; } catch { return "Unknown"; } };
+const generateJobQuestions = (jobId, payload) =>
+    fetch(`${BASE}/questions/jobs/${jobId}/generate`, {
+      method: "POST", headers: getHeaders(), body: JSON.stringify(payload),
+    }).then(handle);
+  
+  const clearJobQuestions = (jobId) =>
+    fetch(`${BASE}/questions/jobs/${jobId}/clear`, { method: "DELETE", headers: getHeaders() }).then(handle);
+  
+  const deleteOneQuestion = (jobId, qType, index) =>
+    fetch(`${BASE}/questions/jobs/${jobId}/${qType}/${index}`, { method: "DELETE", headers: getHeaders() }).then(handle);
+
+  const getJobQuestions = (jobId) =>
+    fetch(`${BASE}/questions/jobs/${jobId}`, { headers: getHeaders() }).then(handle);
+
+
 
 const PRIORITIES = ["Low", "Medium", "High", "Critical"];
 const STATUSES   = ["Open", "On Hold", "Closed", "Filled"];
@@ -3551,6 +3576,19 @@ const EMPTY_FORM = {
     screening_time_minutes: 0, screening_test_pass_percentage: "",
     department: "", preferred_location: "", is_active: true, jd_edit_status: "", remarks: "",
 };
+const getExpLevel = (min, max) => {
+    const avg = (Number(min || 0) + Number(max || 5)) / 2;
+    if (avg <= 2)  return { label: "Junior",           color: "#2e7d32", bg: "#e8f5e9", hint: "Fundamentals & basics" };
+    if (avg <= 5)  return { label: "Mid-level",         color: "#1565c0", bg: "#e3f2fd", hint: "Practical depth & problem-solving" };
+    if (avg <= 9)  return { label: "Senior",            color: "#e65100", bg: "#fff8e1", hint: "Architecture & trade-offs" };
+    return           { label: "Lead / Principal",       color: "#880e4f", bg: "#fce4ec", hint: "System design at scale & strategy" };
+  };
+  
+
+
+
+
+
 
 const formatSalary = (val) => { if (!val) return "—"; if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`; return `₹${val.toLocaleString()}`; };
 const nameInitials = (name = "") => name.split(" ").filter(Boolean).map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
@@ -3747,6 +3785,26 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
     const [selected, setSelected]     = useState(null);
     const [formData, setFormData]     = useState(EMPTY_FORM);
     const [saving, setSaving]         = useState(false);
+    // ── Question generation state ─────────────────────────────────────────────
+    const [genOpen,    setGenOpen]    = useState(false);
+    const [genJob,     setGenJob]     = useState(null);
+    const [genLoading, setGenLoading] = useState(false);
+    const [genError,   setGenError]   = useState("");
+    const [genResult,  setGenResult]  = useState(null);
+    const [genTab,     setGenTab]     = useState(0);
+    const [genConfig, setGenConfig] = useState({
+        mcq_count: 10, subjective_count: 5, coding_count: 3, replace_existing: false,
+        easy_pct: 20, medium_pct: 55, hard_pct: 25,  
+        use_custom_difficulty: false,
+      });
+    // ── View questions state ──────────────────────────────────────────────────
+    const [viewQOpen,    setViewQOpen]    = useState(false);
+    const [viewQJob,     setViewQJob]     = useState(null);
+    const [viewQData,    setViewQData]    = useState(null);
+    const [viewQLoading, setViewQLoading] = useState(false);
+    const [viewQError,   setViewQError]   = useState("");
+    const [viewQTab,     setViewQTab]     = useState(0);
+
 
     const load = useCallback(async () => {
         try { setLoading(true); setError(""); const res = await getAllJobs(); setJobs(res.data || []); }
@@ -3769,7 +3827,23 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
 
     const openCreate = () => { setSelected(null); setFormData(EMPTY_FORM); setFormOpen(true); };
     const openEdit   = j => { setSelected(j); setFormData({ ...EMPTY_FORM, ...j, skills: Array.isArray(j.skills) ? j.skills.join(", ") : (j.skills||""), secondary_skills: Array.isArray(j.secondary_skills) ? j.secondary_skills.join(", ") : (j.secondary_skills||""), deadline: j.deadline ? j.deadline.split("T")[0] : "" }); setFormOpen(true); };
-    const openDetail = j => { setSelected(j); setDetailOpen(true); };
+    // const openDetail = j => { setSelected(j); setDetailOpen(true); };
+    const openDetail = async (j) => {
+        setSelected(j);
+        setDetailOpen(true);
+        // Load questions if any exist
+        if ((j.mcq_questions_count || 0) + (j.subjective_questions_count || 0) + (j.coding_questions_count || 0) > 0) {
+          setViewQLoading(true);
+          setViewQData(null);
+          try {
+            const res = await getJobQuestions(j._id);
+            setViewQData(res.data);
+          } catch { setViewQData(null); }
+          finally { setViewQLoading(false); }
+        } else {
+          setViewQData(null);
+        }
+      };
     const openDelete = j => { setSelected(j); setDeleteOpen(true); };
 
     const handleChange = e => {
@@ -3788,7 +3862,78 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
         finally { setSaving(false); }
     };
     const handleDelete = async () => { try { await deleteJob(selected._id); setDeleteOpen(false); load(); } catch (err) { setError(err?.message || "Delete failed"); } };
+    
+    const openGenerate = (job) => {
+        setGenJob(job);
+        setGenResult(null);
+        setGenError("");
+        setGenTab(0);
+      
+        // Seed difficulty percentages from the experience level defaults
+        const expInfo = getExpLevel(job?.experience_min, job?.experience_max);
+        const diffMap = {
+          "Junior":           { easy_pct: 60, medium_pct: 30, hard_pct: 10 },
+          "Mid-level":        { easy_pct: 20, medium_pct: 55, hard_pct: 25 },
+          "Senior":           { easy_pct: 10, medium_pct: 40, hard_pct: 50 },
+          "Lead / Principal": { easy_pct: 5,  medium_pct: 30, hard_pct: 65 },
+        };
+        const diff = diffMap[expInfo.label] || { easy_pct: 20, medium_pct: 55, hard_pct: 25 };
+      
+        setGenConfig({
+          mcq_count: 10, subjective_count: 5, coding_count: 3,
+          replace_existing: false,
+          use_custom_difficulty: false,
+          ...diff,
+        });
+        setGenOpen(true);
+      };
 
+      const handleGenerate = async () => {
+        // Validate difficulty sums to 100 when custom mode is on
+        if (genConfig.use_custom_difficulty) {
+          const total = genConfig.easy_pct + genConfig.medium_pct + genConfig.hard_pct;
+          if (total !== 100) {
+            setGenError(`Difficulty percentages must sum to 100% (currently ${total}%)`);
+            setGenLoading(false);
+            return;
+          }
+        }
+      
+        setGenLoading(true); setGenError(""); setGenResult(null);
+        try {
+          const payload = {
+            ...genConfig,
+            difficulty_distribution: `${genConfig.easy_pct}% Easy, ${genConfig.medium_pct}% Medium, ${genConfig.hard_pct}% Hard`,
+          };
+          const res = await generateJobQuestions(genJob._id, payload);
+        setGenResult(res.data);
+        setGenTab(0);
+        load(); // refresh job list so screening counts update
+    } catch (err) {
+        setGenError(err?.message || "Generation failed — please retry");
+    } finally {
+        setGenLoading(false);
+    }
+    };
+
+    const handleRegenerate = () => { setGenResult(null); setGenError(""); };
+
+    const openViewQuestions = async (job) => {
+        setViewQJob(job);
+        setViewQData(null);
+        setViewQError("");
+        setViewQTab(0);
+        setViewQOpen(true);
+        setViewQLoading(true);
+        try {
+          const res = await getJobQuestions(job._id);
+          setViewQData(res.data);
+        } catch (err) {
+          setViewQError(err?.message || "Failed to load questions");
+        } finally {
+          setViewQLoading(false);
+        }
+      };
     if (loading) return <Box display="flex" justifyContent="center" py={8}><CircularProgress size={48} /></Box>;
 
     const filteredStats = { open: filtered.filter(j=>j.status==="Open").length, critical: filtered.filter(j=>j.priority==="Critical").length, apps: filtered.reduce((s,j)=>s+(j.applications||0),0) };
@@ -3857,7 +4002,30 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
                                         <TableCell>{(j.mcq_questions_count>0||j.subjective_questions_count>0||j.coding_questions_count>0)?(<Box display="flex" flexDirection="column" gap={0.3}>{j.mcq_questions_count>0&&<Box display="flex" alignItems="center" gap={0.5}><Quiz sx={{fontSize:12,color:"#7b1fa2"}}/><Typography fontSize={11}>{j.mcq_questions_count} MCQ</Typography></Box>}{j.subjective_questions_count>0&&<Box display="flex" alignItems="center" gap={0.5}><QuestionAnswer sx={{fontSize:12,color:"#0277bd"}}/><Typography fontSize={11}>{j.subjective_questions_count} Subj.</Typography></Box>}{j.coding_questions_count>0&&<Box display="flex" alignItems="center" gap={0.5}><Code sx={{fontSize:12,color:"#2e7d32"}}/><Typography fontSize={11}>{j.coding_questions_count} Code</Typography></Box>}</Box>):<Typography fontSize={11} color="text.disabled">—</Typography>}</TableCell>
                                         <TableCell><Chip label={j.priority} color={PRIORITY_COLOR[j.priority]||"default"} size="small" sx={{ fontWeight:700,fontSize:11 }}/></TableCell>
                                         <TableCell><Chip label={j.status}   color={STATUS_COLOR[j.status]||"default"}     size="small" sx={{ fontWeight:700,fontSize:11 }}/></TableCell>
-                                        <TableCell><Box display="flex" gap={0.5}><Tooltip title="View Details"><IconButton size="small" onClick={()=>openDetail(j)}><Visibility fontSize="small"/></IconButton></Tooltip><Tooltip title="View Candidates for this Job"><IconButton size="small" sx={{ color: "#2e7d32" }} onClick={()=>navigate(`/resumes?job=${j._id}&job_title=${encodeURIComponent(j.title || '')}`)}><People fontSize="small"/></IconButton></Tooltip><Tooltip title="Edit"><IconButton size="small" onClick={()=>openEdit(j)}><Edit fontSize="small"/></IconButton></Tooltip><Tooltip title="Delete"><IconButton size="small" color="error" onClick={()=>openDelete(j)}><Delete fontSize="small"/></IconButton></Tooltip></Box></TableCell>
+                                        <TableCell><Box display="flex" gap={0.5}>
+                                        <Tooltip title="View Details">
+                                            <IconButton size="small" onClick={() => openDetail(j)}><Visibility fontSize="small" /></IconButton>
+                                            </Tooltip>
+                                            {/* ── Generate Questions button ── */}
+                                            <Tooltip title="Generate Interview Questions with AI">
+                                            <IconButton size="small" sx={{ color: "#7b1fa2" }} onClick={() => openGenerate(j)}>
+                                                <Quiz fontSize="small" />
+                                            </IconButton>
+                                            </Tooltip>
+                                            <Tooltip title="View Candidates for this Job">
+                                            <IconButton size="small" sx={{ color: "#2e7d32" }} onClick={() => navigate(`/resumes?job=${j._id}&job_title=${encodeURIComponent(j.title || '')}`)}>
+                                                <People fontSize="small" />
+                                            </IconButton>
+                                            </Tooltip>
+                                            <Tooltip title="Edit"><IconButton size="small" onClick={() => openEdit(j)}><Edit fontSize="small" /></IconButton></Tooltip>
+                                            <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => openDelete(j)}><Delete fontSize="small" /></IconButton></Tooltip>
+                                            {/* <Tooltip title="View Details"><IconButton size="small" onClick={()=>openDetail(j)}><Visibility fontSize="small"/></IconButton>
+                                            </Tooltip><Tooltip title="View Candidates for this Job"><IconButton size="small" sx={{ color: "#2e7d32" }} onClick={()=>navigate(`/resumes?job=${j._id}&job_title=${encodeURIComponent(j.title || '')}`)}><People fontSize="small"/></IconButton>
+                                            </Tooltip><Tooltip title="Edit"><IconButton size="small" onClick={()=>openEdit(j)}><Edit fontSize="small"/></IconButton>
+                                            </Tooltip><Tooltip title="Delete"><IconButton size="small" color="error" onClick={()=>openDelete(j)}><Delete fontSize="small"/></IconButton>
+                                            </Tooltip> */}
+                                        </Box>
+                                        </TableCell>
                                     </TableRow>
                                 );
                             })}
@@ -3883,14 +4051,305 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
                         <Grid item xs={12} sm={4}><SectionLabel>Screening</SectionLabel><DetailRow label="MCQ Count" value={selected.mcq_questions_count||0}/><DetailRow label="Subjective" value={selected.subjective_questions_count||0}/><DetailRow label="Coding" value={selected.coding_questions_count||0}/><DetailRow label="Time" value={selected.screening_time_minutes?`${selected.screening_time_minutes} mins`:"—"}/></Grid>
                     </Grid>
                     {selected.skills?.length>0&&<Box mt={2.5}><SectionLabel>Required Skills</SectionLabel><Box display="flex" flexWrap="wrap" gap={0.8}>{selected.skills.map((s,i)=><Chip key={i} label={s.trim()} size="small" variant="outlined" sx={{fontSize:11,borderColor:"#0277bd",color:"#0277bd"}}/>)}</Box></Box>}
-                    {selected.description&&<Box mt={2.5} p={2} bgcolor="#f5f7fa" borderRadius={2} border="1px solid #e0e0e0"><SectionLabel>Job Description</SectionLabel><Typography fontSize={13} lineHeight={1.8} sx={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{selected.description}</Typography></Box>}
-                </DialogContent>}
-                <DialogActions sx={{ px:3,py:2.5,borderTop:"1px solid #e0e0e0",justifyContent:"flex-start",gap:1.5 }}>
+                    {/* {selected.description&&<Box mt={2.5} p={2} bgcolor="#f5f7fa" borderRadius={2} border="1px solid #e0e0e0"><SectionLabel>Job Description</SectionLabel><Typography fontSize={13} lineHeight={1.8} sx={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{selected.description}</Typography></Box>}
+                </DialogContent>} */}
+                {selected.description && (
+            <Box mt={2.5} p={2} bgcolor="#f5f7fa" borderRadius={2} border="1px solid #e0e0e0">
+              <SectionLabel>Job Description</SectionLabel>
+              <Typography fontSize={13} lineHeight={1.8} sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {selected.description}
+              </Typography>
+            </Box>
+          )}
+
+          {/* ── Questions section ─────────────────────────────────────────── */}
+          {((selected?.mcq_questions_count || 0) + (selected?.subjective_questions_count || 0) + (selected?.coding_questions_count || 0)) > 0 && (
+            <Box mt={3}>
+              <Divider sx={{ mb: 2.5 }} />
+
+              {/* Header row */}
+              <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+                <Box display="flex" alignItems="center" gap={1.5}>
+                  <Avatar sx={{ width: 32, height: 32, bgcolor: "#e3f2fd" }}>
+                    <QuestionAnswer sx={{ fontSize: 17, color: "#0277bd" }} />
+                  </Avatar>
+                  <Box>
+                    <Typography fontSize={13} fontWeight={700} color="text.primary">Question Bank</Typography>
+                    <Typography fontSize={11} color="text.secondary">
+                      {(selected?.mcq_questions_count || 0) + (selected?.subjective_questions_count || 0) + (selected?.coding_questions_count || 0)} total questions with answers
+                    </Typography>
+                  </Box>
+                </Box>
+                <Button
+                  size="small" variant="outlined" startIcon={<Quiz />}
+                  onClick={() => { setDetailOpen(false); openGenerate(selected); }}
+                  sx={{ fontSize: 11, color: "#7b1fa2", borderColor: "#7b1fa2",
+                        "&:hover": { bgcolor: "#f3e5f5" } }}
+                >
+                  Generate More
+                </Button>
+              </Box>
+
+              {/* Tab selector */}
+              {(() => {
+                const mcqCount  = selected?.mcq_questions_count  || 0;
+                const subjCount = selected?.subjective_questions_count || 0;
+                const codeCount = selected?.coding_questions_count || 0;
+
+                return (
+                  <Box display="flex" gap={0.8} mb={2} flexWrap="wrap">
+                    {mcqCount > 0 && (
+                      <Chip
+                        icon={<Quiz sx={{ fontSize: 13 }} />}
+                        label={`${mcqCount} MCQ`}
+                        size="small"
+                        onClick={() => setViewQTab(0)}
+                        sx={{
+                          cursor: "pointer", fontWeight: 700, fontSize: 11,
+                          bgcolor: viewQTab === 0 ? "#7b1fa2" : "#f3e5f5",
+                          color:   viewQTab === 0 ? "#fff"    : "#7b1fa2",
+                          border:  viewQTab === 0 ? "none" : "1px solid #ce93d8",
+                        }}
+                      />
+                    )}
+                    {subjCount > 0 && (
+                      <Chip
+                        icon={<QuestionAnswer sx={{ fontSize: 13 }} />}
+                        label={`${subjCount} Subjective`}
+                        size="small"
+                        onClick={() => setViewQTab(1)}
+                        sx={{
+                          cursor: "pointer", fontWeight: 700, fontSize: 11,
+                          bgcolor: viewQTab === 1 ? "#0277bd" : "#e3f2fd",
+                          color:   viewQTab === 1 ? "#fff"    : "#0277bd",
+                          border:  viewQTab === 1 ? "none" : "1px solid #90caf9",
+                        }}
+                      />
+                    )}
+                    {codeCount > 0 && (
+                      <Chip
+                        icon={<Code sx={{ fontSize: 13 }} />}
+                        label={`${codeCount} Coding`}
+                        size="small"
+                        onClick={() => setViewQTab(2)}
+                        sx={{
+                          cursor: "pointer", fontWeight: 700, fontSize: 11,
+                          bgcolor: viewQTab === 2 ? "#2e7d32" : "#e8f5e9",
+                          color:   viewQTab === 2 ? "#fff"    : "#2e7d32",
+                          border:  viewQTab === 2 ? "none" : "1px solid #a5d6a7",
+                        }}
+                      />
+                    )}
+                  </Box>
+                );
+              })()}
+
+              {/* Questions content */}
+              {viewQLoading ? (
+                <Box display="flex" justifyContent="center" py={4}>
+                  <CircularProgress size={28} sx={{ color: "#0277bd" }} />
+                </Box>
+              ) : viewQData ? (
+                <Box display="flex" flexDirection="column" gap={1.5}>
+
+                  {/* ── MCQ ── */}
+                  {viewQTab === 0 && (viewQData.mcq_questions || []).map((q, i) => {
+                    const correctAnswers = Array.isArray(q.correct_answer)
+                      ? q.correct_answer.map(String)
+                      : [String(q.correct_answer || "")];
+                    const diffStyle = DIFFICULTY_COLOR[q.difficulty] || {};
+                    return (
+                      <Box key={i} sx={{ border: "1px solid #e0e0e0", borderRadius: 2, overflow: "hidden", bgcolor: "#fff" }}>
+                        {/* Question header */}
+                        <Box sx={{ bgcolor: "#f5f7fa", px: 2, py: 1.5, borderBottom: "1px solid #e0e0e0",
+                                   display: "flex", alignItems: "flex-start", gap: 1.5, flexWrap: "wrap" }}>
+                          <Chip label={`Q${i + 1}`} size="small"
+                            sx={{ bgcolor: "#7b1fa2", color: "#fff", fontWeight: 700, fontSize: 11, height: 20, flexShrink: 0, mt: 0.2 }} />
+                          {q.topic && (
+                            <Chip label={q.topic} size="small" variant="outlined"
+                              sx={{ fontSize: 10, height: 20, borderColor: "#7b1fa2", color: "#7b1fa2", flexShrink: 0, mt: 0.2 }} />
+                          )}
+                          {q.difficulty && (
+                            <Chip label={q.difficulty} size="small"
+                              sx={{ fontSize: 10, height: 20, fontWeight: 700, flexShrink: 0, mt: 0.2,
+                                    bgcolor: diffStyle.bg, color: diffStyle.text, border: `1px solid ${diffStyle.border}` }} />
+                          )}
+                          <Typography fontSize={13} fontWeight={600} color="text.primary" lineHeight={1.5} sx={{ flex: 1 }}>
+                            {q.question}
+                          </Typography>
+                        </Box>
+                        {/* Options */}
+                        <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 0.7 }}>
+                          {(q.options || []).map((opt, j) => {
+                            const isCorrect = correctAnswers.includes(String(opt));
+                            return (
+                              <Box key={j} display="flex" alignItems="center" gap={1.2}
+                                sx={{ px: 1.5, py: 0.8, borderRadius: 1.5,
+                                      bgcolor: isCorrect ? "#e8f5e9" : "#fafafa",
+                                      border:  isCorrect ? "1.5px solid #a5d6a7" : "1px solid #eeeeee" }}>
+                                {isCorrect
+                                  ? <CheckCircle sx={{ fontSize: 16, color: "#2e7d32", flexShrink: 0 }} />
+                                  : <RadioButtonUnchecked sx={{ fontSize: 16, color: "#bdbdbd", flexShrink: 0 }} />}
+                                <Typography fontSize={12} fontWeight={isCorrect ? 600 : 400}
+                                  color={isCorrect ? "#1b5e20" : "text.secondary"} sx={{ flex: 1 }}>
+                                  {opt}
+                                </Typography>
+                                {isCorrect && (
+                                  <Chip label="✓ Correct" size="small"
+                                    sx={{ fontSize: 10, height: 18, bgcolor: "#2e7d32", color: "#fff", fontWeight: 700 }} />
+                                )}
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      </Box>
+                    );
+                  })}
+
+                  {/* ── Subjective ── */}
+                  {viewQTab === 1 && (viewQData.subjective_questions || []).map((q, i) => {
+                    const diffStyle = DIFFICULTY_COLOR[q.difficulty] || DIFFICULTY_COLOR["Medium"];
+                    return (
+                      <Box key={i} sx={{ border: "1px solid #e0e0e0", borderRadius: 2, overflow: "hidden", bgcolor: "#fff" }}>
+                        {/* Question header */}
+                        <Box sx={{ bgcolor: "#f5f7fa", px: 2, py: 1.5, borderBottom: "1px solid #e0e0e0",
+                                   display: "flex", alignItems: "flex-start", gap: 1.5, flexWrap: "wrap" }}>
+                          <Chip label={`Q${i + 1}`} size="small"
+                            sx={{ bgcolor: "#0277bd", color: "#fff", fontWeight: 700, fontSize: 11, height: 20, flexShrink: 0, mt: 0.2 }} />
+                          {q.skill && (
+                            <Chip label={q.skill} size="small" variant="outlined"
+                              sx={{ fontSize: 10, height: 20, borderColor: "#0277bd", color: "#0277bd", fontWeight: 600, flexShrink: 0, mt: 0.2 }} />
+                          )}
+                          {q.difficulty && (
+                            <Chip label={q.difficulty} size="small"
+                              sx={{ fontSize: 10, height: 20, fontWeight: 700, flexShrink: 0, mt: 0.2,
+                                    bgcolor: diffStyle.bg, color: diffStyle.text, border: `1px solid ${diffStyle.border}` }} />
+                          )}
+                          <Typography fontSize={13} fontWeight={600} color="text.primary" lineHeight={1.5} sx={{ flex: 1 }}>
+                            {q.question}
+                          </Typography>
+                        </Box>
+                        {/* Reference answer + key points */}
+                        <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 1.5 }}>
+                          {q.reference_answer && (
+                            <Box>
+                              <Typography fontSize={11} fontWeight={700} color="#2e7d32"
+                                textTransform="uppercase" letterSpacing={0.5} mb={0.5}>
+                                Reference Answer
+                              </Typography>
+                              <Box sx={{ bgcolor: "#e8f5e9", border: "1px solid #a5d6a7", borderRadius: 1.5, px: 1.5, py: 1 }}>
+                                <Typography fontSize={12} color="#1b5e20" lineHeight={1.7} sx={{ whiteSpace: "pre-wrap" }}>
+                                  {q.reference_answer}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          )}
+                          {q.key_points && (
+                            <Box>
+                              <Typography fontSize={11} fontWeight={700} color="#e65100"
+                                textTransform="uppercase" letterSpacing={0.5} mb={0.5}>
+                                Key Points to Look For
+                              </Typography>
+                              <Box sx={{ bgcolor: "#fff8e1", border: "1px solid #ffe082", borderRadius: 1.5, px: 1.5, py: 1 }}>
+                                <Typography fontSize={12} color="#bf360c" lineHeight={1.7} sx={{ whiteSpace: "pre-wrap" }}>
+                                  {q.key_points}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          )}
+                        </Box>
+                      </Box>
+                    );
+                  })}
+
+                  {/* ── Coding ── */}
+                  {viewQTab === 2 && (viewQData.coding_questions || []).map((q, i) => {
+                    const diffStyle = DIFFICULTY_COLOR[q.difficulty] || {};
+                    return (
+                      <Box key={i} sx={{ border: "1px solid #3d3d5c", borderRadius: 2, overflow: "hidden" }}>
+                        {/* Terminal header */}
+                        <Box sx={{ bgcolor: "#2d2d3f", px: 2, py: 1, display: "flex", alignItems: "center",
+                                   gap: 1.5, borderBottom: "1px solid #3d3d5c" }}>
+                          <Box display="flex" gap={0.6}>
+                            {["#ff5f57", "#febc2e", "#28c840"].map(c => (
+                              <Box key={c} sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: c }} />
+                            ))}
+                          </Box>
+                          <Code sx={{ fontSize: 14, color: "#82aaff" }} />
+                          <Typography fontSize={12} fontWeight={700} color="#82aaff" flex={1}>
+                            Problem {i + 1}
+                            {q.topic && <span style={{ color: "#a9b1d6", fontWeight: 400 }}> · {q.topic}</span>}
+                          </Typography>
+                          {q.difficulty && (
+                            <Chip label={q.difficulty} size="small"
+                              sx={{ fontSize: 9, height: 18, fontWeight: 700,
+                                    bgcolor: diffStyle.bg || "#2d2d3f",
+                                    color:   diffStyle.text || "#cdd6f4",
+                                    border:  `1px solid ${diffStyle.border || "#3d3d5c"}` }} />
+                          )}
+                          {q.programming_language && (
+                            <Chip label={q.programming_language} size="small"
+                              sx={{ fontSize: 9, height: 18, bgcolor: "#1a1a2e", color: "#82aaff",
+                                    border: "1px solid #414868" }} />
+                          )}
+                        </Box>
+                        {/* Problem body */}
+                        <Box sx={{ bgcolor: "#1e1e2e", px: 2.5, py: 2 }}>
+                          <Typography fontSize={12} color="#cdd6f4" lineHeight={1.9}
+                            sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word",
+                                  fontFamily: "'Fira Code','Consolas',monospace" }}>
+                            {typeof q === "string" ? q : q.question || JSON.stringify(q)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    );
+                  })}
+
+                </Box>
+              ) : (
+                <Box display="flex" justifyContent="center" py={4}>
+                  <Typography fontSize={13} color="text.secondary">Could not load questions</Typography>
+                </Box>
+              )}
+            </Box>
+          )}
+        </DialogContent>}
+                <DialogActions sx={{ px:3, py:2.5, borderTop:"1px solid #e0e0e0", justifyContent:"flex-start", gap:1.5 }}>
+  <Button variant="outlined"
+    onClick={() => { setDetailOpen(false); navigate(`/resumes?job=${selected?._id}&job_title=${encodeURIComponent(selected?.title || '')}`); }}
+    sx={{ textTransform:"none", fontWeight:600 }}>
+    View Candidates
+  </Button>
+  <Button variant="outlined"
+    onClick={() => { setDetailOpen(false); navigate(`/tracking?job=${selected?._id}`); }}
+    sx={{ textTransform:"none", fontWeight:600 }}>
+    Track Progress
+  </Button>
+
+  {/* ── Generate Questions button ── */}
+  <Button
+    variant="outlined"
+    startIcon={<Quiz />}
+    onClick={() => { setDetailOpen(false); openGenerate(selected); }}
+    sx={{ textTransform:"none", fontWeight:600, color:"#7b1fa2", borderColor:"#7b1fa2",
+          "&:hover": { bgcolor:"#f3e5f5", borderColor:"#6a1b9a" } }}
+  >
+    Generate Questions
+  </Button>
+
+  <Box sx={{ flex: 1 }} />
+  <Button variant="contained"
+    onClick={() => { setDetailOpen(false); openEdit(selected); }}
+    sx={{ textTransform:"none", fontWeight:700 }}>
+    Edit Job
+  </Button>
+</DialogActions>
+                {/* <DialogActions sx={{ px:3,py:2.5,borderTop:"1px solid #e0e0e0",justifyContent:"flex-start",gap:1.5 }}>
                     <Button variant="outlined" onClick={()=>{setDetailOpen(false);navigate(`/resumes?job=${selected?._id}&job_title=${encodeURIComponent(selected?.title || '')}`);}} sx={{ textTransform:"none",fontWeight:600 }}>View Candidates</Button>
                     <Button variant="outlined" onClick={()=>{setDetailOpen(false);navigate(`/tracking?job=${selected?._id}`);}} sx={{ textTransform:"none",fontWeight:600 }}>Track Progress</Button>
                     <Box sx={{ flex:1 }}/>
                     <Button variant="contained" onClick={()=>{setDetailOpen(false);openEdit(selected);}} sx={{ textTransform:"none",fontWeight:700 }}>Edit Job</Button>
-                </DialogActions>
+                </DialogActions> */}
             </Dialog>
 
             {/* Add / Edit Dialog */}
@@ -3941,6 +4400,438 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
                     <Button type="submit" variant="contained" disabled={saving}>{saving?<CircularProgress size={18} sx={{mr:1}}/>:null}{selected?"Update Job":"Post Job"}</Button>
                 </DialogActions></form>
             </Dialog>
+{/* ══ AI Question Generation Dialog ══════════════════════════════════════ */}
+<Dialog
+  open={genOpen}
+  onClose={() => { if (!genLoading) setGenOpen(false); }}
+  maxWidth="lg" fullWidth
+  PaperProps={{ sx: { maxHeight: "93vh" } }}
+>
+  <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0", pb: 1.5 }}>
+    <Box display="flex" alignItems="center" justifyContent="space-between">
+      <Box display="flex" alignItems="center" gap={1.5}>
+        <Avatar sx={{ bgcolor: "#f3e5f5", width: 38, height: 38 }}>
+          <Quiz sx={{ fontSize: 20, color: "#7b1fa2" }} />
+        </Avatar>
+        <Box>
+          <Typography fontWeight={700} fontSize={15}>AI Question Generator</Typography>
+          <Typography fontSize={11} color="text.secondary">
+            {genJob?.job_id} · {genJob?.title} · {genJob?.client_name}
+          </Typography>
+        </Box>
+      </Box>
+      <IconButton size="small" onClick={() => setGenOpen(false)} disabled={genLoading}>
+        <CloseIcon fontSize="small" />
+      </IconButton>
+    </Box>
+  </DialogTitle>
+
+  <DialogContent sx={{ pt: 2.5 }}>
+
+    {/* ── CONFIG PANEL ── */}
+    {!genResult && (() => {
+      const expInfo  = getExpLevel(genJob?.experience_min, genJob?.experience_max);
+      const totalNew = genConfig.mcq_count + genConfig.subjective_count + genConfig.coding_count;
+      const hasExisting =
+        (genJob?.mcq_questions_count || 0) +
+        (genJob?.subjective_questions_count || 0) +
+        (genJob?.coding_questions_count || 0) > 0;
+
+      return (
+        <>
+{/* Experience band banner */}
+<Box display="flex" alignItems="center" gap={2} mb={2} p={1.5}
+  sx={{ bgcolor: expInfo.bg, borderRadius: 2, border: `1px solid ${expInfo.color}30` }}>
+  <Box flex={1}>
+    <Box display="flex" alignItems="center" gap={1} mb={0.3}>
+      <Chip label={expInfo.label} size="small"
+        sx={{ bgcolor: expInfo.color, color: "#fff", fontWeight: 700, fontSize: 11 }} />
+      <Typography fontSize={12} fontWeight={600} color={expInfo.color}>
+        {genJob?.experience_min}–{genJob?.experience_max} years experience
+      </Typography>
+    </Box>
+    <Typography fontSize={11} color="text.secondary">{expInfo.hint}</Typography>
+  </Box>
+</Box>
+
+{/* ── Difficulty distribution configurator ── */}
+<Box p={2} bgcolor="#f8f8ff" borderRadius={2} border="1px solid #c5cae9" mb={2}>
+  <Box display="flex" alignItems="center" justifyContent="space-between" mb={1.5}>
+    <Box>
+      <Typography fontSize={12} fontWeight={700} color="#1a237e">Difficulty distribution</Typography>
+      <Typography fontSize={11} color="text.secondary">
+        {genConfig.use_custom_difficulty
+          ? "Custom — you set the mix"
+          : `Auto from experience (${expInfo.label})`}
+      </Typography>
+    </Box>
+    <FormControlLabel
+      sx={{ mr: 0 }}
+      control={
+        <Switch
+          size="small"
+          checked={genConfig.use_custom_difficulty}
+          onChange={e => {
+            const custom = e.target.checked;
+            if (!custom) {
+              // reset to experience defaults
+              const diffMap = {
+                "Junior":           { easy_pct: 60, medium_pct: 30, hard_pct: 10 },
+                "Mid-level":        { easy_pct: 20, medium_pct: 55, hard_pct: 25 },
+                "Senior":           { easy_pct: 10, medium_pct: 40, hard_pct: 50 },
+                "Lead / Principal": { easy_pct: 5,  medium_pct: 30, hard_pct: 65 },
+              };
+              const def = diffMap[expInfo.label] || { easy_pct: 20, medium_pct: 55, hard_pct: 25 };
+              setGenConfig(p => ({ ...p, use_custom_difficulty: false, ...def }));
+            } else {
+              setGenConfig(p => ({ ...p, use_custom_difficulty: true }));
+            }
+          }}
+          sx={{
+            "& .MuiSwitch-switchBase.Mui-checked": { color: "#1a237e" },
+            "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { bgcolor: "#1a237e" },
+          }}
+        />
+      }
+      label={<Typography fontSize={11} color="text.secondary">Customise</Typography>}
+    />
+  </Box>
+
+  {/* Visual bar showing current split */}
+  <Box mb={1.5}>
+    <Box display="flex" height={10} borderRadius={5} overflow="hidden" gap="2px">
+      <Box sx={{ width: `${genConfig.easy_pct}%`, bgcolor: "#2e7d32", transition: "width 0.3s" }} />
+      <Box sx={{ width: `${genConfig.medium_pct}%`, bgcolor: "#f57c00", transition: "width 0.3s" }} />
+      <Box sx={{ width: `${genConfig.hard_pct}%`, bgcolor: "#c62828", transition: "width 0.3s" }} />
+    </Box>
+    <Box display="flex" justifyContent="space-between" mt={0.6}>
+      {[
+        { label: "Easy",   pct: genConfig.easy_pct,   color: "#2e7d32" },
+        { label: "Medium", pct: genConfig.medium_pct,  color: "#f57c00" },
+        { label: "Hard",   pct: genConfig.hard_pct,    color: "#c62828" },
+      ].map(({ label, pct, color }) => (
+        <Box key={label} display="flex" alignItems="center" gap={0.5}>
+          <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: color }} />
+          <Typography fontSize={11} fontWeight={600} color={color}>{label} {pct}%</Typography>
+        </Box>
+      ))}
+      {/* Validation warning */}
+      {(genConfig.easy_pct + genConfig.medium_pct + genConfig.hard_pct) !== 100 && (
+        <Typography fontSize={11} color="error.main" fontWeight={600}>
+          ⚠ Must sum to 100% (currently {genConfig.easy_pct + genConfig.medium_pct + genConfig.hard_pct}%)
+        </Typography>
+      )}
+    </Box>
+  </Box>
+
+  {/* Sliders — only editable when custom mode is ON */}
+  <Box display="flex" flexDirection="column" gap={1}>
+    {[
+      { key: "easy_pct",   label: "Easy",   color: "#2e7d32", bg: "#e8f5e9" },
+      { key: "medium_pct", label: "Medium", color: "#f57c00", bg: "#fff8e1" },
+      { key: "hard_pct",   label: "Hard",   color: "#c62828", bg: "#fce4ec" },
+    ].map(({ key, label, color, bg }) => (
+      <Box key={key} display="flex" alignItems="center" gap={1.5}>
+        <Box sx={{ width: 52, flexShrink: 0 }}>
+          <Chip label={label} size="small"
+            sx={{ bgcolor: bg, color, fontWeight: 700, fontSize: 10, height: 20, width: "100%" }} />
+        </Box>
+        <Box flex={1} position="relative">
+          <input
+            type="range" min={0} max={100}
+            value={genConfig[key]}
+            disabled={!genConfig.use_custom_difficulty}
+            onChange={e => {
+              const newVal = Number(e.target.value);
+              // Auto-adjust the other two to keep sum = 100
+              setGenConfig(prev => {
+                const others = key === "easy_pct"
+                  ? ["medium_pct", "hard_pct"]
+                  : key === "medium_pct"
+                  ? ["easy_pct", "hard_pct"]
+                  : ["easy_pct", "medium_pct"];
+
+                const remaining   = 100 - newVal;
+                const currentSum  = prev[others[0]] + prev[others[1]];
+
+                let a, b;
+                if (currentSum === 0) {
+                  a = Math.round(remaining / 2);
+                  b = remaining - a;
+                } else {
+                  a = Math.round((prev[others[0]] / currentSum) * remaining);
+                  b = remaining - a;
+                }
+                return { ...prev, [key]: newVal, [others[0]]: a, [others[1]]: b };
+              });
+            }}
+            style={{
+              width: "100%",
+              accentColor: color,
+              cursor: genConfig.use_custom_difficulty ? "pointer" : "not-allowed",
+              opacity: genConfig.use_custom_difficulty ? 1 : 0.5,
+            }}
+          />
+        </Box>
+        <Box sx={{ width: 36, textAlign: "right" }}>
+          <Typography fontSize={12} fontWeight={700} color={color}>
+            {genConfig[key]}%
+          </Typography>
+        </Box>
+      </Box>
+    ))}
+  </Box>
+
+  {!genConfig.use_custom_difficulty && (
+    <Typography fontSize={10} color="text.disabled" mt={1}>
+      Toggle "Customise" above to manually set the difficulty split
+    </Typography>
+  )}
+</Box>
+
+          {/* JD preview */}
+          {genJob?.description ? (
+            <Box mb={2} p={1.5} bgcolor="#f5f7fa" borderRadius={2}
+              border="1px solid #e0e0e0" maxHeight={100} overflow="auto">
+              <Typography fontSize={10} fontWeight={700} color="text.secondary"
+                textTransform="uppercase" letterSpacing={0.5} mb={0.5}>JD Preview</Typography>
+              <Typography fontSize={12} color="text.secondary" lineHeight={1.6}>
+                {genJob.description.slice(0, 400)}{genJob.description.length > 400 ? "…" : ""}
+              </Typography>
+            </Box>
+          ) : (
+            <Alert severity="warning" sx={{ mb: 2, fontSize: 12 }}>
+              No job description found. Add a description for higher quality questions.
+            </Alert>
+          )}
+
+          {/* Skills */}
+          {genJob?.skills?.length > 0 && (
+            <Box mb={2}>
+              <Typography fontSize={10} fontWeight={700} color="text.secondary"
+                textTransform="uppercase" letterSpacing={0.5} mb={0.6}>Skills being tested</Typography>
+              <Box display="flex" flexWrap="wrap" gap={0.5}>
+                {genJob.skills.map((s, i) => (
+                  <Chip key={i} label={s} size="small" variant="outlined"
+                    sx={{ fontSize: 10, height: 20, borderColor: "#7b1fa2", color: "#7b1fa2" }} />
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {/* Count config */}
+          <Box p={2} bgcolor="#fdf6ff" borderRadius={2} border="1px solid #ce93d8" mb={2}>
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={1.5}>
+              <Typography fontSize={12} fontWeight={700} color="#4a148c">
+                Configure question counts
+              </Typography>
+              <Chip label={`${totalNew} questions to generate`} size="small"
+                sx={{ bgcolor: "#7b1fa2", color: "#fff", fontSize: 11, fontWeight: 700 }} />
+            </Box>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={4}>
+                <TextField fullWidth size="small" type="number" label="MCQ Questions"
+                  value={genConfig.mcq_count}
+                  onChange={e => setGenConfig(p => ({ ...p, mcq_count: Math.max(0, Math.min(30, Number(e.target.value))) }))}
+                  inputProps={{ min: 0, max: 30 }}
+                  helperText="Auto-graded · max 30"
+                  InputProps={{ startAdornment: <InputAdornment position="start"><Quiz sx={{ fontSize: 16, color: "#7b1fa2" }} /></InputAdornment> }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField fullWidth size="small" type="number" label="Subjective Questions"
+                  value={genConfig.subjective_count}
+                  onChange={e => setGenConfig(p => ({ ...p, subjective_count: Math.max(0, Math.min(20, Number(e.target.value))) }))}
+                  inputProps={{ min: 0, max: 20 }}
+                  helperText="Open-ended · max 20"
+                  InputProps={{ startAdornment: <InputAdornment position="start"><QuestionAnswer sx={{ fontSize: 16, color: "#0277bd" }} /></InputAdornment> }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField fullWidth size="small" type="number" label="Coding Problems"
+                  value={genConfig.coding_count}
+                  onChange={e => setGenConfig(p => ({ ...p, coding_count: Math.max(0, Math.min(10, Number(e.target.value))) }))}
+                  inputProps={{ min: 0, max: 10 }}
+                  helperText="Full problems · max 10"
+                  InputProps={{ startAdornment: <InputAdornment position="start"><Code sx={{ fontSize: 16, color: "#2e7d32" }} /></InputAdornment> }}
+                />
+              </Grid>
+            </Grid>
+            <FormControlLabel sx={{ mt: 1.5 }}
+              control={
+                <Switch size="small" checked={genConfig.replace_existing}
+                  onChange={e => setGenConfig(p => ({ ...p, replace_existing: e.target.checked }))}
+                  sx={{ "& .MuiSwitch-switchBase.Mui-checked": { color: "#7b1fa2" },
+                        "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { bgcolor: "#7b1fa2" } }}
+                />
+              }
+              label={
+                <Typography fontSize={12} color={genConfig.replace_existing ? "#880e4f" : "text.secondary"}>
+                  {genConfig.replace_existing
+                    ? "Replace all existing questions with newly generated ones"
+                    : "Append to existing bank (duplicates auto-removed)"}
+                </Typography>
+              }
+            />
+          </Box>
+
+          {/* Existing question summary */}
+          {hasExisting && (
+            <Alert severity={genConfig.replace_existing ? "warning" : "info"} sx={{ mb: 2, fontSize: 12 }}>
+              <strong>Current bank:</strong> {genJob.mcq_questions_count || 0} MCQ ·{" "}
+              {genJob.subjective_questions_count || 0} subjective ·{" "}
+              {genJob.coding_questions_count || 0} coding.{" "}
+              {genConfig.replace_existing
+                ? "⚠ All will be permanently replaced."
+                : "New questions will be appended. Duplicates are auto-detected and skipped."}
+            </Alert>
+          )}
+
+          {/* Generation history */}
+          {genJob?.generation_history?.length > 0 && (
+            <Box mb={2}>
+              <Typography fontSize={10} fontWeight={700} color="text.secondary"
+                textTransform="uppercase" letterSpacing={0.5} mb={0.8}>
+                Generation history ({genJob.generation_history.length} run{genJob.generation_history.length > 1 ? "s" : ""})
+              </Typography>
+              <Box display="flex" flexDirection="column" gap={0.6}>
+                {[...genJob.generation_history].reverse().slice(0, 5).map((h, i) => (
+                  <Box key={i} display="flex" alignItems="center" gap={1.5}
+                    sx={{ p: 1, bgcolor: "#f5f7fa", borderRadius: 1.5 }}>
+                    <Typography fontSize={10} color="text.disabled" sx={{ minWidth: 120 }}>
+                      {new Date(h.generated_at).toLocaleString("en-IN")}
+                    </Typography>
+                    <Chip label={h.exp_level} size="small" sx={{ fontSize: 9, height: 18 }} />
+                    <Typography fontSize={11} color="text.secondary" flex={1}>
+                      +{h.mcq_added} MCQ · +{h.subj_added} subj · +{h.coding_added} coding
+                      {h.duplicates_skipped > 0 && (
+                        <span style={{ color: "#f57c00" }}> · {h.duplicates_skipped} dup skipped</span>
+                      )}
+                    </Typography>
+                    {h.replace_existing && (
+                      <Chip label="replaced" size="small" color="error" sx={{ fontSize: 9, height: 18 }} />
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {genError && <Alert severity="error">{genError}</Alert>}
+        </>
+      );
+    })()}
+
+    {/* ── RESULTS PANEL ── */}
+    {genResult && (
+      <Box>
+        {/* Summary */}
+        <Box display="flex" gap={1.5} mb={2} flexWrap="wrap" alignItems="center">
+          <Alert severity="success" sx={{ flex: 1, py: 0.5, fontSize: 12 }}>
+            Saved to DB — added <strong>{genResult.mcq_added}</strong> MCQ,{" "}
+            <strong>{genResult.subj_added}</strong> subjective,{" "}
+            <strong>{genResult.coding_added}</strong> coding.
+            {genResult.duplicates_skipped > 0 && (
+              <span style={{ color: "#e65100" }}> {genResult.duplicates_skipped} duplicate(s) skipped.</span>
+            )}
+          </Alert>
+          <Chip label={genResult.exp_level} size="small"
+            sx={{ bgcolor: getExpLevel(genJob?.experience_min, genJob?.experience_max).color,
+                  color: "#fff", fontWeight: 700, fontSize: 11 }} />
+        </Box>
+
+        {/* Bank totals */}
+        <Box display="flex" gap={1} mb={2} flexWrap="wrap">
+          {[
+            { label: `${genResult.total_mcq_in_bank} MCQ in bank`,        color: "#7b1fa2" },
+            { label: `${genResult.total_subj_in_bank} Subjective in bank`, color: "#0277bd" },
+            { label: `${genResult.total_code_in_bank} Coding in bank`,     color: "#2e7d32" },
+          ].map(({ label, color }) => (
+            <Chip key={label} label={label} size="small" variant="outlined"
+              sx={{ fontSize: 10, borderColor: color, color, fontWeight: 600 }} />
+          ))}
+        </Box>
+
+        {/* Tabs */}
+        <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
+          <Tabs value={genTab} onChange={(_, v) => setGenTab(v)}
+            sx={{ "& .MuiTab-root": { fontWeight: 600, textTransform: "none", minHeight: 40 } }}>
+            <Tab label={
+              <Box display="flex" alignItems="center" gap={0.8}>
+                <Quiz sx={{ fontSize: 16, color: "#7b1fa2" }} />
+                <span>{genResult.mcq_added} MCQ added</span>
+              </Box>
+            } />
+            <Tab label={
+              <Box display="flex" alignItems="center" gap={0.8}>
+                <QuestionAnswer sx={{ fontSize: 16, color: "#0277bd" }} />
+                <span>{genResult.subj_added} Subjective added</span>
+              </Box>
+            } />
+            <Tab label={
+              <Box display="flex" alignItems="center" gap={0.8}>
+                <Code sx={{ fontSize: 16, color: "#2e7d32" }} />
+                <span>{genResult.coding_added} Coding added</span>
+              </Box>
+            } />
+          </Tabs>
+        </Box>
+
+        {genTab === 0 && (
+          <Box display="flex" flexDirection="column" gap={1.5}>
+            {genResult.mcq_questions?.length > 0
+              ? genResult.mcq_questions.map((q, i) => <MCQQuestionCard key={i} question={q} index={i} />)
+              : <Typography color="text.secondary" textAlign="center" py={4} fontSize={13}>
+                  No new MCQ questions — all were duplicates or count was 0
+                </Typography>}
+          </Box>
+        )}
+        {genTab === 1 && (
+          <Box display="flex" flexDirection="column" gap={1.5}>
+            {genResult.subjective_questions?.length > 0
+              ? genResult.subjective_questions.map((q, i) => <SubjectiveQuestionCard key={i} question={q} index={i} />)
+              : <Typography color="text.secondary" textAlign="center" py={4} fontSize={13}>
+                  No new subjective questions
+                </Typography>}
+          </Box>
+        )}
+        {genTab === 2 && (
+          <Box display="flex" flexDirection="column" gap={1.5}>
+            {genResult.coding_questions?.length > 0
+              ? genResult.coding_questions.map((q, i) => <CodingQuestionCard key={i} question={q} index={i} />)
+              : <Typography color="text.secondary" textAlign="center" py={4} fontSize={13}>
+                  No new coding questions
+                </Typography>}
+          </Box>
+        )}
+      </Box>
+    )}
+  </DialogContent>
+
+  <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0", gap: 1 }}>
+    <Button onClick={() => setGenOpen(false)} disabled={genLoading}>
+      {genResult ? "Close" : "Cancel"}
+    </Button>
+    <Box flex={1} />
+    {genResult && (
+      <Button variant="outlined" startIcon={<Quiz />} onClick={handleRegenerate}
+        sx={{ color: "#7b1fa2", borderColor: "#7b1fa2" }}>
+        Generate More
+      </Button>
+    )}
+    {!genResult && (
+      <Button variant="contained" onClick={handleGenerate}
+        disabled={genLoading || (genConfig.mcq_count + genConfig.subjective_count + genConfig.coding_count === 0)}
+        startIcon={genLoading ? <CircularProgress size={16} color="inherit" /> : <Quiz />}
+        sx={{ bgcolor: "#7b1fa2", "&:hover": { bgcolor: "#6a1b9a" }, minWidth: 190 }}>
+        {genLoading
+          ? "Generating with AI…"
+          : `Generate ${genConfig.mcq_count + genConfig.subjective_count + genConfig.coding_count} Questions`}
+      </Button>
+    )}
+  </DialogActions>
+</Dialog>
+
 
             {/* Delete Dialog */}
             <Dialog open={deleteOpen} onClose={()=>setDeleteOpen(false)} maxWidth="xs" fullWidth>
