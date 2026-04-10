@@ -241,7 +241,7 @@ const LoginPage = () => {
 
             {/* Password hint */}
             <div className="hint-box">
-              <p><strong>🔑 Register with any role to test</strong></p>
+              <p><strong>🔑 Register with any role</strong></p>
               <p>Password: 8+ chars, 1 uppercase, 1 number</p>
             </div>
 

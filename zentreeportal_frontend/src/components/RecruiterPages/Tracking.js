@@ -458,7 +458,7 @@ const getStageConfig = (stage) =>
             <ToggleButton value="kanban"><ViewKanban fontSize="small" /></ToggleButton>
             <ToggleButton value="list"><ViewList fontSize="small" /></ToggleButton>
           </ToggleButtonGroup>
-          <Button variant="contained" startIcon={<Add />} onClick={openCreate}>Add to Pipeline</Button>
+          {/* <Button variant="contained" startIcon={<Add />} onClick={openCreate}>Add to Pipeline</Button> */}
         </Box>
       </Box>
 
