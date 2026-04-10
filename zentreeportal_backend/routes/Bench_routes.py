@@ -10,6 +10,8 @@ from extensions import mongo
 from models.Benchpeople_model import (
     bench_schema, serialize_bench, BENCH_STATUSES, EMPLOYMENT_TYPES,
 )
+from routes.Resume_routes import _extract_gemini_text
+
 
 bench_bp = Blueprint("bench", __name__)
 
@@ -78,7 +80,8 @@ def parse_pdf():
             timeout=60,
         )
         resp.raise_for_status()
-        raw    = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        # raw    = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        raw    = _extract_gemini_text(resp.json())
         parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
         return jsonify(success=True, data=parsed, file_id=file_id), 200
     except json.JSONDecodeError:
@@ -87,7 +90,18 @@ def parse_pdf():
         if os.path.exists(temp_path):
             os.remove(temp_path)
         return jsonify(success=False, message=str(e)), 500
-
+    
+    
+# ── GET /api/bench/by-skill/<skill_name> ─────────────────────────────────────
+@bench_bp.route("/by-skill/<skill_name>", methods=["GET"])
+@jwt_required()
+def by_skill(skill_name):
+    docs = list(
+        mongo.db.bench_people
+        .find({"skills": {"$regex": skill_name.strip(), "$options": "i"}})
+        .sort("created_at", -1)
+    )
+    return jsonify(success=True, data=[serialize_bench(d) for d in docs]), 200
 
 # ── GET /api/bench/stats ─────────────────────────────────────────────────────
 @bench_bp.route("/stats", methods=["GET"])
@@ -288,3 +302,28 @@ def delete(bid):
             os.remove(fp)
     mongo.db.bench_people.delete_one({"_id": doc["_id"]})
     return jsonify(success=True, message="Deleted"), 200
+
+
+
+# ── GET /api/bench/talent-search?q=... ───────────────────────────────────────
+@bench_bp.route("/talent-search", methods=["GET"])
+@jwt_required()
+def talent_search():
+    import re
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify(success=True, data=[]), 200
+
+    tokens = [t.strip() for t in re.split(r'[\s,]+', q) if len(t.strip()) >= 2]
+    if not tokens:
+        return jsonify(success=True, data=[]), 200
+
+    all_patterns = list({q} | set(tokens))
+    pattern = "|".join(re.escape(p) for p in all_patterns)
+
+    docs = list(
+        mongo.db.bench_people.find(
+            {"skills": {"$regex": pattern, "$options": "i"}}
+        ).sort("created_at", -1)
+    )
+    return jsonify(success=True, data=[serialize_bench(d) for d in docs]), 200

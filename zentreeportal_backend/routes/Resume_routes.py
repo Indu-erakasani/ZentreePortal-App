@@ -752,3 +752,29 @@ def trigger_cleanup():
     """Manually trigger the expired raw resume cleanup."""
     cleanup_expired_raw_resumes()
     return jsonify(success=True, message="Cleanup triggered"), 200
+
+
+
+# ── GET /api/resumes/talent-search?q=... ─────────────────────────────────────
+@resume_bp.route("/talent-search", methods=["GET"])
+@jwt_required()
+def talent_search():
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify(success=True, data=[]), 200
+
+    # Tokenize — split on spaces and commas, filter noise words < 2 chars
+    tokens = [t.strip() for t in re.split(r'[\s,]+', q) if len(t.strip()) >= 2]
+    if not tokens:
+        return jsonify(success=True, data=[]), 200
+
+    # Also add the full phrase as an option: 
+    all_patterns = list({q} | set(tokens))
+    pattern = "|".join(re.escape(p) for p in all_patterns)
+
+    docs = list(
+        mongo.db.candidate_processing.find(
+            {"skills": {"$regex": pattern, "$options": "i"}}
+        ).sort("created_at", -1)
+    )
+    return jsonify(success=True, data=[serialize_resume(d) for d in docs]), 200

@@ -62,10 +62,19 @@ def get_all():
                 {"skills":          {"$regex": skill_name, "$options": "i"}},
             ]
         })
+        bench_available = mongo.db.bench_people.count_documents({
+            "skills": {"$regex": skill_name, "$options": "i"},
+            "status": "Available",
+        })
+        bench_total = mongo.db.bench_people.count_documents({
+            "skills": {"$regex": skill_name, "$options": "i"},
+        })
 
         serialized = serialize_skill(doc)
         serialized["candidate_count"] = candidate_count
         serialized["job_count"]       = job_count
+        serialized["bench_available"]  = bench_available   
+        serialized["bench_total"]      = bench_total       
         result.append(serialized)
 
     return jsonify(success=True, data=result), 200
@@ -182,3 +191,124 @@ def delete(sid):
 @jwt_required()
 def options():
     return jsonify(success=True, categories=CATEGORIES, demand_levels=DEMAND_LEVELS), 200
+
+
+# ── GET /api/skills/<sid>/insights ────────────────────────────────────────────
+@skills_bp.route("/<sid>/insights", methods=["GET"])
+@jwt_required()
+def get_insights(sid):
+    """
+    Aggregated talent intelligence for a skill:
+    - Pipeline stage breakdown for candidates
+    - Bench availability breakdown
+    - Salary range stats
+    - Experience distribution
+    """
+    doc, err = _find(sid)
+    if err:
+        return err
+
+    skill_name = doc.get("skill_name", "")
+    related    = [s.strip() for s in (doc.get("related_skills") or "").split(",") if s.strip()]
+    all_skills = [skill_name] + related
+
+    # Build regex that matches any of the skill names
+    regex_pattern = "|".join(all_skills)
+
+    # ── Candidates ────────────────────────────────────────────────────────────
+    candidates = list(mongo.db.candidate_processing.find(
+        {"skills": {"$regex": regex_pattern, "$options": "i"}}
+    ))
+    candidate_ids = [str(c.get("resume_id", "")) for c in candidates]
+
+    # Pipeline stage breakdown via tracking
+    tracking_docs = list(mongo.db.candidate_tracking.find(
+        {"resume_id": {"$in": candidate_ids}}
+    )) if candidate_ids else []
+
+    stage_breakdown = {}
+    for t in tracking_docs:
+        stage = t.get("current_stage", "Unknown")
+        stage_breakdown[stage] = stage_breakdown.get(stage, 0) + 1
+
+    # Status breakdown
+    status_breakdown = {}
+    for c in candidates:
+        st = c.get("status", "Unknown")
+        status_breakdown[st] = status_breakdown.get(st, 0) + 1
+
+    # Experience distribution
+    exp_bands = {"0-2": 0, "3-5": 0, "6-10": 0, "10+": 0}
+    salaries  = []
+    for c in candidates:
+        exp = float(c.get("experience") or 0)
+        if exp <= 2:   exp_bands["0-2"]  += 1
+        elif exp <= 5: exp_bands["3-5"]  += 1
+        elif exp <= 10:exp_bands["6-10"] += 1
+        else:          exp_bands["10+"]  += 1
+        es = c.get("expected_salary")
+        if es and float(es) > 0:
+            salaries.append(float(es))
+
+    # Notice period breakdown
+    notice_breakdown = {}
+    for c in candidates:
+        np = c.get("notice_period", "Unknown") or "Unknown"
+        notice_breakdown[np] = notice_breakdown.get(np, 0) + 1
+
+    # ── Bench People ──────────────────────────────────────────────────────────
+    bench_people = list(mongo.db.bench_people.find(
+        {"skills": {"$regex": regex_pattern, "$options": "i"}}
+    ))
+
+    bench_status_breakdown = {}
+    bench_exp_bands = {"0-2": 0, "3-5": 0, "6-10": 0, "10+": 0}
+    bench_salaries  = []
+    for b in bench_people:
+        st = b.get("status", "Unknown")
+        bench_status_breakdown[st] = bench_status_breakdown.get(st, 0) + 1
+        exp = float(b.get("experience") or 0)
+        if exp <= 2:    bench_exp_bands["0-2"]  += 1
+        elif exp <= 5:  bench_exp_bands["3-5"]  += 1
+        elif exp <= 10: bench_exp_bands["6-10"] += 1
+        else:           bench_exp_bands["10+"]  += 1
+        es = b.get("expected_salary")
+        if es and float(es) > 0:
+            bench_salaries.append(float(es))
+
+    all_salaries = salaries + bench_salaries
+
+    return jsonify(
+        success=True,
+        data={
+            "skill_name":   skill_name,
+            "related":      related,
+            # Candidate insights
+            "candidate_total":        len(candidates),
+            "candidate_status":       status_breakdown,
+            "candidate_stage":        stage_breakdown,
+            "candidate_exp_bands":    exp_bands,
+            "candidate_notice":       notice_breakdown,
+            # Bench insights
+            "bench_total":            len(bench_people),
+            "bench_status":           bench_status_breakdown,
+            "bench_exp_bands":        bench_exp_bands,
+            "bench_available":        bench_status_breakdown.get("Available", 0),
+            # Combined salary intel
+            "salary_min":  min(all_salaries) if all_salaries else 0,
+            "salary_max":  max(all_salaries) if all_salaries else 0,
+            "salary_avg":  round(sum(all_salaries) / len(all_salaries)) if all_salaries else 0,
+            # Open jobs
+            "open_jobs":   mongo.db.jobs.count_documents({
+                "status": "Open",
+                "$or": [
+                    {"skills": {"$regex": regex_pattern, "$options": "i"}},
+                ]
+            }),
+            # Demand gap: open jobs vs available people
+            "demand_gap":  mongo.db.jobs.count_documents({
+                "status": "Open",
+                "$or": [{"skills": {"$regex": regex_pattern, "$options": "i"}}]
+            }) - bench_status_breakdown.get("Available", 0),
+        }
+    ), 200

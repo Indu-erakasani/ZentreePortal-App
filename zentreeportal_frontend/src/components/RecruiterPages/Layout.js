@@ -319,12 +319,12 @@ const NAV_ITEMS = [
   { label: "Recruiter analytics",icon: <People />,      paths: ["/manager/recruiters"] },
   { label: "Clients",            icon: <People />,      paths: ["/clients"]      },
   { label: "Jobs",               icon: <Work />,        paths: ["/jobs"]         },
-  { label: "Resumes",            icon: <Description />, paths: ["/resumes"]      },
-  { label: "Candidate Tracking", icon: <AccountTree />, paths: ["/tracking"]     },
+  { label: "Candidates",            icon: <Description />, paths: ["/resumes"]      },
+  // { label: "Candidate Tracking", icon: <AccountTree />, paths: ["/tracking"]     },
   { label: "Placements",         icon: <Stars />,       paths: ["/placements"]   },
   { label: "Skills",             icon: <Psychology />,  paths: ["/skills"]       },
-  { label: "Bench People",       icon: <PersonOutline />, paths: ["/bench"]      },  // ← fixed
-  { label: "Employees",          icon: <BadgeOutlined />, paths: ["/employees"]  },  // ← fixed
+  { label: "Bench People",       icon: <PersonOutline />, paths: ["/bench"]      }, 
+  { label: "Employees",          icon: <BadgeOutlined />, paths: ["/employees"]  }, 
   { label: "Reports",            icon: <Assessment />,  paths: ["/reports"]      },
 ];
 
@@ -333,7 +333,7 @@ const getUser = () => {
   catch { return {}; }
 };
 
-const BASE = "http://localhost:5000/api";
+const BASE = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000/api";
 const logoutApi = () =>
   fetch(`${BASE}/auth/logout`, {
     method: "POST",

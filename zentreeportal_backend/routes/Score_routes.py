@@ -265,7 +265,16 @@ Scoring rules:
 - strengths: list of candidate's strong points relevant to this job (max 3 items)
 """.strip()
 
-
+def _extract_gemini_text(response_json: dict) -> str:
+    """Extract final answer text from Gemini response (thinking-model safe)."""
+    try:
+        parts = response_json["candidates"][0]["content"]["parts"]
+        text_parts = [p["text"] for p in parts if p.get("text", "").strip()]
+        if not text_parts:
+            raise ValueError("No text content in Gemini response")
+        return text_parts[-1]   # last part = actual answer, not thinking
+    except (KeyError, IndexError) as e:
+        raise ValueError(f"Unexpected Gemini response structure: {e}") from e
 # ── POST /api/score/candidate ─────────────────────────────────────────────────
 @score_bp.route("/candidate", methods=["POST"])
 @jwt_required()
@@ -306,11 +315,10 @@ def score_candidate():
         )
         if not resp.ok:
             return jsonify(success=False, message=f"Gemini API error {resp.status_code}: {resp.text[:300]}"), 500
-        resp.raise_for_status()
-        parts = resp.json()["candidates"][0]["content"]["parts"]
-        text_parts = [p["text"] for p in parts if p.get("text", "").strip()]
-        raw_text  = text_parts[-1]
+
+        raw_text = _extract_gemini_text(resp.json())
         result   = json.loads(raw_text.replace("```json", "").replace("```", "").strip())
+
     except json.JSONDecodeError:
         return jsonify(success=False, message="AI returned non-JSON response, please retry"), 422
     except Exception as e:

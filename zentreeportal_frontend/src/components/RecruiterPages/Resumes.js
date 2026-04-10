@@ -2848,7 +2848,7 @@ import {
   Close as CloseIcon, PictureAsPdf, OpenInNew, Business,
   Inventory2, PersonAdd, Work, SwapHoriz,
   EditNote, ArrowForward, FilterList, Analytics,
-  Notifications, Assignment,
+  Notifications, Assignment,AccountTree, Chat
 } from "@mui/icons-material";
 
 import CandidateDetailContent, { nameInitials, fmtSalary, STATUS_COLOR, STAGE_COLOR } from "./Candidatedetailcontent";
@@ -2951,6 +2951,20 @@ const getCachedScore = (resume_id, job_id) =>
   fetch(`${BASE}/score/candidate?resume_id=${resume_id}&job_id=${job_id}`, {
     headers: getHeaders(),
   }).then(handle);
+
+
+// ── Tracking APIs (for detail view) ──────────────────────────────────────────
+const getTrackingByResume = (resume_id) =>
+  fetch(`${BASE}/tracking/by-resume/${resume_id}`, { headers: getHeaders() }).then(handle);
+const createTrackingEntry = (payload) =>
+  fetch(`${BASE}/tracking/`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+const updateTrackingEntry = (id, payload) =>
+  fetch(`${BASE}/tracking/${id}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+const addTrackingInterview = (id, payload) =>
+  fetch(`${BASE}/tracking/${id}/interview`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+
+
+
 
 const toBase64 = (file) =>
   new Promise((res, rej) => {
@@ -3322,6 +3336,22 @@ export default function Resumes() {
   const [unreadCount,  setUnreadCount]  = useState(0);
   const [notifLoading, setNotifLoading] = useState(false);
 
+
+  // ── Detail-tab + embedded tracking state ──────────────────────────────────────
+  const [detailTab,         setDetailTab]         = useState(0);
+  const [candidateTracking, setCandidateTracking] = useState(null);
+  const [trackingLoading,   setTrackingLoading]   = useState(false);
+  const [trackingIvOpen,    setTrackingIvOpen]    = useState(false);
+  const [trackingIvData,    setTrackingIvData]    = useState({
+    interviewer: "", interview_type: "Video", feedback_score: 3,
+    recommendation: "Maybe", feedback_summary: "", strengths: "", weaknesses: "",
+  });
+  const [trackingSaving,    setTrackingSaving]    = useState(false);
+  const [trackingStage,     setTrackingStage]     = useState("");
+  const [trackingError,     setTrackingError]     = useState("");
+
+
+
   // ── Loaders ────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     try { setLoading(true); setError(""); const res = await getAllResumes(); setResumes(res.data || []); }
@@ -3447,9 +3477,79 @@ const EXAM_STATUS_STYLE = {
   };
 
   const openEdit   = r => { setSelected(r); setFormData({ ...EMPTY_FORM, ...r }); setAddFile(null); setFormOpen(true); };
-  const openDetail = r => { setSelected(r); setDetailOpen(true); };
   const openDelete = r => { setSelected(r); setDeleteOpen(true); };
   const openPdf    = r => { setSelected(r); setPdfOpen(true); };
+
+const openDetail = async (r) => {
+  setSelected(r);
+  setDetailTab(0);
+  setCandidateTracking(null);
+  setTrackingError("");
+  setDetailOpen(true);
+  setTrackingLoading(true);
+  try {
+    const res = await getTrackingByResume(r.resume_id);
+    const latest = res.data?.[0] || null;
+    setCandidateTracking(latest);
+    setTrackingStage(latest?.current_stage || "Screening");
+  } catch { setCandidateTracking(null); }
+  finally { setTrackingLoading(false); }
+};
+
+const handleStartTracking = async () => {
+  if (!selected) return;
+  setTrackingLoading(true); setTrackingError("");
+  try {
+    const linkedJob = jobs.find(j => j.job_id === selected.linked_job_id);
+    const payload = {
+      resume_id:      selected.resume_id,
+      candidate_name: selected.name,
+      job_id:         linkedJob?._id || selected.linked_job_id || "UNASSIGNED",
+      client_name:    linkedJob?.client_name || "",
+      job_title:      selected.linked_job_title || "",
+      current_stage:  "Screening",
+      pipeline_status:"Active",
+    };
+    const res = await createTrackingEntry(payload);
+    setCandidateTracking(res.data);
+    setTrackingStage("Screening");
+  } catch (err) {
+    setTrackingError(err?.message || "Failed to start tracking");
+  } finally { setTrackingLoading(false); }
+};
+
+const handleTrackingStageUpdate = async (newStage) => {
+  if (!candidateTracking) return;
+  setTrackingLoading(true); setTrackingError("");
+  try {
+    const res = await updateTrackingEntry(candidateTracking._id, { current_stage: newStage });
+    setCandidateTracking(res.data);
+    setTrackingStage(newStage);
+  } catch (err) {
+    setTrackingError(err?.message || "Failed to update stage");
+  } finally { setTrackingLoading(false); }
+};
+
+const handleTrackingIvSave = async (e) => {
+  e.preventDefault();
+  if (!candidateTracking) return;
+  setTrackingSaving(true); setTrackingError("");
+  try {
+    const res = await addTrackingInterview(candidateTracking._id, {
+      ...trackingIvData,
+      feedback_score: Number(trackingIvData.feedback_score),
+      strengths:  trackingIvData.strengths  ? trackingIvData.strengths.split(",").map(s=>s.trim())  : [],
+      weaknesses: trackingIvData.weaknesses ? trackingIvData.weaknesses.split(",").map(s=>s.trim()) : [],
+    });
+    setCandidateTracking(res.data);
+    setTrackingIvOpen(false);
+    setTrackingIvData({ interviewer:"", interview_type:"Video", feedback_score:3, recommendation:"Maybe", feedback_summary:"", strengths:"", weaknesses:"" });
+  } catch (err) {
+    setTrackingError(err?.message || "Failed to save feedback");
+  } finally { setTrackingSaving(false); }
+};
+
+
 
   const formClientJobs = pickedClient
     ? jobs.filter(j => j.client_id === pickedClient._id || j.client_name === pickedClient.company_name)
@@ -4182,16 +4282,293 @@ const EXAM_STATUS_STYLE = {
       <PdfViewerDialog    open={pdfOpen}    onClose={() => setPdfOpen(false)}    candidate={selected} />
       <RawPdfViewerDialog open={rawPdfOpen} onClose={() => setRawPdfOpen(false)} raw={rawPdfDoc} />
 
-      {/* ── Candidate Detail Dialog ──────────────────────────────────────────── */}
-      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} maxWidth="md" fullWidth PaperProps={{ sx: { minHeight: "70vh" } }}>
-        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0" }}>Candidate Details</DialogTitle>
-        {selected && (
-          <CandidateDetailContent candidate={selected} jobs={jobs} recruiters={recruiters}
-            onClose={() => setDetailOpen(false)}
-            onEdit={() => { setDetailOpen(false); openEdit(selected); }}
-            onViewPdf={() => { setDetailOpen(false); openPdf(selected); }} />
-        )}
-      </Dialog>
+      {/* ── Candidate Detail Dialog ──────────────────────────────────────────────── */}
+<Dialog open={detailOpen} onClose={() => setDetailOpen(false)} maxWidth="md" fullWidth
+  PaperProps={{ sx: { minHeight: "80vh" } }}>
+  <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0", pb: 0 }}>
+    <Box display="flex" alignItems="center" justifyContent="space-between" pb={0}>
+      <Typography fontWeight={700} fontSize={18}>Candidate Details</Typography>
+      <IconButton size="small" onClick={() => setDetailOpen(false)}><CloseIcon fontSize="small" /></IconButton>
+    </Box>
+    <Tabs value={detailTab} onChange={(_, v) => setDetailTab(v)} sx={{ mt: 1 }}>
+      <Tab label="Profile" />
+      <Tab label={
+        <Box display="flex" alignItems="center" gap={0.8}>
+          Pipeline
+          {candidateTracking && (
+            <Chip
+              label={candidateTracking.current_stage}
+              size="small"
+              sx={{ fontSize: 9, height: 16, bgcolor: "#e8eaf6", color: "#1a237e", fontWeight: 700 }}
+            />
+          )}
+        </Box>
+      } />
+    </Tabs>
+  </DialogTitle>
+
+  {/* ── Tab 0: Profile ── */}
+  {detailTab === 0 && selected && (
+    <CandidateDetailContent
+      candidate={selected}
+      jobs={jobs}
+      recruiters={recruiters}
+      onClose={() => setDetailOpen(false)}
+      onEdit={() => { setDetailOpen(false); openEdit(selected); }}
+      onViewPdf={() => { setDetailOpen(false); openPdf(selected); }}
+    />
+  )}
+
+  {/* ── Tab 1: Pipeline Tracking ── */}
+  {detailTab === 1 && (
+    <DialogContent sx={{ pt: 2 }}>
+      {trackingError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setTrackingError("")}>{trackingError}</Alert>
+      )}
+
+      {trackingLoading && (
+        <Box display="flex" justifyContent="center" py={6}><CircularProgress /></Box>
+      )}
+
+      {/* Not yet tracked */}
+      {!trackingLoading && !candidateTracking && (
+        <Box display="flex" flexDirection="column" alignItems="center" py={6} gap={2}>
+          <Avatar sx={{ width: 64, height: 64, bgcolor: "#e8eaf6" }}>
+            <AccountTree sx={{ fontSize: 32, color: "#9fa8da" }} />
+          </Avatar>
+          <Typography variant="h6" color="text.secondary">Not in pipeline yet</Typography>
+          <Typography fontSize={13} color="text.disabled" textAlign="center">
+            Start tracking <strong>{selected?.name}</strong> through the interview pipeline.
+          </Typography>
+          <Button variant="contained" startIcon={<Add />} onClick={handleStartTracking}>
+            Start Tracking
+          </Button>
+        </Box>
+      )}
+
+      {/* Tracked */}
+      {!trackingLoading && candidateTracking && (
+        <Box display="flex" flexDirection="column" gap={2.5}>
+
+          {/* Stage card */}
+          <Card variant="outlined" sx={{ borderRadius: 2 }}>
+            <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+              <Typography fontSize={11} fontWeight={700} color="text.secondary"
+                textTransform="uppercase" letterSpacing={0.5} mb={1.5}>
+                Current Pipeline Stage
+              </Typography>
+              <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+                <TextField
+                  select size="small" label="Stage"
+                  value={trackingStage}
+                  onChange={e => setTrackingStage(e.target.value)}
+                  sx={{ minWidth: 200 }}
+                >
+                  {[
+                    "Screening","Technical Round 1","Technical Round 2","HR Round",
+                    "Manager Round","Final Round","Offer Stage","Negotiation",
+                    "Offer Accepted","Offer Declined","Joined","Rejected","Withdrawn"
+                  ].map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+                </TextField>
+                <Button
+                  variant="contained" size="small"
+                  disabled={trackingStage === candidateTracking.current_stage || trackingLoading}
+                  onClick={() => handleTrackingStageUpdate(trackingStage)}
+                >
+                  Update Stage
+                </Button>
+                <Chip
+                  label={candidateTracking.pipeline_status}
+                  size="small"
+                  color={candidateTracking.pipeline_status === "Active" ? "success" : "default"}
+                  sx={{ fontWeight: 700, fontSize: 11 }}
+                />
+              </Box>
+              {candidateTracking.recruiter && (
+                <Typography fontSize={12} color="text.secondary" mt={1}>
+                  👤 Recruiter: <strong>{candidateTracking.recruiter}</strong>
+                </Typography>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Interview feedback */}
+          <Box>
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+              <Typography fontSize={13} fontWeight={700} color="text.primary">
+                Interview Feedback ({candidateTracking.interviews?.length || 0})
+              </Typography>
+              <Button
+                size="small" variant="outlined" startIcon={<Chat />}
+                onClick={() => setTrackingIvOpen(true)}
+              >
+                Add Feedback
+              </Button>
+            </Box>
+
+            {(!candidateTracking.interviews || candidateTracking.interviews.length === 0) ? (
+              <Box p={2} bgcolor="#f5f7fa" borderRadius={2} textAlign="center">
+                <Typography fontSize={12} color="text.disabled">No interview feedback recorded yet.</Typography>
+              </Box>
+            ) : (
+              <Box display="flex" flexDirection="column" gap={1.5}>
+                {[...candidateTracking.interviews].reverse().map((iv, i) => (
+                  <Card key={i} variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardContent sx={{ p: 1.8, "&:last-child": { pb: 1.8 } }}>
+                      <Box display="flex" alignItems="center" justifyContent="space-between" mb={0.8}>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Chip label={iv.stage || "Interview"} size="small"
+                            sx={{ fontSize: 10, bgcolor: "#e8eaf6", color: "#1a237e", fontWeight: 700 }} />
+                          <Typography fontSize={12} fontWeight={600}>{iv.interviewer}</Typography>
+                          {iv.interview_type && (
+                            <Chip label={iv.interview_type} size="small" variant="outlined" sx={{ fontSize: 10 }} />
+                          )}
+                        </Box>
+                        <Box display="flex" gap={0.3}>
+                          {[1,2,3,4,5].map(n => (
+                            <Box key={n} sx={{ color: n <= (iv.feedback_score||0) ? "#f9a825" : "#e0e0e0", fontSize: 14 }}>★</Box>
+                          ))}
+                        </Box>
+                      </Box>
+                      {iv.recommendation && (
+                        <Chip label={iv.recommendation} size="small"
+                          color={iv.recommendation === "Strong Hire" || iv.recommendation === "Hire" ? "success"
+                            : iv.recommendation === "No Hire" ? "error" : "default"}
+                          sx={{ fontSize: 10, fontWeight: 700, mb: 0.8 }} />
+                      )}
+                      {iv.feedback_summary && (
+                        <Typography fontSize={12} color="text.secondary" lineHeight={1.6}>
+                          {iv.feedback_summary}
+                        </Typography>
+                      )}
+                      {iv.strengths?.length > 0 && (
+                        <Box mt={0.8}>
+                          <Typography fontSize={10} fontWeight={700} color="success.main">Strengths:</Typography>
+                          <Box display="flex" flexWrap="wrap" gap={0.5} mt={0.3}>
+                            {iv.strengths.map((s, j) => (
+                              <Chip key={j} label={s} size="small" sx={{ fontSize: 10, bgcolor: "#e8f5e9", color: "#2e7d32" }} />
+                            ))}
+                          </Box>
+                        </Box>
+                      )}
+                      {iv.weaknesses?.length > 0 && (
+                        <Box mt={0.8}>
+                          <Typography fontSize={10} fontWeight={700} color="warning.main">Areas to improve:</Typography>
+                          <Box display="flex" flexWrap="wrap" gap={0.5} mt={0.3}>
+                            {iv.weaknesses.map((w, j) => (
+                              <Chip key={j} label={w} size="small" sx={{ fontSize: 10, bgcolor: "#fff8e1", color: "#e65100" }} />
+                            ))}
+                          </Box>
+                        </Box>
+                      )}
+                      <Typography fontSize={10} color="text.disabled" mt={0.8}>
+                        {iv.interview_date ? new Date(iv.interview_date).toLocaleString("en-IN") : ""}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Box>
+            )}
+          </Box>
+
+          {/* Stage history */}
+          {candidateTracking.stage_history?.length > 0 && (
+            <Box>
+              <Typography fontSize={13} fontWeight={700} color="text.primary" mb={1}>
+                Stage History
+              </Typography>
+              <Box display="flex" flexDirection="column" gap={0.8}>
+                {[...candidateTracking.stage_history].reverse().map((h, i) => (
+                  <Box key={i} display="flex" alignItems="center" gap={1.5}
+                    sx={{ p: 1.2, bgcolor: "#f5f7fa", borderRadius: 1.5 }}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#1a237e", flexShrink: 0 }} />
+                    <Typography fontSize={12} fontWeight={600} sx={{ minWidth: 160 }}>{h.stage}</Typography>
+                    <Typography fontSize={11} color="text.secondary">
+                      {h.entered_at ? new Date(h.entered_at).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : ""}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
+
+        </Box>
+      )}
+    </DialogContent>
+  )}
+</Dialog>
+
+{/* ── Tracking Interview Feedback Dialog (from Detail View) ──────────────── */}
+<Dialog open={trackingIvOpen} onClose={() => setTrackingIvOpen(false)} maxWidth="sm" fullWidth>
+  <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0" }}>
+    Add Interview Feedback
+    {candidateTracking && (
+      <Typography fontSize={12} color="text.secondary" mt={0.3}>
+        {selected?.name} · {candidateTracking.current_stage}
+      </Typography>
+    )}
+  </DialogTitle>
+  <form onSubmit={handleTrackingIvSave}>
+    <DialogContent sx={{ pt: 2.5 }}>
+      <Grid container spacing={2}>
+        <Grid item xs={12} sm={6}>
+          <TextField fullWidth size="small" required label="Your Name (Interviewer)"
+            value={trackingIvData.interviewer}
+            onChange={e => setTrackingIvData(p => ({ ...p, interviewer: e.target.value }))} />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField select fullWidth size="small" label="Interview Type"
+            value={trackingIvData.interview_type}
+            onChange={e => setTrackingIvData(p => ({ ...p, interview_type: e.target.value }))}>
+            {["Phone","Video","In-Person","Panel"].map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+          </TextField>
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField select fullWidth size="small" label="Rating (1–5)"
+            value={trackingIvData.feedback_score}
+            onChange={e => setTrackingIvData(p => ({ ...p, feedback_score: e.target.value }))}>
+            {[1,2,3,4,5].map(n => (
+              <MenuItem key={n} value={n}>{n} — {["Poor","Below Avg","Average","Good","Excellent"][n-1]}</MenuItem>
+            ))}
+          </TextField>
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField select fullWidth size="small" label="Recommendation"
+            value={trackingIvData.recommendation}
+            onChange={e => setTrackingIvData(p => ({ ...p, recommendation: e.target.value }))}>
+            {["Strong Hire","Hire","Maybe","No Hire"].map(r => <MenuItem key={r} value={r}>{r}</MenuItem>)}
+          </TextField>
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField fullWidth size="small" label="Strengths (comma-separated)"
+            value={trackingIvData.strengths}
+            onChange={e => setTrackingIvData(p => ({ ...p, strengths: e.target.value }))}
+            placeholder="e.g. Communication, Problem Solving" />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField fullWidth size="small" label="Weaknesses (comma-separated)"
+            value={trackingIvData.weaknesses}
+            onChange={e => setTrackingIvData(p => ({ ...p, weaknesses: e.target.value }))}
+            placeholder="e.g. System Design, Leadership" />
+        </Grid>
+        <Grid item xs={12}>
+          <TextField fullWidth multiline rows={4} size="small" label="Feedback Summary"
+            value={trackingIvData.feedback_summary}
+            onChange={e => setTrackingIvData(p => ({ ...p, feedback_summary: e.target.value }))}
+            placeholder="Detailed feedback about the interview..." />
+        </Grid>
+      </Grid>
+      {trackingError && <Alert severity="error" sx={{ mt: 2 }}>{trackingError}</Alert>}
+    </DialogContent>
+    <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
+      <Button onClick={() => setTrackingIvOpen(false)}>Cancel</Button>
+      <Button type="submit" variant="contained" disabled={trackingSaving}>
+        {trackingSaving ? <CircularProgress size={18} sx={{ mr: 1 }} /> : null}
+        Submit Feedback
+      </Button>
+    </DialogActions>
+  </form>
+</Dialog>
 
       {/* ── AI Score Dialog ───────────────────────────────────────────────────── */}
       <Dialog open={scoreOpen} onClose={() => setScoreOpen(false)} maxWidth="sm" fullWidth>
