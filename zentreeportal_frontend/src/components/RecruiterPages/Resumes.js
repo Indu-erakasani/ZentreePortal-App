@@ -2848,7 +2848,7 @@ import {
   Close as CloseIcon, PictureAsPdf, OpenInNew, Business,
   Inventory2, PersonAdd, Work, SwapHoriz,
   EditNote, ArrowForward, FilterList, Analytics,
-  Notifications, Assignment,AccountTree, Chat
+  Notifications, Assignment,AccountTree, Chat, Schedule, VideoCall,
 } from "@mui/icons-material";
 
 import CandidateDetailContent, { nameInitials, fmtSalary, STATUS_COLOR, STAGE_COLOR } from "./Candidatedetailcontent";
@@ -2929,14 +2929,14 @@ const createRawManual = (payload) =>
     }).then(handle);
   const getAllExams = () =>
       fetch(`${BASE}/exams/`, { headers: getHeaders() }).then(handle);
-  const getNotifications = () =>
-    fetch(`${BASE}/exams/notifications/`, { headers: getHeaders() }).then(handle);
+  // const getNotifications = () =>
+  //   fetch(`${BASE}/exams/notifications/`, { headers: getHeaders() }).then(handle);
   
-  const markNotifRead = (id) =>
-    fetch(`${BASE}/exams/notifications/${id}/read`, { method: "PUT", headers: getHeaders() }).then(handle);
+  // const markNotifRead = (id) =>
+  //   fetch(`${BASE}/exams/notifications/${id}/read`, { method: "PUT", headers: getHeaders() }).then(handle);
   
-  const markAllNotifsRead = () =>
-    fetch(`${BASE}/exams/notifications/read-all`, { method: "PUT", headers: getHeaders() }).then(handle);
+  // const markAllNotifsRead = () =>
+  //   fetch(`${BASE}/exams/notifications/read-all`, { method: "PUT", headers: getHeaders() }).then(handle);
 
 
 
@@ -2950,7 +2950,7 @@ const scoreCandidate = (resume_id, job_id) =>
 const getCachedScore = (resume_id, job_id) =>
   fetch(`${BASE}/score/candidate?resume_id=${resume_id}&job_id=${job_id}`, {
     headers: getHeaders(),
-  }).then(handle);
+  }).then(r => r.ok ? r.json() : null) 
 
 
 // ── Tracking APIs (for detail view) ──────────────────────────────────────────
@@ -3195,6 +3195,253 @@ const RawPdfViewerDialog = ({ open, onClose, raw }) => {
     </Dialog>
   );
 };
+
+
+
+
+function ScheduleInterviewCard({ tracking, candidate, onScheduled }) {
+  const BASE         = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000/api";
+  const getHeaders   = () => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+  });
+
+  const [open,    setOpen]    = React.useState(false);
+  const [saving,  setSaving]  = React.useState(false);
+  const [result,  setResult]  = React.useState(null);
+  const [error,   setError]   = React.useState("");
+  const [form,    setForm]    = React.useState({
+    interviewer_name:  "",
+    interviewer_email: "",
+    candidate_email:   candidate?.email || "",
+    interview_date:    new Date().toISOString().split("T")[0],
+    interview_time:    "10:00",
+    duration_minutes:  60,
+    interview_type:    "Video",
+    timezone:          "Asia/Kolkata",
+    notes:             "",
+  });
+
+  // Upcoming schedules
+  const upcoming = (tracking?.scheduled_interviews || [])
+    .filter(s => s.status === "Scheduled")
+    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true); setError("");
+    try {
+      const res = await fetch(
+        `${BASE}/tracking/${tracking._id}/schedule`,
+        {
+          method:  "POST",
+          headers: getHeaders(),
+          body:    JSON.stringify({ ...form, stage: tracking.current_stage }),
+        }
+      ).then(r => r.json());
+      if (res.success) {
+        setResult(res);
+        onScheduled?.();
+      } else {
+        setError(res.message || "Failed to schedule");
+      }
+    } catch {
+      setError("Network error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card variant="outlined" sx={{ borderRadius: 2 }}>
+      <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+        <Box display="flex" alignItems="center" justifyContent="space-between" mb={1.5}>
+          <Box display="flex" alignItems="center" gap={1}>
+            <Schedule sx={{ fontSize: 18, color: "#0277bd" }} />
+            <Typography fontSize={13} fontWeight={700}>
+              Schedule Interview
+            </Typography>
+            {upcoming.length > 0 && (
+              <Chip label={`${upcoming.length} upcoming`} size="small"
+                sx={{ bgcolor: "#e3f2fd", color: "#0277bd", fontSize: 10 }} />
+            )}
+          </Box>
+          <Button size="small" variant="outlined" onClick={() => { setOpen(true); setResult(null); setError(""); }}
+            sx={{ fontSize: 11 }}>
+            + Schedule
+          </Button>
+        </Box>
+
+        {/* Upcoming list */}
+        {upcoming.length > 0 ? (
+          <Box display="flex" flexDirection="column" gap={1}>
+            {upcoming.slice(0, 2).map((s, i) => (
+              <Box key={i} sx={{ p: 1.2, bgcolor: "#e3f2fd", borderRadius: 1.5,
+                display: "flex", alignItems: "center", gap: 1.5 }}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography fontSize={12} fontWeight={700} color="#1a237e">
+                    {new Date(s.scheduled_at).toLocaleDateString("en-IN", {
+                      weekday: "short", day: "2-digit", month: "short"
+                    })} at{" "}
+                    {new Date(s.scheduled_at).toLocaleTimeString("en-IN", {
+                      hour: "2-digit", minute: "2-digit"
+                    })}
+                  </Typography>
+                  <Typography fontSize={11} color="text.secondary">
+                    {s.stage} · {s.interview_type} · {s.interviewer_name}
+                  </Typography>
+                </Box>
+                {s.meeting_link && (
+                  <IconButton size="small"
+                    onClick={() => window.open(s.meeting_link, "_blank")}>
+                    <VideoCall sx={{ fontSize: 16, color: "#0277bd" }} />
+                  </IconButton>
+                )}
+              </Box>
+            ))}
+          </Box>
+        ) : (
+          <Typography fontSize={12} color="text.disabled">
+            No interviews scheduled yet.
+          </Typography>
+        )}
+      </CardContent>
+
+      {/* Schedule Dialog */}
+      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0",
+          borderTop: "4px solid #0277bd" }}>
+          <Typography fontWeight={700}>Schedule Interview</Typography>
+          <Typography fontSize={12} color="text.secondary">
+            {candidate?.name} · {tracking?.current_stage}
+          </Typography>
+        </DialogTitle>
+
+        {result ? (
+          <>
+            <DialogContent sx={{ pt: 3 }}>
+              <Box display="flex" flexDirection="column" alignItems="center" gap={2} py={2}>
+                <CheckCircle sx={{ fontSize: 64, color: "#2e7d32" }} />
+                <Typography fontWeight={700} color="success.dark" fontSize={16}>
+                  Interview Scheduled!
+                </Typography>
+                <Box width="100%" p={2} bgcolor="#e8f5e9" borderRadius={2}>
+                  <Typography fontSize={12} color="text.secondary">
+                    📧 Candidate: {result.candidate_email_sent ? "✅ Email sent" : "❌ Not sent"}
+                  </Typography>
+                  <Typography fontSize={12} color="text.secondary">
+                    📧 Interviewer: {result.interviewer_email_sent ? "✅ Email sent" : "❌ Not sent"}
+                  </Typography>
+                </Box>
+                {result.meeting_link && (
+                  <Box width="100%" p={1.5} bgcolor="#e3f2fd" borderRadius={2}
+                    display="flex" alignItems="center" gap={1}>
+                    <VideoCall sx={{ color: "#0277bd" }} />
+                    <Typography fontSize={12} color="#0277bd" flex={1} noWrap>
+                      {result.meeting_link}
+                    </Typography>
+                    <IconButton size="small"
+                      onClick={() => window.open(result.meeting_link, "_blank")}>
+                      <OpenInNew sx={{ fontSize: 14 }} />
+                    </IconButton>
+                  </Box>
+                )}
+              </Box>
+            </DialogContent>
+            <DialogActions sx={{ px: 3, pb: 2 }}>
+              <Button variant="contained" onClick={() => { setOpen(false); setResult(null); }}>
+                Done
+              </Button>
+            </DialogActions>
+          </>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <DialogContent sx={{ pt: 2.5 }}>
+              {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <TextField fullWidth size="small" required label="Interviewer Name"
+                    value={form.interviewer_name}
+                    onChange={e => setForm(p => ({ ...p, interviewer_name: e.target.value }))} />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField fullWidth size="small" label="Interviewer Email"
+                    type="email" value={form.interviewer_email}
+                    onChange={e => setForm(p => ({ ...p, interviewer_email: e.target.value }))}
+                    helperText="Feedback link will be emailed" />
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField fullWidth size="small" label="Candidate Email"
+                    type="email" value={form.candidate_email}
+                    onChange={e => setForm(p => ({ ...p, candidate_email: e.target.value }))}
+                    helperText="Interview invite will be sent" />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField fullWidth size="small" required label="Date" type="date"
+                    value={form.interview_date}
+                    onChange={e => setForm(p => ({ ...p, interview_date: e.target.value }))}
+                    InputLabelProps={{ shrink: true }}
+                    inputProps={{ min: new Date().toISOString().split("T")[0] }} />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField fullWidth size="small" required label="Time" type="time"
+                    value={form.interview_time}
+                    onChange={e => setForm(p => ({ ...p, interview_time: e.target.value }))}
+                    InputLabelProps={{ shrink: true }} />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField fullWidth size="small" label="Duration (mins)" type="number"
+                    value={form.duration_minutes}
+                    onChange={e => setForm(p => ({ ...p, duration_minutes: Number(e.target.value) }))}
+                    inputProps={{ min: 15, step: 15 }} />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField select fullWidth size="small" label="Type"
+                    value={form.interview_type}
+                    onChange={e => setForm(p => ({ ...p, interview_type: e.target.value }))}>
+                    {["Video","Phone","In-Person","Panel"].map(t => (
+                      <MenuItem key={t} value={t}>{t}</MenuItem>
+                    ))}
+                  </TextField>
+                </Grid>
+                {form.interview_type === "Video" && (
+                  <Grid item xs={12}>
+                    <Box p={1.5} bgcolor="#e8f5e9" borderRadius={1.5}
+                      display="flex" alignItems="center" gap={1}>
+                      <VideoCall sx={{ color: "#34a853", fontSize: 18 }} />
+                      <Typography fontSize={12} color="#1e7e34">
+                        Google Meet link will be auto-generated and emailed.
+                      </Typography>
+                    </Box>
+                  </Grid>
+                )}
+                <Grid item xs={12}>
+                  <TextField fullWidth size="small" multiline rows={2} label="Notes (optional)"
+                    value={form.notes}
+                    onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
+                </Grid>
+              </Grid>
+            </DialogContent>
+            <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
+              <Button onClick={() => setOpen(false)}>Cancel</Button>
+              <Button type="submit" variant="contained" disabled={saving}
+                startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <Schedule />}
+                sx={{ bgcolor: "#0277bd" }}>
+                {saving ? "Scheduling…" : "Schedule & Send Invites"}
+              </Button>
+            </DialogActions>
+          </form>
+        )}
+      </Dialog>
+    </Card>
+  );
+}
+
+
+
+
+
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Main Component
@@ -3776,15 +4023,15 @@ const handleTrackingIvSave = async (e) => {
     }
   };
   
-  const loadNotifications = async () => {
-    setNotifLoading(true);
-    try {
-      const res = await getNotifications();
-      setNotifs(res.data || []);
-      setUnreadCount(res.unread || 0);
-    } catch { }
-    finally { setNotifLoading(false); }
-  };
+  // const loadNotifications = async () => {
+  //   setNotifLoading(true);
+  //   try {
+  //     const res = await getNotifications();
+  //     setNotifs(res.data || []);
+  //     setUnreadCount(res.unread || 0);
+  //   } catch { }
+  //   finally { setNotifLoading(false); }
+  // };
   const loadExams = async () => {
     try {
       const res = await getAllExams();
@@ -3798,9 +4045,11 @@ const handleTrackingIvSave = async (e) => {
   //   return () => clearInterval(interval);
   // }, []);
   useEffect(() => {
-    loadNotifications();
+    // loadNotifications();
     loadExams();
-    const interval = setInterval(() => { loadNotifications(); loadExams(); }, 30000);
+    const interval = setInterval(() => {
+      //  loadNotifications(); 
+      loadExams(); }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -3848,19 +4097,8 @@ const handleTrackingIvSave = async (e) => {
 
       {/* ── Page header ────────────────────────────────────────────────────── */}
       <Box display="flex" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2}>
-        {/* ── Notification bell ── */}
-<Box sx={{ position: "fixed", top: 16, right: 16, zIndex: 1300 }}>
-  <Tooltip title="Notifications">
-    <IconButton
-      onClick={() => { setNotifOpen(true); loadNotifications(); }}
-      sx={{ bgcolor: "#fff", boxShadow: 2, "&:hover": { bgcolor: "#f5f5f5" } }}
-    >
-      <Badge badgeContent={unreadCount} color="error" max={99}>
-        <Notifications sx={{ color: "#1a237e" }} />
-      </Badge>
-    </IconButton>
-  </Tooltip>
-</Box>
+
+
         <Box>
           <Typography variant="h4" color="primary.dark">Candidates</Typography>
           <Typography color="text.secondary" mt={0.5}>Manage candidate profiles and track applications</Typography>
@@ -4189,7 +4427,7 @@ const handleTrackingIvSave = async (e) => {
                         <TableCell>{r.linked_job_id ? <Box><Typography fontSize={12} color="#0277bd" fontWeight={600}>{r.linked_job_id}</Typography><Typography fontSize={11} color="text.secondary">{r.linked_job_title}</Typography>{r.client_name && <Typography fontSize={10} color="text.disabled">{r.client_name}</Typography>}</Box> : <Typography fontSize={12} color="text.disabled">Not assigned</Typography>}</TableCell>
                         <TableCell sx={{ fontSize: 11, color: "text.secondary", whiteSpace: "nowrap" }}>
                           {r.created_at ? new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
-                          <Typography fontSize={10} color="text.disabled">
+                          {/* <Typography fontSize={10} color="text.disabled">
                             {r.created_at ? new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
                             {(() => {
                               if (r.status === "Converted") {
@@ -4214,7 +4452,44 @@ const handleTrackingIvSave = async (e) => {
                               return null;
                             })()}
                          
-                          </Typography>
+                          </Typography> */}
+                          <TableCell sx={{ fontSize: 11, color: "text.secondary", whiteSpace: "nowrap" }}>
+                            {r.created_at
+                              ? new Date(r.created_at).toLocaleDateString("en-IN", {
+                                  day: "2-digit", month: "short", year: "numeric"
+                                })
+                              : "—"}
+                            {/* ✅ Use Box instead of Typography to avoid p > div nesting */}
+                            <Box>
+                              <Typography fontSize={10} color="text.disabled">
+                                {r.created_at
+                                  ? new Date(r.created_at).toLocaleTimeString("en-IN", {
+                                      hour: "2-digit", minute: "2-digit"
+                                    })
+                                  : ""}
+                              </Typography>
+                              {r.status === "Converted" ? (
+                                <Chip
+                                  label={r.converted_resume_id ? `→ ${r.converted_resume_id}` : "Converted"}
+                                  size="small"
+                                  color="success"
+                                  variant="outlined"
+                                  sx={{ fontSize: 9, height: 16, mt: 0.5 }}
+                                />
+                              ) : (() => {
+                                  const days = daysUntilExpiry(r.created_at);
+                                  if (days === null) return null;
+                                  if (days <= 0)
+                                    return <Chip label="Expired" size="small" color="error" sx={{ fontSize: 9, height: 16, mt: 0.5 }} />;
+                                  if (days <= 14)
+                                    return <Chip label={`Expires in ${days}d`} size="small" color="warning" sx={{ fontSize: 9, height: 16, mt: 0.5 }} />;
+                                  if (days <= 30)
+                                    return <Chip label={`${days}d left`} size="small" color="default" sx={{ fontSize: 9, height: 16, mt: 0.5 }} />;
+                                  return null;
+                                })()
+                              }
+                            </Box>
+                          </TableCell>
                         </TableCell>
                         <TableCell><Chip label={r.parse_status || "pending"} size="small" color={PARSE_COLOR[r.parse_status] || "default"} sx={{ fontSize: 10, fontWeight: 700 }} /></TableCell>
                         <TableCell><Chip label={r.status} size="small" color={RAW_STATUS_COLOR[r.status] || "default"} sx={{ fontSize: 11, fontWeight: 700 }} /></TableCell>
@@ -4320,7 +4595,7 @@ const handleTrackingIvSave = async (e) => {
   )}
 
   {/* ── Tab 1: Pipeline Tracking ── */}
-  {detailTab === 1 && (
+  {/* {detailTab === 1 && (
     <DialogContent sx={{ pt: 2 }}>
       {trackingError && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setTrackingError("")}>{trackingError}</Alert>
@@ -4330,7 +4605,7 @@ const handleTrackingIvSave = async (e) => {
         <Box display="flex" justifyContent="center" py={6}><CircularProgress /></Box>
       )}
 
-      {/* Not yet tracked */}
+    
       {!trackingLoading && !candidateTracking && (
         <Box display="flex" flexDirection="column" alignItems="center" py={6} gap={2}>
           <Avatar sx={{ width: 64, height: 64, bgcolor: "#e8eaf6" }}>
@@ -4346,11 +4621,11 @@ const handleTrackingIvSave = async (e) => {
         </Box>
       )}
 
-      {/* Tracked */}
+
       {!trackingLoading && candidateTracking && (
         <Box display="flex" flexDirection="column" gap={2.5}>
 
-          {/* Stage card */}
+     
           <Card variant="outlined" sx={{ borderRadius: 2 }}>
             <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
               <Typography fontSize={11} fontWeight={700} color="text.secondary"
@@ -4392,7 +4667,6 @@ const handleTrackingIvSave = async (e) => {
             </CardContent>
           </Card>
 
-          {/* Interview feedback */}
           <Box>
             <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
               <Typography fontSize={13} fontWeight={700} color="text.primary">
@@ -4471,7 +4745,7 @@ const handleTrackingIvSave = async (e) => {
             )}
           </Box>
 
-          {/* Stage history */}
+     
           {candidateTracking.stage_history?.length > 0 && (
             <Box>
               <Typography fontSize={13} fontWeight={700} color="text.primary" mb={1}>
@@ -4495,7 +4769,139 @@ const handleTrackingIvSave = async (e) => {
         </Box>
       )}
     </DialogContent>
-  )}
+  )} */}
+
+
+{detailTab === 1 && (
+  <DialogContent sx={{ pt: 2 }}>
+    {trackingError && (
+      <Alert severity="error" sx={{ mb: 2 }} onClose={() => setTrackingError("")}>
+        {trackingError}
+      </Alert>
+    )}
+
+    {trackingLoading && (
+      <Box display="flex" justifyContent="center" py={6}><CircularProgress /></Box>
+    )}
+
+    {!trackingLoading && !candidateTracking && (
+      <Box display="flex" flexDirection="column" alignItems="center" py={6} gap={2}>
+        <Avatar sx={{ width: 64, height: 64, bgcolor: "#e8eaf6" }}>
+          <AccountTree sx={{ fontSize: 32, color: "#9fa8da" }} />
+        </Avatar>
+        <Typography variant="h6" color="text.secondary">Not in pipeline yet</Typography>
+        <Button variant="contained" startIcon={<Add />} onClick={handleStartTracking}>
+          Start Tracking
+        </Button>
+      </Box>
+    )}
+
+    {!trackingLoading && candidateTracking && (
+      <Box display="flex" flexDirection="column" gap={2.5}>
+
+        {/* Stage card */}
+        <Card variant="outlined" sx={{ borderRadius: 2 }}>
+          <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+            <Typography fontSize={11} fontWeight={700} color="text.secondary"
+              textTransform="uppercase" letterSpacing={0.5} mb={1.5}>
+              Current Pipeline Stage
+            </Typography>
+            <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+              <TextField
+                select size="small" label="Stage"
+                value={trackingStage}
+                onChange={e => setTrackingStage(e.target.value)}
+                sx={{ minWidth: 200 }}
+              >
+                {[
+                  "Screening","Technical Round 1","Technical Round 2","HR Round",
+                  "Manager Round","Final Round","Offer Stage","Negotiation",
+                  "Offer Accepted","Offer Declined","Joined","Rejected","Withdrawn"
+                ].map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+              </TextField>
+              <Button
+                variant="contained" size="small"
+                disabled={trackingStage === candidateTracking.current_stage || trackingLoading}
+                onClick={() => handleTrackingStageUpdate(trackingStage)}
+              >
+                Update Stage
+              </Button>
+              <Chip
+                label={candidateTracking.pipeline_status}
+                size="small"
+                color={candidateTracking.pipeline_status === "Active" ? "success" : "default"}
+              />
+            </Box>
+          </CardContent>
+        </Card>
+
+        {/* ── Schedule Interview Card ── */}
+        <ScheduleInterviewCard
+          tracking={candidateTracking}
+          candidate={selected}
+          onScheduled={() => {
+            // Reload tracking after scheduling
+            getTrackingByResume(selected.resume_id)
+              .then(res => setCandidateTracking(res.data?.[0] || null))
+              .catch(() => {});
+          }}
+        />
+
+        {/* Interview feedback */}
+        <Box>
+          <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+            <Typography fontSize={13} fontWeight={700}>
+              Interview Feedback ({candidateTracking.interviews?.length || 0})
+            </Typography>
+            <Button size="small" variant="outlined" startIcon={<Chat />}
+              onClick={() => setTrackingIvOpen(true)}>
+              Add Feedback
+            </Button>
+          </Box>
+
+          {(!candidateTracking.interviews || candidateTracking.interviews.length === 0) ? (
+            <Box p={2} bgcolor="#f5f7fa" borderRadius={2} textAlign="center">
+              <Typography fontSize={12} color="text.disabled">No interview feedback yet.</Typography>
+            </Box>
+          ) : (
+            <Box display="flex" flexDirection="column" gap={1.5}>
+              {[...candidateTracking.interviews].reverse().map((iv, i) => (
+                <Card key={i} variant="outlined" sx={{ borderRadius: 2 }}>
+                  <CardContent sx={{ p: 1.8, "&:last-child": { pb: 1.8 } }}>
+                    <Box display="flex" alignItems="center" justifyContent="space-between" mb={0.8}>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Chip label={iv.stage || "Interview"} size="small"
+                          sx={{ fontSize: 10, bgcolor: "#e8eaf6", color: "#1a237e", fontWeight: 700 }} />
+                        <Typography fontSize={12} fontWeight={600}>{iv.interviewer}</Typography>
+                      </Box>
+                      <Box display="flex" gap={0.3}>
+                        {[1,2,3,4,5].map(n => (
+                          <Box key={n} sx={{ color: n <= (iv.feedback_score||0) ? "#f9a825" : "#e0e0e0", fontSize: 14 }}>★</Box>
+                        ))}
+                      </Box>
+                    </Box>
+                    {iv.recommendation && (
+                      <Chip label={iv.recommendation} size="small"
+                        color={["Strong Hire","Hire"].includes(iv.recommendation) ? "success"
+                          : iv.recommendation === "No Hire" ? "error" : "default"}
+                        sx={{ fontSize: 10, fontWeight: 700, mb: 0.8 }} />
+                    )}
+                    {iv.feedback_summary && (
+                      <Typography fontSize={12} color="text.secondary" lineHeight={1.6}>
+                        {iv.feedback_summary}
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </Box>
+          )}
+        </Box>
+
+      </Box>
+    )}
+  </DialogContent>
+)}
 </Dialog>
 
 {/* ── Tracking Interview Feedback Dialog (from Detail View) ──────────────── */}
@@ -5022,7 +5428,7 @@ const handleTrackingIvSave = async (e) => {
 </Dialog>
 
 {/* ── Notifications Drawer ──────────────────────────────────────────────── */}
-<Dialog open={notifOpen} onClose={() => setNotifOpen(false)} maxWidth="sm" fullWidth
+{/* <Dialog open={notifOpen} onClose={() => setNotifOpen(false)} maxWidth="sm" fullWidth
   PaperProps={{ sx: { position: "fixed", right: 16, top: 60, m: 0, maxHeight: "80vh", borderRadius: 2 } }}>
   <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0", pb: 1.5 }}>
     <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -5033,7 +5439,9 @@ const handleTrackingIvSave = async (e) => {
       </Box>
       <Box display="flex" gap={1}>
         {unreadCount > 0 && (
-          <Button size="small" onClick={async () => { await markAllNotifsRead(); loadNotifications(); }}
+          <Button size="small" onClick={async () => { await markAllNotifsRead(); 
+            // loadNotifications();
+           }}
             sx={{ fontSize: 11 }}>
             Mark all read
           </Button>
@@ -5053,7 +5461,9 @@ const handleTrackingIvSave = async (e) => {
     {notifs.map(n => (
       <Box key={n._id}
         onClick={async () => {
-          if (!n.is_read) { await markNotifRead(n._id); loadNotifications(); }
+          if (!n.is_read) { await markNotifRead(n._id);
+            //  loadNotifications(); 
+            }
         }}
         sx={{
           px: 2, py: 1.5, borderBottom: "1px solid #f0f0f0",
@@ -5089,7 +5499,7 @@ const handleTrackingIvSave = async (e) => {
       </Box>
     ))}
   </DialogContent>
-</Dialog>
+</Dialog> */}
 
 
 
