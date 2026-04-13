@@ -13,3 +13,5 @@ env/
 logs/
 /tmp/
 *.tmp
+zentreeportal_backend/uploads/onboarding
+zentreeportal_backend/uploads/resumes

@@ -1,0 +1,5 @@
+
+# Google credentials — never commit these
+google_credentials.json
+google_token.json
+oauth_client.json
