@@ -576,19 +576,19 @@ export default function Placements() {
             <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Candidate Details</Typography>
             <Grid container spacing={2} mb={2}>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" required label="Candidate Name"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Candidate Name"
                   name="candidate_name" value={formData.candidate_name} onChange={handleChange} />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" required label="Resume ID"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Resume ID"
                   name="resume_id" value={formData.resume_id} onChange={handleChange} placeholder="e.g. RES001" />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" required label="Job Title"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Job Title"
                   name="job_title" value={formData.job_title} onChange={handleChange} />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" required label="Job ID"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Job ID"
                   name="job_id" value={formData.job_id} onChange={handleChange} placeholder="e.g. JOB001" />
               </Grid>
             </Grid>
@@ -596,23 +596,23 @@ export default function Placements() {
             <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Client &amp; Recruiter</Typography>
             <Grid container spacing={2} mb={2}>
               <Grid item xs={12} sm={6}>
-                <TextField select fullWidth size="small" required label="Client"
+                <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" required label="Client"
                   name="client_name" value={formData.client_name} onChange={handleChange}>
                   <MenuItem value="">Select Client</MenuItem>
                   {clients.map(c => <MenuItem key={c._id} value={c.company_name}>{c.company_name}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" required label="Recruiter"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Recruiter"
                   name="recruiter" value={formData.recruiter} onChange={handleChange} />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" type="date" label="Offer Date"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="date" label="Offer Date"
                   name="offer_date" value={formData.offer_date} onChange={handleChange}
                   InputLabelProps={{ shrink: true }} />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField fullWidth size="small" required type="date" label="Joining Date"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" required type="date" label="Joining Date"
                   name="joining_date" value={formData.joining_date} onChange={handleChange}
                   InputLabelProps={{ shrink: true }} />
               </Grid>
@@ -621,37 +621,37 @@ export default function Placements() {
             <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Compensation &amp; Billing</Typography>
             <Grid container spacing={2} mb={2}>
               <Grid item xs={12} sm={4}>
-                <TextField fullWidth size="small" required type="number" label="Annual CTC (₹)"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" required type="number" label="Annual CTC (₹)"
                   name="final_ctc" value={formData.final_ctc} onChange={handleChange} />
               </Grid>
               <Grid item xs={12} sm={4}>
-                <TextField fullWidth size="small" type="number" label="Billing %"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Billing %"
                   name="billing_percentage" value={formData.billing_percentage} onChange={handleChange}
                   inputProps={{ step: "0.01" }} />
               </Grid>
               <Grid item xs={12} sm={4}>
-                <TextField fullWidth size="small" type="number" label="Billing Amount (₹)"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Billing Amount (₹)"
                   name="billing_amount" value={formData.billing_amount} onChange={handleChange}
                   helperText="Auto-calculated from CTC × %" />
               </Grid>
               <Grid item xs={12} sm={4}>
-                <TextField fullWidth size="small" type="number" label="Guarantee Period (days)"
+                <TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Guarantee Period (days)"
                   name="guarantee_period" value={formData.guarantee_period} onChange={handleChange} />
               </Grid>
               <Grid item xs={12} sm={4}>
-                <TextField select fullWidth size="small" label="Payment Status"
+                <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Payment Status"
                   name="payment_status" value={formData.payment_status} onChange={handleChange}>
                   {PAYMENT_STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={4}>
-                <TextField select fullWidth size="small" label="Candidate Status"
+                <TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Candidate Status"
                   name="candidate_status" value={formData.candidate_status} onChange={handleChange}>
                   {CANDIDATE_STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
                 </TextField>
               </Grid>
             </Grid>
-            <TextField fullWidth multiline rows={2} size="small" label="Notes"
+            <TextField sx={{ width: "100%", minWidth: 400 }} multiline rows={2} size="small" label="Notes"
               name="notes" value={formData.notes} onChange={handleChange} />
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
