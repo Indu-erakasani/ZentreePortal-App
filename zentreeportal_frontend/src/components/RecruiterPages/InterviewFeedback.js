@@ -9,7 +9,7 @@ import {
 } from "@mui/icons-material";
 import { useParams } from "react-router-dom";
 
-const BASE = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000/api";
+const BASE = process.env.REACT_APP_API_BASE_URL;
 
 const RECOMMENDATIONS = ["Strong Hire", "Hire", "Maybe", "No Hire"];
 const INTERVIEW_TYPES = ["Video", "Phone", "In-Person", "Panel"];

@@ -859,7 +859,7 @@ ChartJS.register(
 );
 
 // ── API ───────────────────────────────────────────────────────────────────────
-const BASE = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000/api";
+const BASE = process.env.REACT_APP_API_BASE_URL;
 
 const authFetch = async (url, opts = {}) => {
   const token = localStorage.getItem("access_token") || "";

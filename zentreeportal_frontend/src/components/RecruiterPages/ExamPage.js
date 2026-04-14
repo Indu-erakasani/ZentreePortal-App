@@ -11,7 +11,7 @@ import {
   PlayArrow, ArrowForward, Lock,
 } from "@mui/icons-material";
 
-const BASE = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000/api";
+const BASE = process.env.REACT_APP_API_BASE_URL;
 
 const DIFFICULTY_COLOR = {
   Easy:   { bg: "#e8f5e9", border: "#a5d6a7", text: "#1b5e20" },
