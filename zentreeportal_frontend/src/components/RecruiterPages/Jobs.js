@@ -4363,36 +4363,36 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
                 <form onSubmit={handleSave}><DialogContent sx={{ pt:3 }}>
                     <Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Basic Information</Typography>
                     <Grid container spacing={2} mb={2}>
-                        <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Job ID" name="job_id" value={formData.job_id} onChange={handleChange} disabled={!!selected}/></Grid>
-                        <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Job Title" name="title" value={formData.title} onChange={handleChange}/></Grid>
-                        <Grid item xs={12} sm={6}><TextField select fullWidth size="small" required label="Client" name="client_id" value={formData.client_id} onChange={handleChange}><MenuItem value="">Select Client</MenuItem>{clients.map(c=><MenuItem key={c._id} value={c._id}><Box display="flex" alignItems="center" gap={1}><Business fontSize="small" sx={{color:"#0277bd"}}/>{c.company_name}</Box></MenuItem>)}</TextField></Grid>
-                        <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Location" name="location" value={formData.location} onChange={handleChange}/></Grid>
-                        <Grid item xs={6} sm={3}><TextField select fullWidth size="small" label="Priority" name="priority" value={formData.priority} onChange={handleChange}>{PRIORITIES.map(p=><MenuItem key={p} value={p}>{p}</MenuItem>)}</TextField></Grid>
-                        <Grid item xs={6} sm={3}><TextField select fullWidth size="small" label="Status" name="status" value={formData.status} onChange={handleChange}>{STATUSES.map(s=><MenuItem key={s} value={s}>{s}</MenuItem>)}</TextField></Grid>
-                        <Grid item xs={6} sm={3}><TextField select fullWidth size="small" label="Job Type" name="job_type" value={formData.job_type} onChange={handleChange}>{JOB_TYPES.map(t=><MenuItem key={t} value={t}>{t}</MenuItem>)}</TextField></Grid>
-                        <Grid item xs={6} sm={3}><TextField select fullWidth size="small" label="Work Mode" name="work_mode" value={formData.work_mode} onChange={handleChange}>{WORK_MODES.map(m=><MenuItem key={m} value={m}>{m}</MenuItem>)}</TextField></Grid>
+                        <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Job ID" name="job_id" value={formData.job_id} onChange={handleChange} disabled={!!selected}/></Grid>
+                        <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Job Title" name="title" value={formData.title} onChange={handleChange}/></Grid>
+                        <Grid item xs={12} sm={6}><TextField select sx={{ width: "100%", minWidth: 400 }} size="small" required label="Client" name="client_id" value={formData.client_id} onChange={handleChange}><MenuItem value="">Select Client</MenuItem>{clients.map(c=><MenuItem key={c._id} value={c._id}><Box display="flex" alignItems="center" gap={1}><Business fontSize="small" sx={{color:"#0277bd"}}/>{c.company_name}</Box></MenuItem>)}</TextField></Grid>
+                        <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" required label="Location" name="location" value={formData.location} onChange={handleChange}/></Grid>
+                        <Grid item xs={6} sm={3}><TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Priority" name="priority" value={formData.priority} onChange={handleChange}>{PRIORITIES.map(p=><MenuItem key={p} value={p}>{p}</MenuItem>)}</TextField></Grid>
+                        <Grid item xs={6} sm={3}><TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Status" name="status" value={formData.status} onChange={handleChange}>{STATUSES.map(s=><MenuItem key={s} value={s}>{s}</MenuItem>)}</TextField></Grid>
+                        <Grid item xs={6} sm={3}><TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Job Type" name="job_type" value={formData.job_type} onChange={handleChange}>{JOB_TYPES.map(t=><MenuItem key={t} value={t}>{t}</MenuItem>)}</TextField></Grid>
+                        <Grid item xs={6} sm={3}><TextField select sx={{ width: "100%", minWidth: 400 }} size="small" label="Work Mode" name="work_mode" value={formData.work_mode} onChange={handleChange}>{WORK_MODES.map(m=><MenuItem key={m} value={m}>{m}</MenuItem>)}</TextField></Grid>
                     </Grid>
                     <Divider sx={{ my:2 }}/><Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Requirements</Typography>
                     <Grid container spacing={2} mb={2}>
-                        <Grid item xs={6} sm={3}><TextField fullWidth size="small" type="number" label="Openings" name="openings" value={formData.openings} onChange={handleChange} inputProps={{min:1}}/></Grid>
-                        <Grid item xs={6} sm={3}><TextField fullWidth size="small" type="number" label="Min Exp (yrs)" name="experience_min" value={formData.experience_min} onChange={handleChange} inputProps={{min:0}}/></Grid>
-                        <Grid item xs={6} sm={3}><TextField fullWidth size="small" type="number" label="Max Exp (yrs)" name="experience_max" value={formData.experience_max} onChange={handleChange} inputProps={{min:0}}/></Grid>
-                        <Grid item xs={6} sm={3}><TextField fullWidth size="small" type="date" label="Deadline" name="deadline" value={formData.deadline} onChange={handleChange} InputLabelProps={{shrink:true}}/></Grid>
-                        <Grid item xs={12} sm={6}><TextField fullWidth size="small" type="number" label="Min Salary (₹)" name="salary_min" value={formData.salary_min} onChange={handleChange}/></Grid>
-                        <Grid item xs={12} sm={6}><TextField fullWidth size="small" type="number" label="Max Salary (₹)" name="salary_max" value={formData.salary_max} onChange={handleChange}/></Grid>
-                        <Grid item xs={12}><TextField fullWidth multiline rows={3} size="small" label="Required Skills (comma-separated)" name="skills" value={formData.skills} onChange={handleChange}/></Grid>
+                        <Grid item xs={6} sm={3}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Openings" name="openings" value={formData.openings} onChange={handleChange} inputProps={{min:1}}/></Grid>
+                        <Grid item xs={6} sm={3}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Min Exp (yrs)" name="experience_min" value={formData.experience_min} onChange={handleChange} inputProps={{min:0}}/></Grid>
+                        <Grid item xs={6} sm={3}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Max Exp (yrs)" name="experience_max" value={formData.experience_max} onChange={handleChange} inputProps={{min:0}}/></Grid>
+                        <Grid item xs={6} sm={3}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="date" label="Deadline" name="deadline" value={formData.deadline} onChange={handleChange} InputLabelProps={{shrink:true}}/></Grid>
+                        <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Min Salary (₹)" name="salary_min" value={formData.salary_min} onChange={handleChange}/></Grid>
+                        <Grid item xs={12} sm={6}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Max Salary (₹)" name="salary_max" value={formData.salary_max} onChange={handleChange}/></Grid>
+                        <Grid item xs={12}><TextField sx={{ width: "100%", minWidth: 820 }} multiline rows={3} size="small" label="Required Skills (comma-separated)" name="skills" value={formData.skills} onChange={handleChange}/></Grid>
                     </Grid>
                     <Divider sx={{ my:2 }}/><Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Screening</Typography>
                     <Grid container spacing={2} mb={2}>
-                        <Grid item xs={6} sm={3}><TextField fullWidth size="small" type="number" label="MCQ Count" name="mcq_questions_count" value={formData.mcq_questions_count} onChange={handleChange} inputProps={{min:0}}/></Grid>
-                        <Grid item xs={6} sm={3}><TextField fullWidth size="small" type="number" label="Subjective Count" name="subjective_questions_count" value={formData.subjective_questions_count} onChange={handleChange} inputProps={{min:0}}/></Grid>
-                        <Grid item xs={6} sm={3}><TextField fullWidth size="small" type="number" label="Coding Count" name="coding_questions_count" value={formData.coding_questions_count} onChange={handleChange} inputProps={{min:0}}/></Grid>
-                        <Grid item xs={6} sm={3}><TextField fullWidth size="small" type="number" label="Screening Time (mins)" name="screening_time_minutes" value={formData.screening_time_minutes} onChange={handleChange} inputProps={{min:0}}/></Grid>
+                        <Grid item xs={6} sm={3}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="MCQ Count" name="mcq_questions_count" value={formData.mcq_questions_count} onChange={handleChange} inputProps={{min:0}}/></Grid>
+                        <Grid item xs={6} sm={3}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Subjective Count" name="subjective_questions_count" value={formData.subjective_questions_count} onChange={handleChange} inputProps={{min:0}}/></Grid>
+                        <Grid item xs={6} sm={3}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Coding Count" name="coding_questions_count" value={formData.coding_questions_count} onChange={handleChange} inputProps={{min:0}}/></Grid>
+                        <Grid item xs={6} sm={3}><TextField sx={{ width: "100%", minWidth: 400 }} size="small" type="number" label="Screening Time (mins)" name="screening_time_minutes" value={formData.screening_time_minutes} onChange={handleChange} inputProps={{min:0}}/></Grid>
                     </Grid>
                     <Divider sx={{ my:2 }}/><Typography variant="subtitle2" color="primary" mb={1.5} fontWeight={700}>Description &amp; Notes</Typography>
                     <Grid container spacing={2}>
-                        <Grid item xs={12}><TextField fullWidth multiline rows={8} size="small" label="Job Description" name="description" value={formData.description} onChange={handleChange}/></Grid>
-                        <Grid item xs={12}><TextField fullWidth multiline rows={3} size="small" label="Internal Notes" name="notes" value={formData.notes} onChange={handleChange}/></Grid>
+                        <Grid item xs={12}><TextField sx={{ width: "100%", minWidth: 800 }} multiline rows={8} size="small" label="Job Description" name="description" value={formData.description} onChange={handleChange}/></Grid>
+                        <Grid item xs={12}><TextField sx={{ width: "100%", minWidth: 800 }} multiline rows={3} size="small" label="Internal Notes" name="notes" value={formData.notes} onChange={handleChange}/></Grid>
                     </Grid>
                 </DialogContent>
                 <DialogActions sx={{ px:3,pb:2.5,borderTop:"1px solid #e0e0e0" }}>

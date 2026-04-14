@@ -2570,34 +2570,34 @@ export default function Clients() {
               <Typography fontSize={13} fontWeight={700} color="#1e40af">Basic Information</Typography>
             </Box>
             <Grid container spacing={2} mb={3}>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Client ID *" name="client_id" value={formData.client_id} onChange={handleChange} disabled={!!formTarget} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Company Name *" name="company_name" value={formData.company_name} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={12} sm={6}><TextField select fullWidth size="small" required label="Industry *" name="industry" value={formData.industry} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }}>{INDUSTRIES.map(i => <MenuItem key={i} value={i}>{i}</MenuItem>)}</TextField></Grid>
-              <Grid item xs={12} sm={6}><TextField select fullWidth size="small" label="Status" name="relationship_status" value={formData.relationship_status} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }}>{STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}</TextField></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Company Size *" name="company_size" value={formData.company_size} onChange={handleChange} placeholder="e.g. 100–500" sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Location" name="location" value={formData.location} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField  size="small" required label="Client ID" name="client_id" value={formData.client_id} onChange={handleChange} disabled={!!formTarget} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField  size="small" required label="Company Name" name="company_name" value={formData.company_name} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField select  size="small" required label="Industry" name="industry" value={formData.industry} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }}>{INDUSTRIES.map(i => <MenuItem key={i} value={i}>{i}</MenuItem>)}</TextField></Grid>
+              <Grid item xs={12} sm={6}><TextField select  size="small" label="Status" name="relationship_status" value={formData.relationship_status} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } ,width: "100%", minWidth: 400}}>{STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}</TextField></Grid>
+              <Grid item xs={12} sm={6}><TextField  size="small" required label="Company Size" name="company_size" value={formData.company_size} onChange={handleChange} placeholder="e.g. 100–500" sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } ,width: "100%", minWidth: 400}} /></Grid>
+              <Grid item xs={12} sm={6}><TextField  size="small" label="Location" name="location" value={formData.location} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
             </Grid>
             <Box sx={{ borderLeft: "3px solid #059669", pl: 1.5, mb: 2, borderRadius: 0 }}>
               <Typography fontSize={13} fontWeight={700} color="#059669">Contact Information</Typography>
             </Box>
             <Grid container spacing={2} mb={3}>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Primary Contact *" name="primary_contact" value={formData.primary_contact} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Title *" name="contact_title" value={formData.contact_title} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" required type="email" label="Email *" name="email" value={formData.email} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" required label="Phone *" name="phone" value={formData.phone} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={6} sm={4}><TextField fullWidth size="small" label="City" name="city" value={formData.city} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={6} sm={4}><TextField fullWidth size="small" label="State" name="state" value={formData.state} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={12} sm={4}><TextField fullWidth size="small" label="Country" name="country" value={formData.country} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={12}><TextField fullWidth size="small" label="Website" name="website" value={formData.website} onChange={handleChange} placeholder="https://…" sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField  size="small" required label="Primary Contact" name="primary_contact" value={formData.primary_contact} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField  size="small" required label="Title" name="contact_title" value={formData.contact_title} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField  size="small" required type="email" label="Email" name="email" value={formData.email} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField  size="small" required label="Phone" name="phone" value={formData.phone} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={6} sm={4}><TextField  size="small" label="City" name="city" value={formData.city} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={6} sm={4}><TextField  size="small" label="State" name="state" value={formData.state} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={12} sm={4}><TextField  size="small" label="Country" name="country" value={formData.country} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={12}><TextField  size="small" label="Website" name="website" value={formData.website} onChange={handleChange} placeholder="https://…" sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
             </Grid>
             <Box sx={{ borderLeft: "3px solid #f59e0b", pl: 1.5, mb: 2, borderRadius: 0 }}>
               <Typography fontSize={13} fontWeight={700} color="#b45309">Billing & Agreement</Typography>
             </Box>
             <Grid container spacing={2} mb={2}>
-              <Grid item xs={12} sm={6}><TextField fullWidth size="small" type="number" label="Billing Rate (%)" name="billing_rate" value={formData.billing_rate} onChange={handleChange} inputProps={{ step: "0.01" }} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} /></Grid>
-              <Grid item xs={12} sm={6}><TextField select fullWidth size="small" label="Payment Terms" name="payment_terms" value={formData.payment_terms} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }}>{PAYMENT_TERMS.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}</TextField></Grid>
+              <Grid item xs={12} sm={6}><TextField  size="small" type="number" label="Billing Rate (%)" name="billing_rate" value={formData.billing_rate} onChange={handleChange} inputProps={{ step: "0.01" }} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField select  size="small" label="Payment Terms" name="payment_terms" value={formData.payment_terms} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }}>{PAYMENT_TERMS.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}</TextField></Grid>
             </Grid>
-            <TextField fullWidth multiline rows={3} size="small" label="Notes" name="notes" value={formData.notes} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 } }} />
+            <TextField  multiline rows={3} size="small" label="Notes" name="notes" value={formData.notes} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} />
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #f1f5f9", gap: 1 }}>
             <Button onClick={() => setFormOpen(false)} sx={{ textTransform: "none", color: "#6b7280", borderRadius: 1.5 }}>Cancel</Button>
