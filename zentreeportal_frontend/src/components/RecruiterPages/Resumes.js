@@ -2929,15 +2929,6 @@ const createRawManual = (payload) =>
     }).then(handle);
   const getAllExams = () =>
       fetch(`${BASE}/exams/`, { headers: getHeaders() }).then(handle);
-  // const getNotifications = () =>
-  //   fetch(`${BASE}/exams/notifications/`, { headers: getHeaders() }).then(handle);
-  
-  // const markNotifRead = (id) =>
-  //   fetch(`${BASE}/exams/notifications/${id}/read`, { method: "PUT", headers: getHeaders() }).then(handle);
-  
-  // const markAllNotifsRead = () =>
-  //   fetch(`${BASE}/exams/notifications/read-all`, { method: "PUT", headers: getHeaders() }).then(handle);
-
 
 
 // ── Scoring APIs ──────────────────────────────────────────────────────────────
@@ -3200,7 +3191,7 @@ const RawPdfViewerDialog = ({ open, onClose, raw }) => {
 
 
 function ScheduleInterviewCard({ tracking, candidate, onScheduled }) {
-  const BASE         = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000/api";
+  const BASE         = process.env.REACT_APP_API_BASE_URL;
   const getHeaders   = () => ({
     "Content-Type": "application/json",
     Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
@@ -3577,12 +3568,6 @@ export default function Resumes() {
 
   const [examResultsOpen,   setExamResultsOpen]   = useState(false);
   const [examResultsTarget, setExamResultsTarget] = useState(null);
-  // ── Notification state ────────────────────────────────────────────────────
-  const [notifOpen,    setNotifOpen]    = useState(false);
-  const [notifs,       setNotifs]       = useState([]);
-  const [unreadCount,  setUnreadCount]  = useState(0);
-  const [notifLoading, setNotifLoading] = useState(false);
-
 
   // ── Detail-tab + embedded tracking state ──────────────────────────────────────
   const [detailTab,         setDetailTab]         = useState(0);
@@ -5426,85 +5411,6 @@ const handleTrackingIvSave = async (e) => {
     )}
   </DialogActions>
 </Dialog>
-
-{/* ── Notifications Drawer ──────────────────────────────────────────────── */}
-{/* <Dialog open={notifOpen} onClose={() => setNotifOpen(false)} maxWidth="sm" fullWidth
-  PaperProps={{ sx: { position: "fixed", right: 16, top: 60, m: 0, maxHeight: "80vh", borderRadius: 2 } }}>
-  <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0", pb: 1.5 }}>
-    <Box display="flex" alignItems="center" justifyContent="space-between">
-      <Box display="flex" alignItems="center" gap={1}>
-        <Notifications sx={{ color: "#1a237e" }} />
-        <Typography fontWeight={700}>Notifications</Typography>
-        {unreadCount > 0 && <Chip label={`${unreadCount} new`} size="small" color="error" sx={{ fontSize: 10 }} />}
-      </Box>
-      <Box display="flex" gap={1}>
-        {unreadCount > 0 && (
-          <Button size="small" onClick={async () => { await markAllNotifsRead(); 
-            // loadNotifications();
-           }}
-            sx={{ fontSize: 11 }}>
-            Mark all read
-          </Button>
-        )}
-        <IconButton size="small" onClick={() => setNotifOpen(false)}><CloseIcon fontSize="small" /></IconButton>
-      </Box>
-    </Box>
-  </DialogTitle>
-  <DialogContent sx={{ p: 0 }}>
-    {notifLoading && <Box display="flex" justifyContent="center" py={4}><CircularProgress size={28} /></Box>}
-    {!notifLoading && notifs.length === 0 && (
-      <Box display="flex" flexDirection="column" alignItems="center" py={6} gap={1}>
-        <Notifications sx={{ fontSize: 48, color: "#e0e0e0" }} />
-        <Typography color="text.secondary" fontSize={13}>No notifications yet</Typography>
-      </Box>
-    )}
-    {notifs.map(n => (
-      <Box key={n._id}
-        onClick={async () => {
-          if (!n.is_read) { await markNotifRead(n._id);
-            //  loadNotifications(); 
-            }
-        }}
-        sx={{
-          px: 2, py: 1.5, borderBottom: "1px solid #f0f0f0",
-          bgcolor: n.is_read ? "transparent" : "#e8f5e9",
-          cursor: "pointer", "&:hover": { bgcolor: n.is_read ? "#f5f7fa" : "#c8e6c9" },
-          transition: "background 0.15s",
-        }}>
-        <Box display="flex" alignItems="flex-start" gap={1.5}>
-          <Avatar sx={{ width: 36, height: 36, bgcolor: "#e8f5e9", flexShrink: 0 }}>
-            <CheckCircle sx={{ fontSize: 20, color: "#2e7d32" }} />
-          </Avatar>
-          <Box flex={1}>
-            <Typography fontSize={13} fontWeight={n.is_read ? 400 : 700}>
-              {n.title}
-            </Typography>
-            <Typography fontSize={12} color="text.secondary" lineHeight={1.5}>
-              {n.message}
-            </Typography>
-            <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-              {n.mcq_total > 0 && (
-                <Chip
-                  label={`MCQ: ${n.mcq_score}% (${Math.round((n.mcq_score / 100) * n.mcq_total)}/${n.mcq_total})`}
-                  size="small" color={n.mcq_score >= 70 ? "success" : "warning"} sx={{ fontSize: 10 }}
-                />
-              )}
-              <Typography fontSize={10} color="text.disabled">
-                {new Date(n.created_at).toLocaleString("en-IN")}
-              </Typography>
-              {!n.is_read && <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#2e7d32", ml: "auto" }} />}
-            </Box>
-          </Box>
-        </Box>
-      </Box>
-    ))}
-  </DialogContent>
-</Dialog> */}
-
-
-
-
-
 
 
       {/* ── Delete Confirm ───────────────────────────────────────────────────── */}

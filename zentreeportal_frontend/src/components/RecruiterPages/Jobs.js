@@ -3532,7 +3532,7 @@ import {
     CheckCircle, RadioButtonUnchecked, FilterList, Close as CloseIcon,
 } from "@mui/icons-material";
 
-const BASE = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000/api";
+const BASE = process.env.REACT_APP_API_BASE_URL;
 const getHeaders = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` });
 const handle = async (res) => { const data = await res.json(); if (!res.ok) throw data; return data; };
 

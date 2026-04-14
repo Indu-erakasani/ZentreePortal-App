@@ -1453,7 +1453,7 @@ import {
   FiberManualRecord, Circle,
 } from "@mui/icons-material";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = process.env.REACT_APP_API_BASE_URL;
 
 const authFetch = async (url, opts = {}) => {
   const token = localStorage.getItem("access_token");

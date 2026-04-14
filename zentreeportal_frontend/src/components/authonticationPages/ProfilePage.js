@@ -7,7 +7,7 @@ import {
 import { Person, Email, Lock, Visibility, VisibilityOff, Save, Edit, Logout, AdminPanelSettings, Work, ManageAccounts, ArrowBack } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = process.env.REACT_APP_API_BASE_URL;
 const roleColors = { admin: "#7b1fa2", recruiter: "#0277bd", manager: "#2e7d32" };
 const roleIcons  = { admin: <AdminPanelSettings />, recruiter: <Work />, manager: <ManageAccounts /> };
 
