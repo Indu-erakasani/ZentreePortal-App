@@ -74,7 +74,24 @@ def manager_dashboard():
         }
     }), 200
     
-    
+# ─── HR DASHBOARD ─────────────────────────────────────────────────────────────
+@user_bp.route("/hr/dashboard", methods=["GET"])
+@role_required("hr", "admin")                     
+def hr_dashboard():
+    return jsonify({
+        "success": True,
+        "role": "hr",
+        "dashboard": {
+            "title": "HR Dashboard",
+            "stats": {
+                "total_employees": 0,
+                "onboarding_pending": 0,
+                "bgv_in_progress": 0,
+                "bench_count": 0,
+            },
+            "message": "Welcome to the HR Portal"
+        }
+    }), 200    
 # In user_routes.py — change to match your other routes
 @user_bp.route("/", methods=["GET"])
 @token_required          # ← use same as other endpoints, not jwt_required()

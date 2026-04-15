@@ -3440,6 +3440,9 @@ function ScheduleInterviewCard({ tracking, candidate, onScheduled }) {
 export default function Resumes() {
   const navigate = useNavigate();
   const location = useLocation();
+  // ── Role detection ─────────────────────────────────────────────────────────
+  const currentUser = (() => { try { return JSON.parse(localStorage.getItem("user") || "{}"); } catch { return {}; } })();
+  const isHR        = currentUser?.role === "hr";
 
   // ── Client filter from URL ─────────────────────────────────────────────────
   const _qp = new URLSearchParams(location.search);
@@ -3450,19 +3453,34 @@ export default function Resumes() {
   const [urlJobTitle,    setUrlJobTitle]    = useState(_qp.get("job_title")   || "");
   const [isJobLocked,    setIsJobLocked]    = useState(!!_qp.get("job"));
 
+  // useEffect(() => {
+  //   const p     = new URLSearchParams(location.search);
+  //   const cid   = p.get("client")      || "";
+  //   const cname = p.get("client_name") || "";
+  //   const jid   = p.get("job")         || "";
+  //   const jtitle = p.get("job_title")  || "";
+  //   setUrlClientId(cid); setUrlClientName(cname); setIsClientLocked(!!cid);
+  //   setClientF(cid);
+  //   setUrlJobId(jid); setUrlJobTitle(jtitle); setIsJobLocked(!!jid);
+  //   // pre-set job filter dropdown when coming from Jobs page
+  //   if (jid) setJobF(jid);
+  //   else if (!cid) setJobF("");
+  // }, [location.search]);
   useEffect(() => {
-    const p     = new URLSearchParams(location.search);
-    const cid   = p.get("client")      || "";
-    const cname = p.get("client_name") || "";
-    const jid   = p.get("job")         || "";
-    const jtitle = p.get("job_title")  || "";
+    const p      = new URLSearchParams(location.search);
+    const cid    = p.get("client")      || "";
+    const cname  = p.get("client_name") || "";
+    const jid    = p.get("job")         || "";
+    const jtitle = p.get("job_title")   || "";
     setUrlClientId(cid); setUrlClientName(cname); setIsClientLocked(!!cid);
     setClientF(cid);
     setUrlJobId(jid); setUrlJobTitle(jtitle); setIsJobLocked(!!jid);
-    // pre-set job filter dropdown when coming from Jobs page
     if (jid) setJobF(jid);
     else if (!cid) setJobF("");
-  }, [location.search]);
+  
+    // HR always sees only Hired candidates
+    if (isHR) setStatusF("Hired");
+  }, [location.search, isHR]);
 
   const clearClientFilter = () => {
     setUrlClientId(""); setUrlClientName(""); setIsClientLocked(false);
@@ -4088,7 +4106,7 @@ const handleTrackingIvSave = async (e) => {
           <Typography variant="h4" color="primary.dark">Candidates</Typography>
           <Typography color="text.secondary" mt={0.5}>Manage candidate profiles and track applications</Typography>
         </Box>
-        <Box display="flex" gap={1.5}>
+        {/* <Box display="flex" gap={1.5}>
           {mainTab === 0 && (
             <>
               <Button variant="outlined" startIcon={<CloudUpload />} onClick={() => inlineRef.current?.click()} size="large">Upload Resume</Button>
@@ -4101,8 +4119,23 @@ const handleTrackingIvSave = async (e) => {
               <Button variant="outlined" startIcon={<CloudUpload />} onClick={() => rawUploadRef.current?.click()} size="large">Store Resumes</Button>
             </Box>
           )}
+        </Box> */}
+
+        <Box display="flex" gap={1.5}>
+          {!isHR && mainTab === 0 && (
+            <>
+              <Button variant="outlined" startIcon={<CloudUpload />} onClick={() => inlineRef.current?.click()} size="large">Upload Resume</Button>
+              <Button variant="contained" startIcon={<Add />} onClick={openCreate} size="large">Add Candidate</Button>
+            </>
+          )}
+          {!isHR && mainTab === 1 && (
+            <Box display="flex" gap={1.5}>
+              <Button variant="outlined" startIcon={<EditNote />} onClick={openManualRaw} size="large">Add Manually</Button>
+              <Button variant="outlined" startIcon={<CloudUpload />} onClick={() => rawUploadRef.current?.click()} size="large">Store Resumes</Button>
+            </Box>
+          )}
         </Box>
-      </Box>
+        </Box>
 
       {/* ── Client filter banner ──────────────────────────────────────────── */}
       {isClientLocked && (
@@ -4121,6 +4154,12 @@ const handleTrackingIvSave = async (e) => {
           Showing candidates for job <strong>{urlJobTitle}</strong>
         </Alert>
       )}
+      {/* ── HR view banner ───────────────────────────────────────────────── */}
+{isHR && (
+  <Alert severity="info" icon={<People fontSize="small" />} sx={{ py: 0.5 }}>
+    Showing <strong>Hired candidates</strong> only. Contact a recruiter to modify candidate records.
+  </Alert>
+)}
 
       {/* ── Stat cards ─────────────────────────────────────────────────────── */}
       <Grid container spacing={2.5}>
@@ -4131,28 +4170,72 @@ const handleTrackingIvSave = async (e) => {
       </Grid>
 
       {/* ── Main tabs ──────────────────────────────────────────────────────── */}
-      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+      {/* <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs value={mainTab} onChange={(_, v) => setMainTab(v)}>
           <Tab label={<Box display="flex" alignItems="center" gap={1}><People fontSize="small" />Candidates{isClientLocked && <Chip label={urlClientName} size="small" color="info" sx={{ fontSize: 10, height: 18 }} />}</Box>} iconPosition="start" />
           <Tab label={<Badge badgeContent={rawResumes.filter(r => r.status === "Stored").length} color="secondary" max={99}><Box sx={{ pr: rawResumes.filter(r => r.status === "Stored").length > 0 ? 1.5 : 0 }}>Stored Resumes</Box></Badge>} icon={<Inventory2 fontSize="small" />} iconPosition="start" />
         </Tabs>
-      </Box>
+      </Box> */}
+
+        <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+          <Tabs value={mainTab} onChange={(_, v) => setMainTab(v)}>
+            <Tab
+              label={
+                <Box display="flex" alignItems="center" gap={1}>
+                  <People fontSize="small" />
+                  {isHR ? "Hired Candidates" : "Candidates"}
+                  {isClientLocked && <Chip label={urlClientName} size="small" color="info" sx={{ fontSize: 10, height: 18 }} />}
+                </Box>
+              }
+              iconPosition="start"
+            />
+            {/* Stored Resumes tab — recruiters/managers/admins only */}
+            {!isHR && (
+              <Tab
+                label={
+                  <Badge badgeContent={rawResumes.filter(r => r.status === "Stored").length} color="secondary" max={99}>
+                    <Box sx={{ pr: rawResumes.filter(r => r.status === "Stored").length > 0 ? 1.5 : 0 }}>
+                      Stored Resumes
+                    </Box>
+                  </Badge>
+                }
+                icon={<Inventory2 fontSize="small" />}
+                iconPosition="start"
+              />
+            )}
+          </Tabs>
+        </Box>
 
       {/* ══════════════════════════════════════════════════════════════════════
           TAB 0 — Resume Bank
       ══════════════════════════════════════════════════════════════════════ */}
       {mainTab === 0 && (
         <>
-          {!showParsing
+          {/* {!showParsing
             ? <InlineUploadZone onFiles={handleFileSelect} fileRef={inlineRef} />
             : <InlineParseProgress files={inlineFiles} onReview={openBulkReview} onClear={clearInline} />
-          }
+          } */}
+          {!isHR && (
+              !showParsing
+                ? <InlineUploadZone onFiles={handleFileSelect} fileRef={inlineRef} />
+                : <InlineParseProgress files={inlineFiles} onReview={openBulkReview} onClear={clearInline} />
+            )}
 
           <Box display="flex" gap={2} flexWrap="wrap">
             <TextField placeholder="Search by name, skills, or ID…" value={search} onChange={e => setSearch(e.target.value)} size="small" sx={{ flexGrow: 1, minWidth: 220 }} InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" color="action" /></InputAdornment> }} />
-            <TextField select value={statusF} onChange={e => setStatusF(e.target.value)} size="small" sx={{ minWidth: 150 }} label="Status">
+            {/* <TextField select value={statusF} onChange={e => setStatusF(e.target.value)} size="small" sx={{ minWidth: 150 }} label="Status">
               <MenuItem value="">All Statuses</MenuItem>{STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-            </TextField>
+            </TextField> */}
+            <TextField
+                select value={statusF}
+                onChange={e => !isHR && setStatusF(e.target.value)}
+                size="small" sx={{ minWidth: 150 }}
+                label="Status"
+                disabled={isHR}
+              >
+                <MenuItem value="">All Statuses</MenuItem>
+                {STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+              </TextField>
             <TextField select value={expF} onChange={e => setExpF(e.target.value)} size="small" sx={{ minWidth: 160 }} label="Experience">
               <MenuItem value="">All Experience</MenuItem>{EXP_BANDS.slice(1).map(b => <MenuItem key={b.label} value={b.label}>{b.label}</MenuItem>)}
             </TextField>
@@ -4250,39 +4333,39 @@ const handleTrackingIvSave = async (e) => {
                           {(() => { const track = trackingMap[r.resume_id]; if (!track) return <Typography fontSize={12} color="text.disabled">—</Typography>; return <Box><Chip label={track.current_stage} size="small" color={STAGE_COLOR[track.current_stage] || "default"} sx={{ fontWeight: 700, fontSize: 10, mb: 0.3 }} /><Typography fontSize={10} color="text.secondary">{track.pipeline_status}</Typography></Box>; })()}
                         </TableCell>
                         <TableCell><Chip label={r.status} color={STATUS_COLOR[r.status] || "default"} size="small" sx={{ fontWeight: 700, fontSize: 11 }} /></TableCell>
-                        <TableCell>
+                        {/* <TableCell>
                         {examMap[r._id] && (() => {
-    const ex    = examMap[r._id];
-    const style = EXAM_STATUS_STYLE[ex.status] || EXAM_STATUS_STYLE["Sent"];
-    return (
-      <Tooltip title={
-        ex.status === "Completed"
-          ? `MCQ score: ${ex.mcq_score}% · Submitted ${new Date(ex.submitted_at).toLocaleDateString("en-IN")}`
-          : ex.status === "In Progress"
-          ? `Started ${new Date(ex.started_at).toLocaleDateString("en-IN")}`
-          : `Sent on ${new Date(ex.sent_at).toLocaleDateString("en-IN")} · expires ${new Date(ex.expires_at).toLocaleDateString("en-IN")}`
-      }>
-        <Chip
-          label={style.label}
-          size="small"
-          sx={{
-            fontSize: 9, height: 18, mb: 0.5,
-            bgcolor: style.bg,
-            color: style.color,
-            border: `1px solid ${style.border}`,
-            fontWeight: 700,
-            display: "flex",
-          }}
-        />
-      </Tooltip>
-    );
-  })()}
+                              const ex    = examMap[r._id];
+                              const style = EXAM_STATUS_STYLE[ex.status] || EXAM_STATUS_STYLE["Sent"];
+                              return (
+                                <Tooltip title={
+                                  ex.status === "Completed"
+                                    ? `MCQ score: ${ex.mcq_score}% · Submitted ${new Date(ex.submitted_at).toLocaleDateString("en-IN")}`
+                                    : ex.status === "In Progress"
+                                    ? `Started ${new Date(ex.started_at).toLocaleDateString("en-IN")}`
+                                    : `Sent on ${new Date(ex.sent_at).toLocaleDateString("en-IN")} · expires ${new Date(ex.expires_at).toLocaleDateString("en-IN")}`
+                                }>
+                                  <Chip
+                                    label={style.label}
+                                    size="small"
+                                    sx={{
+                                      fontSize: 9, height: 18, mb: 0.5,
+                                      bgcolor: style.bg,
+                                      color: style.color,
+                                      border: `1px solid ${style.border}`,
+                                      fontWeight: 700,
+                                      display: "flex",
+                                    }}
+                                  />
+                                </Tooltip>
+                              );
+                            })()}
                           <Box display="flex" gap={0.5}>
                             <Tooltip title="View Details"><IconButton size="small" onClick={() => openDetail(r)}><Visibility fontSize="small" /></IconButton></Tooltip>
                             <Tooltip title={r.resume_file ? "View Resume PDF" : "No resume file uploaded"}>
                               <span><IconButton size="small" onClick={() => r.resume_file && openPdf(r)} sx={{ color: r.resume_file ? "#c62828" : "#bdbdbd", cursor: r.resume_file ? "pointer" : "not-allowed" }}><PictureAsPdf fontSize="small" /></IconButton></span>
                             </Tooltip>
-                            {/* ── Score button ── */}
+                       
                             <Tooltip title={r.linked_job_id ? "AI Score vs Job" : "Link to a job to enable scoring"}>
                               <span>
                                 <IconButton size="small" onClick={() => openScore(r)} disabled={!r.linked_job_id} sx={{ color: r.linked_job_id ? "#7b1fa2" : "#bdbdbd" }}>
@@ -4303,7 +4386,97 @@ const handleTrackingIvSave = async (e) => {
                             <Tooltip title="Edit"><IconButton size="small" onClick={() => openEdit(r)}><Edit fontSize="small" /></IconButton></Tooltip>
                             <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => openDelete(r)}><Delete fontSize="small" /></IconButton></Tooltip>
                           </Box>
-                        </TableCell>
+                        </TableCell> */}
+
+
+                      <TableCell>
+                        {/* Exam status chip — recruiters only */}
+                        {!isHR && examMap[r._id] && (() => {
+                          const ex    = examMap[r._id];
+                          const style = EXAM_STATUS_STYLE[ex.status] || EXAM_STATUS_STYLE["Sent"];
+                          return (
+                            <Tooltip title={
+                              ex.status === "Completed"
+                                ? `MCQ score: ${ex.mcq_score}% · Submitted ${new Date(ex.submitted_at).toLocaleDateString("en-IN")}`
+                                : ex.status === "In Progress"
+                                ? `Started ${new Date(ex.started_at).toLocaleDateString("en-IN")}`
+                                : `Sent on ${new Date(ex.sent_at).toLocaleDateString("en-IN")}`
+                            }>
+                              <Chip label={style.label} size="small" sx={{
+                                fontSize: 9, height: 18, mb: 0.5,
+                                bgcolor: style.bg, color: style.color,
+                                border: `1px solid ${style.border}`, fontWeight: 700, display: "flex",
+                              }} />
+                            </Tooltip>
+                          );
+                        })()}
+
+                        <Box display="flex" gap={0.5}>
+                          {/* View details — everyone */}
+                          <Tooltip title="View Details">
+                            <IconButton size="small" onClick={() => openDetail(r)}>
+                              <Visibility fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+
+                          {/* View PDF — everyone */}
+                          <Tooltip title={r.resume_file ? "View Resume PDF" : "No resume file uploaded"}>
+                            <span>
+                              <IconButton size="small" onClick={() => r.resume_file && openPdf(r)}
+                                sx={{ color: r.resume_file ? "#c62828" : "#bdbdbd", cursor: r.resume_file ? "pointer" : "not-allowed" }}>
+                                <PictureAsPdf fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+
+                          {/* AI Score — recruiters/managers/admins only */}
+                          {!isHR && (
+                            <Tooltip title={r.linked_job_id ? "AI Score vs Job" : "Link to a job to enable scoring"}>
+                              <span>
+                                <IconButton size="small" onClick={() => openScore(r)} disabled={!r.linked_job_id}
+                                  sx={{ color: r.linked_job_id ? "#7b1fa2" : "#bdbdbd" }}>
+                                  <Analytics fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+
+                          {/* Send Exam — recruiters/managers/admins only */}
+                          {!isHR && (
+                            <Tooltip title={r.email ? "Send Screening Exam" : "No email — cannot send exam"}>
+                              <span>
+                                <IconButton size="small" onClick={() => r.email && openExamDialog(r)} disabled={!r.email}
+                                  sx={{ color: r.email ? "#e65100" : "#bdbdbd" }}>
+                                  <Assignment fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+
+                          {/* Edit — recruiters/managers/admins only */}
+                          {!isHR && (
+                            <Tooltip title="Edit">
+                              <IconButton size="small" onClick={() => openEdit(r)}>
+                                <Edit fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+
+                          {/* Delete — recruiters/managers/admins only */}
+                          {!isHR && (
+                            <Tooltip title="Delete">
+                              <IconButton size="small" color="error" onClick={() => openDelete(r)}>
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Box>
+                      </TableCell>
+
+
+
+
+
                       </TableRow>
                     ))}
                   </TableBody>

@@ -548,6 +548,9 @@ def upload_file(rid):
 @resume_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_all():
+    from flask_jwt_extended import get_jwt_identity
+    import json as _json
+
     q        = request.args.get("q", "").strip()
     status   = request.args.get("status", "")
     source   = request.args.get("source", "")
@@ -557,7 +560,20 @@ def get_all():
     page     = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 20))
 
+    # ── Role-based gate: HR sees only Hired candidates ────────────────────────
+    identity = get_jwt_identity()
+    try:
+        caller_role = (_json.loads(identity) if isinstance(identity, str) else identity).get("role", "")
+    except Exception:
+        caller_role = ""
+
     query = {}
+    if caller_role == "hr":
+        query["status"] = "Hired"          # HR locked to Hired only
+    else:
+        if status:
+            query["status"] = status       # Recruiter/admin can filter freely
+
     if q:
         query["$or"] = [
             {"name":         {"$regex": q, "$options": "i"}},
@@ -565,7 +581,6 @@ def get_all():
             {"current_role": {"$regex": q, "$options": "i"}},
             {"resume_id":    {"$regex": q, "$options": "i"}},
         ]
-    if status:  query["status"]        = status
     if source:  query["source"]        = source
     if job_id:  query["linked_job_id"] = job_id
     if min_exp: query["experience"]    = {"$gte": float(min_exp)}
@@ -582,6 +597,43 @@ def get_all():
     )
     return jsonify(success=True, data=[serialize_resume(d) for d in docs],
                    total=total, page=page, per_page=per_page), 200
+# @resume_bp.route("/", methods=["GET"])
+# @jwt_required()
+# def get_all():
+#     q        = request.args.get("q", "").strip()
+#     status   = request.args.get("status", "")
+#     source   = request.args.get("source", "")
+#     job_id   = request.args.get("job_id", "")
+#     min_exp  = request.args.get("min_exp", "")
+#     max_exp  = request.args.get("max_exp", "")
+#     page     = int(request.args.get("page", 1))
+#     per_page = int(request.args.get("per_page", 20))
+
+#     query = {}
+#     if q:
+#         query["$or"] = [
+#             {"name":         {"$regex": q, "$options": "i"}},
+#             {"skills":       {"$regex": q, "$options": "i"}},
+#             {"current_role": {"$regex": q, "$options": "i"}},
+#             {"resume_id":    {"$regex": q, "$options": "i"}},
+#         ]
+#     if status:  query["status"]        = status
+#     if source:  query["source"]        = source
+#     if job_id:  query["linked_job_id"] = job_id
+#     if min_exp: query["experience"]    = {"$gte": float(min_exp)}
+#     if max_exp:
+#         query.setdefault("experience", {})
+#         query["experience"]["$lte"] = float(max_exp)
+
+#     total = mongo.db.candidate_processing.count_documents(query)
+#     docs  = list(
+#         mongo.db.candidate_processing.find(query)
+#         .sort("created_at", -1)
+#         .skip((page - 1) * per_page)
+#         .limit(per_page)
+#     )
+#     return jsonify(success=True, data=[serialize_resume(d) for d in docs],
+#                    total=total, page=page, per_page=per_page), 200
 
 
 @resume_bp.route("/stats", methods=["GET"])

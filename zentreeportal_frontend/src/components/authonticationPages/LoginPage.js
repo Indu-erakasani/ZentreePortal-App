@@ -10,6 +10,7 @@ const getDashboardByRole = (role) => {
   if (role === "admin") return "/admin/dashboard";
   if (role === "recruiter") return "/recruiter/dashboard";
   if (role === "manager") return "/manager/dashboard";
+  if (role === "hr")        return "/hr/dashboard";
   return "/login";
 };
 

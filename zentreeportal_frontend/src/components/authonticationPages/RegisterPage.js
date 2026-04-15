@@ -13,6 +13,7 @@ const ROLES = [
   { value: "admin",     label: "Admin",     desc: "Full system access" },
   { value: "recruiter", label: "Recruiter", desc: "Manage jobs & candidates" },
   { value: "manager",   label: "Manager",   desc: "Approve hires & manage team" },
+  { value: "hr",        label: "HR",        desc: "Onboarding & employee lifecycle" }, 
 ];
 
 const validate = (form) => {
