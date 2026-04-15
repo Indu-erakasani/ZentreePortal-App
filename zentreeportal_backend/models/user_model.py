@@ -4,7 +4,7 @@ from bson import ObjectId
 from database import get_db
 import bcrypt
 
-VALID_ROLES = ["admin", "recruiter", "manager"]
+VALID_ROLES = ["admin", "recruiter", "manager","hr"]
 
 
 def is_valid_phone(phone: str) -> bool:

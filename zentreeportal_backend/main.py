@@ -48,10 +48,10 @@ jwt.init_app(app)
 CORS(app, resources={
     r"/api/*": {
         "origins": [
-            "http://10.10.2.60:3000",
-            "http://10.10.2.60:3001",
-            "http://10.10.2.60:3002",
-            "http://10.10.2.60:3003",
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:3002",
+            "http://localhost:3003",
             "https://c6ba-183-82-96-97.ngrok-free.app",
         ],
         "methods":       ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
