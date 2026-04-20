@@ -19,7 +19,10 @@ import CandidateDetailContent, { nameInitials, fmtSalary } from "./Candidatedeta
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 const BASE = process.env.REACT_APP_API_BASE_URL;
-
+const PLACEMENT_BASE = process.env.REACT_APP_API_PLACEMENTS_URL;
+const RESUMES_BASE = process.env.REACT_APP_API_RESUMES_URL;
+const CLIENT_BASE = process.env.REACT_APP_API_CLIENTS_URL;
+const JOBS_BASE = process.env.REACT_APP_API_JOBS_URL;
 const getHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
@@ -32,23 +35,23 @@ const handle = async (res) => {
 
 const getAllPlacements    = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
-  return fetch(`${BASE}/placements/${qs ? "?" + qs : ""}`, { headers: getHeaders() }).then(handle);
+  return fetch(`${PLACEMENT_BASE}/${qs ? "?" + qs : ""}`, { headers: getHeaders() }).then(handle);
 };
 const createPlacement    = (payload) =>
-  fetch(`${BASE}/placements/`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+  fetch(`${PLACEMENT_BASE}/`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
 const updatePlacement    = (id, payload) =>
-  fetch(`${BASE}/placements/${id}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+  fetch(`${PLACEMENT_BASE}/${id}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
 const getAllClients       = () =>
-  fetch(`${BASE}/clients/`, { headers: getHeaders() }).then(handle);
+  fetch(`${CLIENT_BASE}/`, { headers: getHeaders() }).then(handle);
 const getAllJobs          = () =>
-  fetch(`${BASE}/jobs/`, { headers: getHeaders() }).then(handle);
+  fetch(`${JOBS_BASE}/`, { headers: getHeaders() }).then(handle);
 const getPendingTracking  = () =>
-  fetch(`${BASE}/placements/pending-from-tracking`, { headers: getHeaders() }).then(handle);
+  fetch(`${PLACEMENT_BASE}/pending-from-tracking`, { headers: getHeaders() }).then(handle);
 const getAllRecruiters    = () =>
   fetch(`${BASE}/user/`, { headers: getHeaders() }).then(handle);
 // Look up a resume by resume_id via the search endpoint
 const getResumeByResumeId = (resume_id) =>
-  fetch(`${BASE}/resumes/?q=${encodeURIComponent(resume_id.trim())}`, { headers: getHeaders() }).then(handle);
+  fetch(`${RESUMES_BASE}/?q=${encodeURIComponent(resume_id.trim())}`, { headers: getHeaders() }).then(handle);
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const PAYMENT_STATUSES   = ["Pending", "Partial", "Paid", "Overdue"];

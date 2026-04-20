@@ -20,6 +20,7 @@ import {
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 const BASE = process.env.REACT_APP_API_BASE_URL;
+const EMPLOYEE_BASE = process.env.REACT_APP_API_EMPLOYEES_URL;
 const hdrs = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
@@ -32,11 +33,11 @@ const ok = async (res) => {
 
 const getAllEmployees = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
-  return fetch(`${BASE}/employees/${qs ? "?" + qs : ""}`, { headers: hdrs() }).then(ok);
+  return fetch(`${EMPLOYEE_BASE}/${qs ? "?" + qs : ""}`, { headers: hdrs() }).then(ok);
 };
-const createEmployee = (pl)     => fetch(`${BASE}/employees/`,      { method: "POST",   headers: hdrs(), body: JSON.stringify(pl) }).then(ok);
-const updateEmployee = (id, pl) => fetch(`${BASE}/employees/${id}`, { method: "PUT",    headers: hdrs(), body: JSON.stringify(pl) }).then(ok);
-const deleteEmployee = (id)     => fetch(`${BASE}/employees/${id}`, { method: "DELETE", headers: hdrs() }).then(ok);
+const createEmployee = (pl)     => fetch(`${EMPLOYEE_BASE}/`,      { method: "POST",   headers: hdrs(), body: JSON.stringify(pl) }).then(ok);
+const updateEmployee = (id, pl) => fetch(`${EMPLOYEE_BASE}/${id}`, { method: "PUT",    headers: hdrs(), body: JSON.stringify(pl) }).then(ok);
+const deleteEmployee = (id)     => fetch(`${EMPLOYEE_BASE}/${id}`, { method: "DELETE", headers: hdrs() }).then(ok);
 
 const downloadExport = async (type = "excel") => {
   const res  = await fetch(`${BASE}/export/employees/${type}`, { headers: hdrs() });

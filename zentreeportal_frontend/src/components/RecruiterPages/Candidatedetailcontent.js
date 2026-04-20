@@ -14,6 +14,10 @@ import {
 
 // ── API ───────────────────────────────────────────────────────────────────────
 const BASE = process.env.REACT_APP_API_BASE_URL;
+const TRACKING_BASE = process.env.REACT_APP_API_TRACKING_URL;
+const EXAM_BASE = process.env.REACT_APP_API_EXAMS_URL;
+const candidate_exam_api = process.env.REACT_APP_API_CANDIDATE_EXAMS_URL;
+
 
 const getHeaders = () => ({
   "Content-Type": "application/json",
@@ -27,19 +31,19 @@ const handle = async (res) => {
 };
 
 const getTrackingByResume = (resume_id) =>
-  fetch(`${BASE}/tracking/by-resume/${resume_id}`, { headers: getHeaders() }).then(handle);
+  fetch(`${TRACKING_BASE}/by-resume/${resume_id}`, { headers: getHeaders() }).then(handle);
 
 const createTracking = (payload) =>
-  fetch(`${BASE}/tracking/`, {
+  fetch(`${TRACKING_BASE}/`, {
     method: "POST", headers: getHeaders(),
     body: JSON.stringify(payload),
   }).then(handle);
 
 const getExamsByCandidate = (candidate_id) =>
-  fetch(`${BASE}/exams/by-candidate/${candidate_id}`, { headers: getHeaders() }).then(handle);
+  fetch(`${candidate_exam_api}/${candidate_id}`, { headers: getHeaders() }).then(handle);
 
 const updateExamScore = (exam_id, payload) =>
-  fetch(`${BASE}/exams/${exam_id}/score`, {
+  fetch(`${EXAM_BASE}/${exam_id}/score`, {
     method: "PUT", headers: getHeaders(),
     body: JSON.stringify(payload),
   }).then(handle);

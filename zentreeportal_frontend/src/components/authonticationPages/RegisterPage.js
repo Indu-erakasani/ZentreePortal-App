@@ -7,7 +7,7 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
-const API_URL = process.env.REACT_APP_API_BASE_URL;
+const API_URL = process.env.REACT_APP_API_REGISTER_URL;
 
 const ROLES = [
   { value: "admin",     label: "Admin",     desc: "Full system access" },
@@ -161,7 +161,7 @@ const RegisterPage = () => {
       const { confirm_password, phone, ...rest } = form;
       const payload = { ...rest, phone: phone.trim() || null };
 
-      const response = await fetch(`${API_URL}/auth/register`, {
+      const response = await fetch(`${API_URL}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

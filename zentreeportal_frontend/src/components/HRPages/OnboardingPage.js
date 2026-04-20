@@ -20,7 +20,8 @@ const BLUE   = "#1d4ed8";
 const SLATE  = "#64748b";
 
 const BASE = process.env.REACT_APP_API_BASE_URL;
-
+const EMPLOYEE_BASE = process.env.REACT_APP_API_EMPLOYEES_URL;
+const ONBOARDING_BASE = process.env.REACT_APP_API_ONBOARDING_URL
 const authHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
@@ -33,18 +34,18 @@ const handle = async (res) => {
   return data;
 };
 
-const getEmployees     = ()           => fetch(`${BASE}/employees/`,                       { headers: authHeaders() }).then(handle);
-const getOnboarding    = (eid)        => fetch(`${BASE}/onboarding/${eid}`,                { headers: authHeaders() }).then(handle);
-const updateOnboarding = (eid, pl)    => fetch(`${BASE}/onboarding/${eid}`,                { method: "PUT",    headers: authHeaders(), body: JSON.stringify(pl) }).then(handle);
-const updateChecklist  = (eid, i, pl) => fetch(`${BASE}/onboarding/${eid}/checklist/${i}`, { method: "PUT",    headers: authHeaders(), body: JSON.stringify(pl) }).then(handle);
-const addDocument      = (eid, pl)    => fetch(`${BASE}/onboarding/${eid}/document`,       { method: "POST",   headers: authHeaders(), body: JSON.stringify(pl) }).then(handle);
-const updateDocument   = (eid, i, pl) => fetch(`${BASE}/onboarding/${eid}/document/${i}`,  { method: "PUT",    headers: authHeaders(), body: JSON.stringify(pl) }).then(handle);
-const deleteDocument   = (eid, i)     => fetch(`${BASE}/onboarding/${eid}/document/${i}`,  { method: "DELETE", headers: authHeaders() }).then(handle);
+const getEmployees     = ()           => fetch(`${EMPLOYEE_BASE}/`,                       { headers: authHeaders() }).then(handle);
+const getOnboarding    = (eid)        => fetch(`${ONBOARDING_BASE}/${eid}`,                { headers: authHeaders() }).then(handle);
+const updateOnboarding = (eid, pl)    => fetch(`${ONBOARDING_BASE}/${eid}`,                { method: "PUT",    headers: authHeaders(), body: JSON.stringify(pl) }).then(handle);
+const updateChecklist  = (eid, i, pl) => fetch(`${ONBOARDING_BASE}/${eid}/checklist/${i}`, { method: "PUT",    headers: authHeaders(), body: JSON.stringify(pl) }).then(handle);
+const addDocument      = (eid, pl)    => fetch(`${ONBOARDING_BASE}/${eid}/document`,       { method: "POST",   headers: authHeaders(), body: JSON.stringify(pl) }).then(handle);
+const updateDocument   = (eid, i, pl) => fetch(`${ONBOARDING_BASE}/${eid}/document/${i}`,  { method: "PUT",    headers: authHeaders(), body: JSON.stringify(pl) }).then(handle);
+const deleteDocument   = (eid, i)     => fetch(`${ONBOARDING_BASE}/${eid}/document/${i}`,  { method: "DELETE", headers: authHeaders() }).then(handle);
 
 const uploadDocFile = async (eid, idx, file) => {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`${BASE}/onboarding/${eid}/document/${idx}/upload`, {
+  const res = await fetch(`${ONBOARDING_BASE}/${eid}/document/${idx}/upload`, {
     method: "POST",
     headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
     body: fd,

@@ -946,6 +946,8 @@ import {
 } from "@mui/icons-material";
 
 const BASE = process.env.REACT_APP_API_BASE_URL;
+const TRACKING_BASE = process.env.REACT_APP_API_TRACKING_URL;
+const JOBS_BASE = process.env.REACT_APP_API_JOBS_URL;
 const getHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
@@ -959,22 +961,22 @@ const handle = async (res) => {
 // ── API helpers ───────────────────────────────────────────────────────────────
 const getAllTracking  = (p = {}) => {
   const qs = new URLSearchParams(p).toString();
-  return fetch(`${BASE}/tracking/${qs ? "?" + qs : ""}`, { headers: getHeaders() }).then(handle);
+  return fetch(`${TRACKING_BASE}/${qs ? "?" + qs : ""}`, { headers: getHeaders() }).then(handle);
 };
 const updateTracking = (id, payload) =>
-  fetch(`${BASE}/tracking/${id}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+  fetch(`${TRACKING_BASE}/${id}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
 const addInterview = (id, payload) =>
-  fetch(`${BASE}/tracking/${id}/interview`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+  fetch(`${TRACKING_BASE}/${id}/interview`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
 const getAllJobs = () =>
-  fetch(`${BASE}/jobs/`, { headers: getHeaders() }).then(handle);
+  fetch(`${JOBS_BASE}/`, { headers: getHeaders() }).then(handle);
 const scheduleInterview = (id, payload) =>
-  fetch(`${BASE}/tracking/${id}/schedule`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+  fetch(`${TRACKING_BASE}/${id}/schedule`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
 const getCalendarEvents = (year, month) =>
-  fetch(`${BASE}/tracking/calendar?year=${year}&month=${month}`, { headers: getHeaders() }).then(handle);
+  fetch(`${TRACKING_BASE}/calendar?year=${year}&month=${month}`, { headers: getHeaders() }).then(handle);
 const submitScheduleFeedback = (tid, scheduleId, payload) =>
-  fetch(`${BASE}/tracking/${tid}/schedule/${scheduleId}/feedback`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+  fetch(`${TRACKING_BASE}/${tid}/schedule/${scheduleId}/feedback`, { method: "POST", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
 const updateSchedule = (tid, scheduleId, payload) =>
-  fetch(`${BASE}/tracking/${tid}/schedule/${scheduleId}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
+  fetch(`${TRACKING_BASE}/${tid}/schedule/${scheduleId}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(payload) }).then(handle);
 
 // ── Stage config ──────────────────────────────────────────────────────────────
 const STAGES = [
