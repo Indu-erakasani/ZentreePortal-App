@@ -8,6 +8,8 @@ import { Person, Email, Lock, Visibility, VisibilityOff, Save, Edit, Logout, Adm
 import { useNavigate } from "react-router-dom";
 
 const API_URL = process.env.REACT_APP_API_BASE_URL;
+const LOGOUT_URL = process.env.REACT_APP_API_LOGOUT_URL;
+const PASSWORD_URL = process.env.REACT_APP_API_PASSWORD_CHANGE_URL;
 const roleColors = { admin: "#7b1fa2", recruiter: "#0277bd", manager: "#2e7d32" };
 const roleIcons  = { admin: <AdminPanelSettings />, recruiter: <Work />, manager: <ManageAccounts /> };
 
@@ -38,11 +40,11 @@ export const ProfilePage = () => {
   const [error, setError]   = useState("");
   const [editing, setEditing] = useState(false);
 
-  const handleLogout = async () => {
-    await authFetch(`${API_URL}/auth/logout`, { method: "POST" }).catch(() => {});
-    localStorage.clear();
-    navigate("/login");
-  };
+  // const handleLogout = async () => {
+  //   await authFetch(`${LOGOUT_URL}`, { method: "POST" }).catch(() => {});
+  //   localStorage.clear();
+  //   navigate("/login");
+  // };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -157,11 +159,11 @@ export const ChangePasswordPage = () => {
   const [success, setSuccess] = useState("");
   const [error, setError]     = useState("");
 
-  const handleLogout = async () => {
-    await authFetch(`${API_URL}/auth/logout`, { method: "POST" }).catch(() => {});
-    localStorage.clear();
-    navigate("/login");
-  };
+  // const handleLogout = async () => {
+  //   await authFetch(`${LOGOUT_URL}`, { method: "POST" }).catch(() => {});
+  //   localStorage.clear();
+  //   navigate("/login");
+  // };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -173,7 +175,7 @@ export const ChangePasswordPage = () => {
     setLoading(true); setError(""); setSuccess("");
     try {
       // ── Inline API Call: change password ─────────────────────────────────────
-      const res  = await authFetch(`${API_URL}/auth/change-password`, {
+      const res  = await authFetch(`${PASSWORD_URL}`, {
         method: "PUT",
         body: JSON.stringify({ current_password: form.current_password, new_password: form.new_password }),
       });

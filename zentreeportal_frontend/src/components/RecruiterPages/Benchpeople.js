@@ -13,6 +13,10 @@ import {
 } from "@mui/icons-material";
 
 const BASE = process.env.REACT_APP_API_BASE_URL;
+const BENCH_BASE = process.env.REACT_APP_API_BENCH_URL;
+const PDF_PARSING = process.env.REACT_APP_API_PDF_PARSING_URL;
+const TRACKING_BASE = process.env.REACT_APP_API_TRACKING_URL;
+const JOBS_BASE = process.env.REACT_APP_API_JOBS_URL
 const getHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
@@ -25,20 +29,20 @@ const handle = async (res) => {
 
 const getAllBench       = (p = {}) => {
   const qs = new URLSearchParams(p).toString();
-  return fetch(`${BASE}/bench/${qs ? "?" + qs : ""}`, { headers: getHeaders() }).then(handle);
+  return fetch(`${BENCH_BASE}/${qs ? "?" + qs : ""}`, { headers: getHeaders() }).then(handle);
 };
-const createBench      = (pl) => fetch(`${BASE}/bench/`, { method: "POST", headers: getHeaders(), body: JSON.stringify(pl) }).then(handle);
-const updateBench      = (id, pl) => fetch(`${BASE}/bench/${id}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(pl) }).then(handle);
-const deleteBench      = (id) => fetch(`${BASE}/bench/${id}`, { method: "DELETE", headers: getHeaders() }).then(handle);
+const createBench      = (pl) => fetch(`${BENCH_BASE}/`, { method: "POST", headers: getHeaders(), body: JSON.stringify(pl) }).then(handle);
+const updateBench      = (id, pl) => fetch(`${BENCH_BASE}/${id}`, { method: "PUT", headers: getHeaders(), body: JSON.stringify(pl) }).then(handle);
+const deleteBench      = (id) => fetch(`${BENCH_BASE}/${id}`, { method: "DELETE", headers: getHeaders() }).then(handle);
 const parsePdf         = (file_b64, file_name) =>
-  fetch(`${BASE}/bench/parse-pdf`, { method: "POST", headers: getHeaders(), body: JSON.stringify({ file_b64, file_name }) }).then(handle);
+  fetch(`${PDF_PARSING}`, { method: "POST", headers: getHeaders(), body: JSON.stringify({ file_b64, file_name }) }).then(handle);
 const uploadFile       = (id, file_b64) =>
-  fetch(`${BASE}/bench/${id}/upload-file`, { method: "POST", headers: getHeaders(), body: JSON.stringify({ file_b64 }) }).then(handle);
+  fetch(`${BENCH_BASE}/${id}/upload-file`, { method: "POST", headers: getHeaders(), body: JSON.stringify({ file_b64 }) }).then(handle);
 const getTrackingByBench = (bench_id) =>
-  fetch(`${BASE}/tracking/by-resume/${bench_id}`, { headers: getHeaders() }).then(handle);
+  fetch(`${TRACKING_BASE}/by-resume/${bench_id}`, { headers: getHeaders() }).then(handle);
 const createTracking   = (pl) =>
-  fetch(`${BASE}/tracking/`, { method: "POST", headers: getHeaders(), body: JSON.stringify(pl) }).then(handle);
-const getAllJobs        = () => fetch(`${BASE}/jobs/`, { headers: getHeaders() }).then(handle);
+  fetch(`${TRACKING_BASE}/`, { method: "POST", headers: getHeaders(), body: JSON.stringify(pl) }).then(handle);
+const getAllJobs        = () => fetch(`${JOBS_BASE}/`, { headers: getHeaders() }).then(handle);
 
 const toBase64 = (file) => new Promise((res, rej) => {
   const r = new FileReader();

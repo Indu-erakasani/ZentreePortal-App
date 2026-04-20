@@ -32,9 +32,9 @@ from routes.question_routes  import question_bp
 from routes.exam_routes      import exam_bp
 from routes.Notification_routes import (
     notification_bp,
-    _generate_interview_notifications,
-    _generate_job_notifications,
-    _generate_resume_expiry_notifications,
+    # _generate_interview_notifications,
+    # _generate_job_notifications,
+    # _generate_resume_expiry_notifications,
 )
 
 app = Flask(__name__)
@@ -92,16 +92,16 @@ def run_cleanup():
     with app.app_context():
         cleanup_expired_raw_resumes()
 
-def run_notification_generators():
-    """Refresh all notification types — runs every hour via scheduler."""
-    with app.app_context():
-        try:
-            _generate_interview_notifications()
-            _generate_job_notifications()
-            _generate_resume_expiry_notifications()
-            print("[SCHEDULER] Notification generators refreshed.")
-        except Exception as e:
-            print(f"[SCHEDULER] Notification generator error: {e}")
+# def run_notification_generators():
+#     """Refresh all notification types — runs every hour via scheduler."""
+#     with app.app_context():
+#         try:
+#             _generate_interview_notifications()
+#             _generate_job_notifications()
+#             _generate_resume_expiry_notifications()
+#             print("[SCHEDULER] Notification generators refreshed.")
+#         except Exception as e:
+#             print(f"[SCHEDULER] Notification generator error: {e}")
 
 scheduler = BackgroundScheduler()
 
@@ -114,26 +114,26 @@ scheduler.add_job(
     replace_existing=True,
 )
 
-scheduler.add_job(
-    func=run_notification_generators,
-    trigger="interval",
-    hours=1,                          # refresh notifications every hour
-    id="notification_refresh",
-    replace_existing=True,
-)
+# scheduler.add_job(
+#     func=run_notification_generators,
+#     trigger="interval",
+#     hours=1,                          # refresh notifications every hour
+#     id="notification_refresh",
+#     replace_existing=True,
+# )
 
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown(wait=False))
 
 # ── Run notification generators once at startup ───────────────────────────────
-with app.app_context():
-    try:
-        _generate_interview_notifications()
-        _generate_job_notifications()
-        _generate_resume_expiry_notifications()
-        print("[STARTUP] Notification generators ran successfully.")
-    except Exception as e:
-        print(f"[STARTUP] Notification generator warning: {e}")
+# with app.app_context():
+#     try:
+#         _generate_interview_notifications()
+#         _generate_job_notifications()
+#         _generate_resume_expiry_notifications()
+#         print("[STARTUP] Notification generators ran successfully.")
+#     except Exception as e:
+#         print(f"[STARTUP] Notification generator warning: {e}")
 
 # ── Health check ──────────────────────────────────────────────────────────────
 @app.route("/api/health")

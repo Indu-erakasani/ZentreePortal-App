@@ -4,7 +4,7 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
-const API_URL =process.env.REACT_APP_API_BASE_URL;
+const API_URL =process.env.REACT_APP_API_LOGIN_URL;
 
 const getDashboardByRole = (role) => {
   if (role === "admin") return "/admin/dashboard";
@@ -36,7 +36,7 @@ const LoginPage = () => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
+      const response = await fetch(`${API_URL}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: form.email, password: form.password }),

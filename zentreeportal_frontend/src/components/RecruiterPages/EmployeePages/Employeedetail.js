@@ -23,6 +23,8 @@ import {
 
 // ── API helpers (onboarding + engagement) ────────────────────────────────────
 const BASE = process.env.REACT_APP_API_BASE_URL;
+const EMPLOYEE_BASE = process.env.REACT_APP_API_EMPLOYEES_URL;
+const ONBOARDING_BASE = process.env.REACT_APP_API_ONBOARDING_URL;
 const hdrs = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
@@ -34,17 +36,17 @@ const ok = async (res) => {
 };
 
 const api = {
-  getOnboarding:    (id)          => fetch(`${BASE}/onboarding/${id}`,                  { headers: hdrs() }).then(ok),
-  updateOnboarding: (id, pl)      => fetch(`${BASE}/onboarding/${id}`,                  { method: "PUT",    headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
-  toggleChecklist:  (id, idx, pl) => fetch(`${BASE}/onboarding/${id}/checklist/${idx}`, { method: "PUT",    headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
-  addDocument:      (id, pl)      => fetch(`${BASE}/onboarding/${id}/document`,          { method: "POST",   headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
-  updateDocument:   (id, idx, pl) => fetch(`${BASE}/onboarding/${id}/document/${idx}`,  { method: "PUT",    headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
-  deleteDocument:   (id, idx)     => fetch(`${BASE}/onboarding/${id}/document/${idx}`,  { method: "DELETE", headers: hdrs() }).then(ok),
+  getOnboarding:    (id)          => fetch(`${ONBOARDING_BASE}/${id}`,                  { headers: hdrs() }).then(ok),
+  updateOnboarding: (id, pl)      => fetch(`${ONBOARDING_BASE}/${id}`,                  { method: "PUT",    headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
+  toggleChecklist:  (id, idx, pl) => fetch(`${ONBOARDING_BASE}/${id}/checklist/${idx}`, { method: "PUT",    headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
+  addDocument:      (id, pl)      => fetch(`${ONBOARDING_BASE}/${id}/document`,          { method: "POST",   headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
+  updateDocument:   (id, idx, pl) => fetch(`${ONBOARDING_BASE}/${id}/document/${idx}`,  { method: "PUT",    headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
+  deleteDocument:   (id, idx)     => fetch(`${ONBOARDING_BASE}/${id}/document/${idx}`,  { method: "DELETE", headers: hdrs() }).then(ok),
   // File upload — FormData, no Content-Type (browser sets multipart boundary)
   uploadFile: (id, idx, file) => {
     const fd = new FormData();
     fd.append("file", file);
-    return fetch(`${BASE}/onboarding/${id}/document/${idx}/upload`, {
+    return fetch(`${ONBOARDING_BASE}/${id}/document/${idx}/upload`, {
       method: "POST",
       headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` },
       body: fd,
@@ -52,13 +54,13 @@ const api = {
   },
   // Fetch file as blob → object URL for inline viewing in new tab
   viewFile: async (id, idx) => {
-    const res = await fetch(`${BASE}/onboarding/${id}/document/${idx}/file`, { headers: hdrs() });
+    const res = await fetch(`${ONBOARDING_BASE}/${id}/document/${idx}/file`, { headers: hdrs() });
     if (!res.ok) throw new Error("File not found");
     const blob = await res.blob();
     return URL.createObjectURL(blob);
   },
-  addEngagement: (id, pl)    => fetch(`${BASE}/employees/${id}/engagement`,         { method: "POST", headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
-  endEngagement: (id, idx)   => fetch(`${BASE}/employees/${id}/engagement/${idx}`,  { method: "PUT",  headers: hdrs(), body: JSON.stringify({}) }).then(ok),
+  addEngagement: (id, pl)    => fetch(`${EMPLOYEE_BASE}/${id}/engagement`,         { method: "POST", headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
+  endEngagement: (id, idx)   => fetch(`${EMPLOYEE_BASE}/${id}/engagement/${idx}`,  { method: "PUT",  headers: hdrs(), body: JSON.stringify({}) }).then(ok),
   // Export single employee full profile as Excel
   exportEmployee: async (id, fileName) => {
     const res = await fetch(`${BASE}/export/employee/${id}/excel`, { headers: hdrs() });
