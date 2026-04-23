@@ -181,16 +181,16 @@ pipeline {
         }
         failure {
             echo "Build #${env.BUILD_NUMBER} FAILED — ${env.BUILD_URL}"
-            mail(
-                to: 'outsourcing@zentreelabs.com',
-                subject: "FAILED: ZentreePortal Build #${env.BUILD_NUMBER}",
-                body: """
-                    Build failed.
-                    Job   : ${env.JOB_NAME}
-                    Build : #${env.BUILD_NUMBER}
-                    Logs  : ${env.BUILD_URL}console
-                """
-            )
+            // mail(
+            //     to: 'outsourcing@zentreelabs.com',
+            //     subject: "FAILED: ZentreePortal Build #${env.BUILD_NUMBER}",
+            //     body: """
+            //         Build failed.
+            //         Job   : ${env.JOB_NAME}
+            //         Build : #${env.BUILD_NUMBER}
+            //         Logs  : ${env.BUILD_URL}console
+            //     """
+            // )
         }
         always {
             echo "Cleaning workspace..."
