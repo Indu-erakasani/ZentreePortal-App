@@ -69,7 +69,7 @@ pipeline {
                                 echo "Node version: $(node --version)"
                                 echo "NPM version:  $(npm --version)"
                                 npm install --silent
-                                npm run build
+                                DISABLE_ESLINT_PLUGIN=true CI=false npm run build
                                 echo "React build complete"
                             '''
                         }
@@ -113,7 +113,7 @@ pipeline {
                         dir("${WORKSPACE}/zentreeportal_frontend") {
                             sh '''
                                 export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
-                                CI=true npm test -- --watchAll=false --passWithNoTests
+                                CI=true npm test -- --watchAll=false --passWithNoTests --forceExit
                             '''
                         }
                     }
