@@ -9,6 +9,7 @@ pipeline {
         GIT_BRANCH    = "main"
         BACKEND_ENV   = credentials('zentree-backend-env')
         FRONTEND_ENV  = credentials('zentree-frontend-env')
+        PATH          = "/usr/local/bin:/usr/bin:/bin:/snap/bin"
     }
 
     triggers {
@@ -45,6 +46,7 @@ pipeline {
                         echo "========== Backend: Installing dependencies =========="
                         dir("${WORKSPACE}/zentreeportal_backend") {
                             sh '''
+                                export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
                                 if [ ! -d "venv" ]; then
                                     python3 -m venv venv
                                     echo "Virtual environment created"
@@ -63,6 +65,9 @@ pipeline {
                         echo "========== Frontend: Installing and building =========="
                         dir("${WORKSPACE}/zentreeportal_frontend") {
                             sh '''
+                                export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
+                                echo "Node version: $(node --version)"
+                                echo "NPM version:  $(npm --version)"
                                 npm install --silent
                                 npm run build
                                 echo "React build complete"
@@ -81,6 +86,7 @@ pipeline {
                         echo "========== Running Flask tests =========="
                         dir("${WORKSPACE}/zentreeportal_backend") {
                             sh '''
+                                export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
                                 . venv/bin/activate
                                 if [ -d "tests" ]; then
                                     pytest tests/ -v --junitxml=test-results.xml
@@ -106,6 +112,7 @@ pipeline {
                         echo "========== Running React tests =========="
                         dir("${WORKSPACE}/zentreeportal_frontend") {
                             sh '''
+                                export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
                                 CI=true npm test -- --watchAll=false --passWithNoTests
                             '''
                         }
@@ -122,6 +129,7 @@ pipeline {
                 echo "========== Deploying ZentreePortal =========="
 
                 sh """
+                    export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
                     echo "Syncing backend..."
                     rsync -av --delete \
                         --exclude='venv/' \
@@ -137,6 +145,7 @@ pipeline {
                 """
 
                 sh """
+                    export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
                     cd ${BACKEND_PATH}
                     if [ ! -d "venv" ]; then
                         python3 -m venv venv
@@ -148,6 +157,7 @@ pipeline {
                 """
 
                 sh """
+                    export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
                     echo "Syncing frontend build..."
                     rsync -av --delete \
                         --exclude='node_modules/' \
@@ -181,16 +191,6 @@ pipeline {
         }
         failure {
             echo "Build #${env.BUILD_NUMBER} FAILED — ${env.BUILD_URL}"
-            // mail(
-            //     to: 'outsourcing@zentreelabs.com',
-            //     subject: "FAILED: ZentreePortal Build #${env.BUILD_NUMBER}",
-            //     body: """
-            //         Build failed.
-            //         Job   : ${env.JOB_NAME}
-            //         Build : #${env.BUILD_NUMBER}
-            //         Logs  : ${env.BUILD_URL}console
-            //     """
-            // )
         }
         always {
             echo "Cleaning workspace..."
