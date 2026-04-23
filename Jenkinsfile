@@ -132,6 +132,7 @@ pipeline {
                     export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
                     echo "Syncing backend..."
                     rsync -av --delete \
+                        --no-owner --no-group \
                         --exclude='venv/' \
                         --exclude='.env' \
                         --exclude='__pycache__/' \
@@ -160,6 +161,7 @@ pipeline {
                     export PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
                     echo "Syncing frontend build..."
                     rsync -av --delete \
+                        --no-owner --no-group \
                         --exclude='node_modules/' \
                         --exclude='.env' \
                         ${WORKSPACE}/zentreeportal_frontend/build/ \
