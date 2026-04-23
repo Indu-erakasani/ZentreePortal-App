@@ -15,3 +15,7 @@ logs/
 *.tmp
 zentreeportal_backend/uploads/onboarding
 zentreeportal_backend/uploads/resumes
+docker-compose.yml
+backend.env
+frontend.env
+*.env
