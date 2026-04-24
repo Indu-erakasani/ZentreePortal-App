@@ -48,6 +48,7 @@ jwt.init_app(app)
 CORS(app, resources={
     r"/api/*": {
         "origins": [
+            "http://10.10.2.240:3000",
             "http://localhost:3000",
             "http://localhost:3001",
             "http://localhost:3002",
