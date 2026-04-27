@@ -1116,7 +1116,7 @@ export default function RecruiterDashboard() {
               <Button
                 component={Link} to="/jobs" variant="contained" startIcon={<Add />}
                 sx={{
-                  bgcolor: "#fff", color: COLORS.navy, fontWeight: 700, fontSize: 13,
+                  bgcolor: "#fff", color: COLORS.white, fontWeight: 700, fontSize: 13,
                   borderRadius: "10px", px: 2.5, textTransform: "none",
                   boxShadow: "none",
                   "&:hover": { bgcolor: "#f1f5f9", boxShadow: "none" },

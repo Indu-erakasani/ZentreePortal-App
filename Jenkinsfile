@@ -175,8 +175,8 @@ pipeline {
                     sleep 3
                     if systemctl is-active --quiet zentree-backend; then
                         echo "Flask is running"
-                    else
-                        echo "Flask failed to start!"
+                
+                else                        echo "Flask failed to start!"
                         sudo journalctl -u zentree-backend --no-pager -n 30
                         exit 1
                     fi

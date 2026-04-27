@@ -127,6 +127,7 @@ import CssBaseline from "@mui/material/CssBaseline";
 import theme from "../src/components/utils/theme";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Layout from "./components/RecruiterPages/Layout";
+import LandingPage from "./components/HomePages/LandingPage";
 
 // ── Auth / public pages ──────────────────────────────────────────────────────
 import LoginPage        from "./components/authonticationPages/LoginPage";
@@ -162,6 +163,8 @@ const App = () => (
       <Routes>
 
         {/* ── Public routes ─────────────────────────────────────────────── */}
+        
+        <Route path="/"        element={<LandingPage />} />
         <Route path="/login"        element={<LoginPage />} />
         <Route path="/register"     element={<RegisterPage />} />
         <Route path="/unauthorized" element={<UnauthorizedPage />} />
