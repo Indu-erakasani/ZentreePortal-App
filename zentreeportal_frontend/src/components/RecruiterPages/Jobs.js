@@ -35,16 +35,28 @@ const generateJobQuestions = (jobId, payload) =>
       method: "POST", headers: getHeaders(), body: JSON.stringify(payload),
     }).then(handle);
   
-  const clearJobQuestions = (jobId) =>
-    fetch(`${QUESTION_BASE}/jobs/${jobId}/clear`, { method: "DELETE", headers: getHeaders() }).then(handle);
-  
-  const deleteOneQuestion = (jobId, qType, index) =>
-    fetch(`${QUESTION_BASE}/jobs/${jobId}/${qType}/${index}`, { method: "DELETE", headers: getHeaders() }).then(handle);
+    const toggleQuestion = (jobId, qType, index) =>
+      fetch(`${QUESTION_BASE}/jobs/${jobId}/${qType}/${index}/toggle`, {
+        method: "PUT", headers: getHeaders(),
+      }).then(handle);
+    
+    const deleteOneQuestion = (jobId, qType, index) =>
+      fetch(`${QUESTION_BASE}/jobs/${jobId}/${qType}/${index}`, {
+        method: "DELETE", headers: getHeaders(),
+      }).then(handle);
+    
+    const getJobQuestionsAll = (jobId) =>
+      fetch(`${QUESTION_BASE}/jobs/${jobId}?show_all=true`, {
+        headers: getHeaders()
+      }).then(handle);
 
   const getJobQuestions = (jobId) =>
     fetch(`${QUESTION_BASE}/jobs/${jobId}`, { headers: getHeaders() }).then(handle);
 
-
+  const addManualQuestion = (jobId, payload) =>
+    fetch(`${QUESTION_BASE}/jobs/${jobId}/manual`, {
+      method: "POST", headers: getHeaders(), body: JSON.stringify(payload),
+    }).then(handle);
 
 const PRIORITIES = ["Low", "Medium", "High", "Critical"];
 const STATUSES   = ["Open", "On Hold", "Closed", "Filled"];
@@ -279,6 +291,33 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
         easy_pct: 20, medium_pct: 55, hard_pct: 25,  
         use_custom_difficulty: false,
       });
+
+// ── Manage questions state ────────────────────────────────────────────────
+const [manageOpen,     setManageOpen]     = useState(false);
+const [manageJob,      setManageJob]      = useState(null);
+const [manageData,     setManageData]     = useState(null);
+const [manageLoading,  setManageLoading]  = useState(false);
+const [manageError,    setManageError]    = useState("");
+const [manageTab,      setManageTab]      = useState(0);
+const [showInactive,   setShowInactive]   = useState(false);
+const [confirmDelete,  setConfirmDelete]  = useState(null); // {qType, index, text}
+const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${index}`
+    // ── Manual question entry state ───────────────────────────────────────────
+    const [manualOpen,    setManualOpen]    = useState(false);
+    const [manualJob,     setManualJob]     = useState(null);
+    const [manualType,    setManualType]    = useState("mcq");
+    const [manualSaving,  setManualSaving]  = useState(false);
+    const [manualError,   setManualError]   = useState("");
+    const [manualSuccess, setManualSuccess] = useState("");
+    const [manualForm,    setManualForm]    = useState({
+        // MCQ fields
+        question: "", options: ["", "", "", ""], correct_answer: "", topic: "", difficulty: "Medium",
+        // Subjective fields
+        reference_answer: "", key_points: "", skill: "",
+        // Coding fields
+        programming_language: "Python", 
+    });
+
     // ── View questions state ──────────────────────────────────────────────────
     const [viewQOpen,    setViewQOpen]    = useState(false);
     const [viewQJob,     setViewQJob]     = useState(null);
@@ -286,7 +325,6 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
     const [viewQLoading, setViewQLoading] = useState(false);
     const [viewQError,   setViewQError]   = useState("");
     const [viewQTab,     setViewQTab]     = useState(0);
-
 
     const load = useCallback(async () => {
         try { setLoading(true); setError(""); const res = await getAllJobs(); setJobs(res.data || []); }
@@ -307,7 +345,18 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
         return mQ && (!statusF || j.status === statusF) && (!priorityF || j.priority === priorityF) && (!clientF || j.client_id === clientF);
     });
 
-    const openCreate = () => { setSelected(null); setFormData(EMPTY_FORM); setFormOpen(true); };
+    // const openCreate = () => { setSelected(null); setFormData(EMPTY_FORM); setFormOpen(true); };
+    
+    const openCreate = () => {
+      setSelected(null);
+      const prefillClient = clients.find(c => c._id === clientF);
+      setFormData({
+        ...EMPTY_FORM,
+        client_id:   prefillClient?._id        || "",
+        client_name: prefillClient?.company_name || "",
+      });
+      setFormOpen(true);
+    };
     const openEdit   = j => { setSelected(j); setFormData({ ...EMPTY_FORM, ...j, skills: Array.isArray(j.skills) ? j.skills.join(", ") : (j.skills||""), secondary_skills: Array.isArray(j.secondary_skills) ? j.secondary_skills.join(", ") : (j.secondary_skills||""), deadline: j.deadline ? j.deadline.split("T")[0] : "" }); setFormOpen(true); };
     // const openDetail = j => { setSelected(j); setDetailOpen(true); };
     const openDetail = async (j) => {
@@ -368,7 +417,121 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
           ...diff,
         });
         setGenOpen(true);
-      };
+    };
+    const openManual = (job) => {
+      setManualJob(job);
+      setManualType("mcq");
+      setManualError("");
+      setManualSuccess("");
+      setManualForm({
+          question: "", options: ["", "", "", ""], correct_answer: "", topic: "", difficulty: "Medium",
+          reference_answer: "", key_points: "", skill: "", programming_language: job?.programming_language || "Python",
+      });
+      setManualOpen(true);
+  };
+
+  const handleManualSave = async () => {
+      setManualError(""); setManualSuccess("");
+      if (!manualForm.question.trim()) { setManualError("Question text is required"); return; }
+
+      let questionObj = {};
+      if (manualType === "mcq") {
+          const opts = manualForm.options.filter(o => o.trim());
+          if (opts.length < 2) { setManualError("At least 2 options are required"); return; }
+          if (!manualForm.correct_answer.trim()) { setManualError("Correct answer is required"); return; }
+          if (!opts.includes(manualForm.correct_answer.trim())) { setManualError("Correct answer must exactly match one of the options"); return; }
+          questionObj = {
+              question: manualForm.question.trim(),
+              options: opts,
+              correct_answer: [manualForm.correct_answer.trim()],
+              topic: manualForm.topic.trim(),
+              difficulty: manualForm.difficulty,
+          };
+      } else if (manualType === "subjective") {
+          questionObj = {
+              question: manualForm.question.trim(),
+              reference_answer: manualForm.reference_answer.trim(),
+              key_points: manualForm.key_points.trim(),
+              skill: manualForm.skill.trim(),
+              difficulty: manualForm.difficulty,
+          };
+      } else {
+          questionObj = {
+              question: manualForm.question.trim(),
+              programming_language: manualForm.programming_language,
+              difficulty: manualForm.difficulty,
+              topic: manualForm.topic.trim(),
+          };
+      }
+
+      setManualSaving(true);
+      try {
+          const res = await addManualQuestion(manualJob._id, { type: manualType, question: questionObj });
+          setManualSuccess(`✅ Saved! Bank now has ${res.data.total} ${manualType} questions.`);
+          // Reset form but keep dialog open for adding more
+          setManualForm(p => ({ ...p, question: "", options: ["","","",""], correct_answer: "", topic: "", reference_answer: "", key_points: "", skill: "" }));
+          load(); // refresh counts
+      } catch (err) {
+          setManualError(err?.message || "Failed to save question");
+      } finally {
+          setManualSaving(false);
+      }
+  };
+
+
+  const openManage = async (job) => {
+    setManageJob(job);
+    setManageData(null);
+    setManageError("");
+    setManageTab(0);
+    setShowInactive(false);
+    setConfirmDelete(null);
+    setManageOpen(true);
+    setManageLoading(true);
+    try {
+        const res = await getJobQuestionsAll(job._id);
+        setManageData(res.data);
+    } catch (err) {
+        setManageError(err?.message || "Failed to load questions");
+    } finally {
+        setManageLoading(false);
+    }
+};
+
+const handleToggleActive = async (qType, index) => {
+    const key = `${qType}-${index}`;
+    setActionLoading(p => ({ ...p, [key]: "toggle" }));
+    try {
+        await toggleQuestion(manageJob._id, qType, index);
+        // Refresh data
+        const res = await getJobQuestionsAll(manageJob._id);
+        setManageData(res.data);
+        load(); // refresh job list counts
+    } catch (err) {
+        setManageError(err?.message || "Failed to toggle question");
+    } finally {
+        setActionLoading(p => ({ ...p, [key]: null }));
+    }
+};
+
+const handleDeleteQuestion = async () => {
+    if (!confirmDelete) return;
+    const { qType, index } = confirmDelete;
+    const key = `${qType}-${index}`;
+    setActionLoading(p => ({ ...p, [key]: "delete" }));
+    setConfirmDelete(null);
+    try {
+        await deleteOneQuestion(manageJob._id, qType, index);
+        const res = await getJobQuestionsAll(manageJob._id);
+        setManageData(res.data);
+        load();
+    } catch (err) {
+        setManageError(err?.message || "Failed to delete question");
+    } finally {
+        setActionLoading(p => ({ ...p, [key]: null }));
+    }
+};
+
 
       const handleGenerate = async () => {
         // Validate difficulty sums to 100 when custom mode is on
@@ -494,6 +657,25 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
                                                 <Quiz fontSize="small" />
                                             </IconButton>
                                             </Tooltip>
+
+                                            <Tooltip title="Add Question Manually">
+                                            <IconButton size="small" sx={{ color: "#0277bd" }} onClick={() => openManual(j)}>
+                                                <Assignment fontSize="small" />
+                                            </IconButton>
+                                            </Tooltip>
+
+                                            <Tooltip title="Manage Questions (Activate/Deactivate/Delete)">
+                                            <IconButton size="small" sx={{ color: "#e65100" }} onClick={() => openManage(j)}>
+                                                <FilterList fontSize="small" />
+                                            </IconButton>
+                                            </Tooltip>
+
+
+
+
+
+
+
                                             <Tooltip title="View Candidates for this Job">
                                             <IconButton size="small" sx={{ color: "#2e7d32" }} onClick={() => navigate(`/resumes?job=${j._id}&job_title=${encodeURIComponent(j.title || '')}`)}>
                                                 <People fontSize="small" />
@@ -501,11 +683,7 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
                                             </Tooltip>
                                             <Tooltip title="Edit"><IconButton size="small" onClick={() => openEdit(j)}><Edit fontSize="small" /></IconButton></Tooltip>
                                             <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => openDelete(j)}><Delete fontSize="small" /></IconButton></Tooltip>
-                                            {/* <Tooltip title="View Details"><IconButton size="small" onClick={()=>openDetail(j)}><Visibility fontSize="small"/></IconButton>
-                                            </Tooltip><Tooltip title="View Candidates for this Job"><IconButton size="small" sx={{ color: "#2e7d32" }} onClick={()=>navigate(`/resumes?job=${j._id}&job_title=${encodeURIComponent(j.title || '')}`)}><People fontSize="small"/></IconButton>
-                                            </Tooltip><Tooltip title="Edit"><IconButton size="small" onClick={()=>openEdit(j)}><Edit fontSize="small"/></IconButton>
-                                            </Tooltip><Tooltip title="Delete"><IconButton size="small" color="error" onClick={()=>openDelete(j)}><Delete fontSize="small"/></IconButton>
-                                            </Tooltip> */}
+                                            
                                         </Box>
                                         </TableCell>
                                     </TableRow>
@@ -826,12 +1004,7 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
     Edit Job
   </Button>
 </DialogActions>
-                {/* <DialogActions sx={{ px:3,py:2.5,borderTop:"1px solid #e0e0e0",justifyContent:"flex-start",gap:1.5 }}>
-                    <Button variant="outlined" onClick={()=>{setDetailOpen(false);navigate(`/resumes?job=${selected?._id}&job_title=${encodeURIComponent(selected?.title || '')}`);}} sx={{ textTransform:"none",fontWeight:600 }}>View Candidates</Button>
-                    <Button variant="outlined" onClick={()=>{setDetailOpen(false);navigate(`/tracking?job=${selected?._id}`);}} sx={{ textTransform:"none",fontWeight:600 }}>Track Progress</Button>
-                    <Box sx={{ flex:1 }}/>
-                    <Button variant="contained" onClick={()=>{setDetailOpen(false);openEdit(selected);}} sx={{ textTransform:"none",fontWeight:700 }}>Edit Job</Button>
-                </DialogActions> */}
+      
             </Dialog>
 
             {/* Add / Edit Dialog */}
@@ -1313,6 +1486,559 @@ function JobsTab({ initialClientId, initialClientName, onClearClientFilter }) {
     )}
   </DialogActions>
 </Dialog>
+
+{/* ══ Manual Question Entry Dialog ══════════════════════════════════════ */}
+<Dialog open={manualOpen} onClose={() => { if (!manualSaving) setManualOpen(false); }}
+  maxWidth="md" fullWidth PaperProps={{ sx: { maxHeight: "93vh" } }}>
+  <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0", pb: 1.5 }}>
+    <Box display="flex" alignItems="center" justifyContent="space-between">
+      <Box display="flex" alignItems="center" gap={1.5}>
+        <Avatar sx={{ bgcolor: "#e3f2fd", width: 38, height: 38 }}>
+          <Assignment sx={{ fontSize: 20, color: "#0277bd" }} />
+        </Avatar>
+        <Box>
+          <Typography fontWeight={700} fontSize={15}>Add Question Manually</Typography>
+          <Typography fontSize={11} color="text.secondary">
+            {manualJob?.job_id} · {manualJob?.title}
+          </Typography>
+        </Box>
+      </Box>
+      <IconButton size="small" onClick={() => setManualOpen(false)} disabled={manualSaving}>
+        <CloseIcon fontSize="small" />
+      </IconButton>
+    </Box>
+  </DialogTitle>
+
+  <DialogContent sx={{ pt: 2.5 }}>
+    {/* Type selector */}
+    <Box display="flex" gap={1} mb={2.5}>
+      {[
+        { key: "mcq",        label: "MCQ",        color: "#7b1fa2", bg: "#f3e5f5", icon: <Quiz sx={{ fontSize: 15 }} /> },
+        { key: "subjective", label: "Subjective",  color: "#0277bd", bg: "#e3f2fd", icon: <QuestionAnswer sx={{ fontSize: 15 }} /> },
+        { key: "coding",     label: "Coding",      color: "#2e7d32", bg: "#e8f5e9", icon: <Code sx={{ fontSize: 15 }} /> },
+      ].map(({ key, label, color, bg, icon }) => (
+        <Box key={key} onClick={() => { setManualType(key); setManualError(""); setManualSuccess(""); }}
+          sx={{
+            flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 1, py: 1.2, borderRadius: 2, cursor: "pointer", fontWeight: 700, fontSize: 13,
+            border: `2px solid ${manualType === key ? color : "#e0e0e0"}`,
+            bgcolor: manualType === key ? bg : "#fafafa",
+            color: manualType === key ? color : "#aaa",
+            transition: "all 0.15s",
+          }}>
+          {icon}{label}
+        </Box>
+      ))}
+    </Box>
+
+    {/* Common: question text */}
+    <TextField fullWidth multiline rows={3} label="Question *" size="small"
+      value={manualForm.question}
+      onChange={e => setManualForm(p => ({ ...p, question: e.target.value }))}
+      placeholder={
+        manualType === "mcq"        ? "e.g. What is the time complexity of binary search?" :
+        manualType === "subjective" ? "e.g. Describe a time you optimised a slow database query." :
+                                      "e.g. Two Sum\n\nGiven an array of integers nums and an integer target, return indices of two numbers that add up to target.\n\nInput: nums = [2,7,11,15], target = 9\nOutput: [0,1]"
+      }
+      sx={{ mb: 2 }}
+    />
+
+    {/* Common: difficulty + topic/skill row */}
+    <Grid container spacing={2} mb={2}>
+      <Grid item xs={12} sm={4}>
+        <TextField select fullWidth size="small" label="Difficulty"
+          value={manualForm.difficulty}
+          onChange={e => setManualForm(p => ({ ...p, difficulty: e.target.value }))}>
+          {["Easy", "Medium", "Hard"].map(d => <MenuItem key={d} value={d}>{d}</MenuItem>)}
+        </TextField>
+      </Grid>
+      {manualType !== "subjective" && (
+        <Grid item xs={12} sm={8}>
+          <TextField fullWidth size="small" label={manualType === "coding" ? "Topic / Algorithm" : "Topic / Concept"}
+            value={manualForm.topic}
+            onChange={e => setManualForm(p => ({ ...p, topic: e.target.value }))}
+            placeholder={manualType === "coding" ? "e.g. Hash Map, Two Pointers" : "e.g. OOP, Data Structures"}
+          />
+        </Grid>
+      )}
+      {manualType === "subjective" && (
+        <Grid item xs={12} sm={8}>
+          <TextField fullWidth size="small" label="Skill being tested"
+            value={manualForm.skill}
+            onChange={e => setManualForm(p => ({ ...p, skill: e.target.value }))}
+            placeholder="e.g. Problem Solving, System Design"
+          />
+        </Grid>
+      )}
+    </Grid>
+
+    {/* ── MCQ specific ── */}
+    {manualType === "mcq" && (
+      <Box p={2} bgcolor="#fdf6ff" borderRadius={2} border="1px solid #ce93d8" mb={2}>
+        <Typography fontSize={12} fontWeight={700} color="#4a148c" mb={1.5}>Answer Options</Typography>
+        <Box display="flex" flexDirection="column" gap={1.2}>
+          {manualForm.options.map((opt, i) => (
+            <Box key={i} display="flex" alignItems="center" gap={1}>
+              <Box sx={{
+                width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+                bgcolor: manualForm.correct_answer === opt && opt.trim() ? "#2e7d32" : "#e0e0e0",
+                color:   manualForm.correct_answer === opt && opt.trim() ? "#fff" : "#555",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontWeight: 700, fontSize: 12,
+              }}>
+                {String.fromCharCode(65 + i)}
+              </Box>
+              <TextField fullWidth size="small"
+                label={`Option ${String.fromCharCode(65 + i)}`}
+                value={opt}
+                onChange={e => {
+                  const newOpts = [...manualForm.options];
+                  const oldVal  = newOpts[i];
+                  newOpts[i]    = e.target.value;
+                  // Keep correct_answer in sync if this option was correct
+                  setManualForm(p => ({
+                    ...p,
+                    options: newOpts,
+                    correct_answer: p.correct_answer === oldVal ? e.target.value : p.correct_answer,
+                  }));
+                }}
+              />
+              <Tooltip title="Mark as correct answer">
+                <IconButton size="small"
+                  onClick={() => opt.trim() && setManualForm(p => ({ ...p, correct_answer: opt.trim() }))}
+                  sx={{ color: manualForm.correct_answer === opt.trim() && opt.trim() ? "#2e7d32" : "#bbb" }}>
+                  <CheckCircle fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          ))}
+        </Box>
+        {manualForm.correct_answer && (
+          <Box mt={1.5} px={1.5} py={0.8} bgcolor="#e8f5e9" borderRadius={1.5} border="1px solid #a5d6a7"
+            display="flex" alignItems="center" gap={1}>
+            <CheckCircle sx={{ fontSize: 16, color: "#2e7d32" }} />
+            <Typography fontSize={12} color="#1b5e20" fontWeight={600}>
+              Correct: {manualForm.correct_answer}
+            </Typography>
+          </Box>
+        )}
+      </Box>
+    )}
+
+    {/* ── Subjective specific ── */}
+    {manualType === "subjective" && (
+      <Box display="flex" flexDirection="column" gap={2} mb={2}>
+        <Box p={2} bgcolor="#e8f5e9" borderRadius={2} border="1px solid #a5d6a7">
+          <Typography fontSize={12} fontWeight={700} color="#1b5e20" mb={1}>Reference Answer</Typography>
+          <TextField fullWidth multiline rows={4} size="small"
+            placeholder="Write a model answer covering all key aspects..."
+            value={manualForm.reference_answer}
+            onChange={e => setManualForm(p => ({ ...p, reference_answer: e.target.value }))}
+            sx={{ bgcolor: "#fff", borderRadius: 1 }}
+          />
+        </Box>
+        <Box p={2} bgcolor="#fff8e1" borderRadius={2} border="1px solid #ffe082">
+          <Typography fontSize={12} fontWeight={700} color="#e65100" mb={1}>
+            Key Points to Look For
+          </Typography>
+          <TextField fullWidth multiline rows={3} size="small"
+            placeholder={"• Point 1\n• Point 2\n• Point 3"}
+            value={manualForm.key_points}
+            onChange={e => setManualForm(p => ({ ...p, key_points: e.target.value }))}
+            sx={{ bgcolor: "#fff", borderRadius: 1 }}
+          />
+        </Box>
+      </Box>
+    )}
+
+    {/* ── Coding specific ── */}
+    {manualType === "coding" && (
+      <Box mb={2}>
+        <Box p={1.5} bgcolor="#1e1e2e" borderRadius={2} border="1px solid #3d3d5c">
+          <Box display="flex" alignItems="center" gap={1} mb={1.5}>
+            <Box display="flex" gap={0.5}>
+              {["#ff5f57","#febc2e","#28c840"].map(c => (
+                <Box key={c} sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: c }} />
+              ))}
+            </Box>
+            <TextField select size="small"
+              value={manualForm.programming_language}
+              onChange={e => setManualForm(p => ({ ...p, programming_language: e.target.value }))}
+              sx={{
+                minWidth: 130,
+                "& .MuiInputBase-root": { color: "#82aaff", fontSize: 12, height: 28 },
+                "& .MuiOutlinedInput-notchedOutline": { borderColor: "#414868" },
+                "& .MuiSelect-icon": { color: "#82aaff" },
+              }}>
+              {["Python","JavaScript","Java","C++","C","Go","TypeScript","Rust","Kotlin","Swift"].map(l =>
+                <MenuItem key={l} value={l} sx={{ fontSize: 12 }}>{l}</MenuItem>
+              )}
+            </TextField>
+            <Typography fontSize={11} color="#a9b1d6">Write the full problem statement below</Typography>
+          </Box>
+          <TextField fullWidth multiline rows={10} size="small"
+            value={manualForm.question}
+            onChange={e => setManualForm(p => ({ ...p, question: e.target.value }))}
+            placeholder={"Problem Title\n\nProblem statement...\n\nInput: description\nOutput: description\n\nExample:\nInput: nums = [2,7,11,15], target = 9\nOutput: [0,1]\n\nConstraints:\n- 2 <= nums.length <= 10^4"}
+            sx={{
+              "& .MuiInputBase-root": {
+                bgcolor: "#282a36", color: "#f8f8f2", fontSize: 12,
+                fontFamily: "'Fira Code','Consolas',monospace", lineHeight: 1.8,
+              },
+              "& .MuiOutlinedInput-notchedOutline": { borderColor: "#414868" },
+            }}
+          />
+        </Box>
+      </Box>
+    )}
+
+    {manualError   && <Alert severity="error"   sx={{ mt: 1 }}>{manualError}</Alert>}
+    {manualSuccess && <Alert severity="success" sx={{ mt: 1 }}>{manualSuccess}</Alert>}
+  </DialogContent>
+
+  <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0", gap: 1 }}>
+    <Button onClick={() => setManualOpen(false)} disabled={manualSaving}>Close</Button>
+    <Box flex={1} />
+    <Button variant="outlined"
+      onClick={() => { setManualError(""); setManualSuccess(""); setManualForm(p => ({ ...p, question: "", options: ["","","",""], correct_answer: "", topic: "", reference_answer: "", key_points: "", skill: "" })); }}
+      disabled={manualSaving}>
+      Clear Form
+    </Button>
+    <Button variant="contained" onClick={handleManualSave} disabled={manualSaving}
+      startIcon={manualSaving ? <CircularProgress size={16} color="inherit" /> : <Add />}
+      sx={{
+        bgcolor: manualType === "mcq" ? "#7b1fa2" : manualType === "subjective" ? "#0277bd" : "#2e7d32",
+        "&:hover": { bgcolor: manualType === "mcq" ? "#6a1b9a" : manualType === "subjective" ? "#01579b" : "#1b5e20" },
+        minWidth: 160,
+      }}>
+      {manualSaving ? "Saving…" : "Save Question"}
+    </Button>
+  </DialogActions>
+</Dialog>
+
+
+
+
+{/* ══ Manage Questions Dialog ═══════════════════════════════════════════ */}
+<Dialog open={manageOpen} onClose={() => setManageOpen(false)}
+  maxWidth="lg" fullWidth PaperProps={{ sx: { maxHeight: "93vh" } }}>
+  <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0", pb: 1.5 }}>
+    <Box display="flex" alignItems="center" justifyContent="space-between">
+      <Box display="flex" alignItems="center" gap={1.5}>
+        <Avatar sx={{ bgcolor: "#fff3e0", width: 38, height: 38 }}>
+          <FilterList sx={{ fontSize: 20, color: "#e65100" }} />
+        </Avatar>
+        <Box>
+          <Typography fontWeight={700} fontSize={15}>Manage Questions</Typography>
+          <Typography fontSize={11} color="text.secondary">
+            {manageJob?.job_id} · {manageJob?.title} — activate, deactivate or permanently delete
+          </Typography>
+        </Box>
+      </Box>
+      <Box display="flex" alignItems="center" gap={1}>
+        <FormControlLabel
+          control={
+            <Switch size="small" checked={showInactive}
+              onChange={e => setShowInactive(e.target.checked)}
+              sx={{ "& .MuiSwitch-switchBase.Mui-checked": { color: "#e65100" },
+                    "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { bgcolor: "#e65100" } }}
+            />
+          }
+          label={<Typography fontSize={11} color="text.secondary">Show inactive</Typography>}
+        />
+        <IconButton size="small" onClick={() => setManageOpen(false)}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </Box>
+    </Box>
+  </DialogTitle>
+
+  <DialogContent sx={{ pt: 2 }}>
+    {manageError && <Alert severity="error" onClose={() => setManageError("")} sx={{ mb: 2 }}>{manageError}</Alert>}
+
+    {manageLoading ? (
+      <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>
+    ) : manageData ? (() => {
+      const allMcq  = manageData.mcq_questions        || [];
+      const allSubj = manageData.subjective_questions  || [];
+      const allCode = manageData.coding_questions      || [];
+
+      const visibleMcq  = showInactive ? allMcq  : allMcq.filter(q  => q.is_active !== false);
+      const visibleSubj = showInactive ? allSubj : allSubj.filter(q  => q.is_active !== false);
+      const visibleCode = showInactive ? allCode : allCode.filter(q  => q.is_active !== false);
+
+      const activeMcq  = allMcq.filter(q  => q.is_active !== false).length;
+      const activeSubj = allSubj.filter(q => q.is_active !== false).length;
+      const activeCode = allCode.filter(q => q.is_active !== false).length;
+
+      // Map visible index back to real index in full array
+      const getRealIndex = (qType, visibleIdx) => {
+        const allArr = qType === "mcq" ? allMcq : qType === "subjective" ? allSubj : allCode;
+        const visArr = qType === "mcq" ? visibleMcq : qType === "subjective" ? visibleSubj : visibleCode;
+        const targetQ = visArr[visibleIdx];
+        return allArr.findIndex(q => q === targetQ);
+      };
+
+      const tabData = [
+        { key: "mcq",        label: "MCQ",        color: "#7b1fa2", active: activeMcq,  total: allMcq.length,  visible: visibleMcq  },
+        { key: "subjective", label: "Subjective",  color: "#0277bd", active: activeSubj, total: allSubj.length, visible: visibleSubj },
+        { key: "coding",     label: "Coding",      color: "#2e7d32", active: activeCode, total: allCode.length, visible: visibleCode },
+      ];
+
+      return (
+        <>
+          {/* Stats row */}
+          <Box display="flex" gap={1.5} mb={2} flexWrap="wrap">
+            {tabData.map(({ key, label, color, active, total }) => (
+              <Box key={key} px={2} py={1} borderRadius={2}
+                sx={{ bgcolor: `${color}10`, border: `1px solid ${color}30`, minWidth: 130 }}>
+                <Typography fontSize={10} fontWeight={700} color={color}
+                  textTransform="uppercase" letterSpacing={0.5}>{label}</Typography>
+                <Box display="flex" alignItems="baseline" gap={0.5} mt={0.3}>
+                  <Typography fontSize={20} fontWeight={800} color={color}>{active}</Typography>
+                  <Typography fontSize={11} color="text.secondary">/ {total} active</Typography>
+                </Box>
+              </Box>
+            ))}
+            <Box px={2} py={1} borderRadius={2}
+              sx={{ bgcolor: "#fce4ec", border: "1px solid #f48fb1", minWidth: 130 }}>
+              <Typography fontSize={10} fontWeight={700} color="#c62828"
+                textTransform="uppercase" letterSpacing={0.5}>Inactive</Typography>
+              <Box display="flex" alignItems="baseline" gap={0.5} mt={0.3}>
+                <Typography fontSize={20} fontWeight={800} color="#c62828">
+                  {(allMcq.length - activeMcq) + (allSubj.length - activeSubj) + (allCode.length - activeCode)}
+                </Typography>
+                <Typography fontSize={11} color="text.secondary">hidden from exams</Typography>
+              </Box>
+            </Box>
+          </Box>
+
+          {/* Tabs */}
+          <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
+            <Tabs value={manageTab} onChange={(_, v) => setManageTab(v)}
+              sx={{ "& .MuiTab-root": { fontWeight: 600, textTransform: "none", minHeight: 40 } }}>
+              {tabData.map(({ key, label, color, active, total }, idx) => (
+                <Tab key={key} value={idx} label={
+                  <Box display="flex" alignItems="center" gap={0.8}>
+                    <Typography fontSize={13}>{label}</Typography>
+                    <Chip label={`${active}/${total}`} size="small"
+                      sx={{ fontSize: 10, height: 18, bgcolor: `${color}15`, color, fontWeight: 700 }} />
+                  </Box>
+                } />
+              ))}
+            </Tabs>
+          </Box>
+
+          {/* Question list */}
+          {tabData.map(({ key, visible }, tabIdx) => (
+            manageTab !== tabIdx ? null :
+            visible.length === 0 ? (
+              <Box display="flex" flexDirection="column" alignItems="center" py={6} gap={1}>
+                <Typography color="text.secondary" fontSize={14}>
+                  {showInactive ? "No questions in this bank yet" : "No active questions — toggle 'Show inactive' to see all"}
+                </Typography>
+              </Box>
+            ) : (
+              <Box key={key} display="flex" flexDirection="column" gap={1.2}>
+                {visible.map((q, visIdx) => {
+                  const realIdx   = getRealIndex(key, visIdx);
+                  const actionKey = `${key}-${realIdx}`;
+                  const isActive  = q.is_active !== false;
+                  const isToggling = actionLoading[actionKey] === "toggle";
+                  const isDeleting = actionLoading[actionKey] === "delete";
+
+                  return (
+                    <Box key={realIdx} sx={{
+                      border: `1.5px solid ${isActive ? "#e0e0e0" : "#ffcc02"}`,
+                      borderRadius: 2, overflow: "hidden",
+                      opacity: isActive ? 1 : 0.65,
+                      bgcolor: isActive ? "#fff" : "#fffde7",
+                      transition: "all 0.2s",
+                    }}>
+                      {/* Question header */}
+                      <Box sx={{
+                        bgcolor: isActive ? "#f5f7fa" : "#fff9c4",
+                        px: 2, py: 1.2,
+                        display: "flex", alignItems: "center", gap: 1.5,
+                        borderBottom: `1px solid ${isActive ? "#e0e0e0" : "#fff176"}`,
+                        flexWrap: "wrap",
+                      }}>
+                        {/* Index badge */}
+                        <Chip label={`#${realIdx + 1}`} size="small"
+                          sx={{
+                            bgcolor: isActive
+                              ? key === "mcq" ? "#7b1fa2" : key === "subjective" ? "#0277bd" : "#2e7d32"
+                              : "#9e9e9e",
+                            color: "#fff", fontWeight: 700, fontSize: 10, height: 20, flexShrink: 0,
+                          }} />
+
+                        {/* Status badge */}
+                        <Chip
+                          label={isActive ? "Active" : "Inactive"}
+                          size="small"
+                          sx={{
+                            bgcolor: isActive ? "#e8f5e9" : "#fce4ec",
+                            color:   isActive ? "#2e7d32" : "#c62828",
+                            border:  `1px solid ${isActive ? "#a5d6a7" : "#f48fb1"}`,
+                            fontWeight: 700, fontSize: 10, height: 20, flexShrink: 0,
+                          }}
+                        />
+
+                        {/* Difficulty */}
+                        {q.difficulty && (() => {
+                          const ds = DIFFICULTY_COLOR[q.difficulty] || {};
+                          return (
+                            <Chip label={q.difficulty} size="small"
+                              sx={{ fontSize: 10, height: 20, fontWeight: 600, flexShrink: 0,
+                                    bgcolor: ds.bg, color: ds.text, border: `1px solid ${ds.border}` }} />
+                          );
+                        })()}
+
+                        {/* Topic / Skill */}
+                        {(q.topic || q.skill) && (
+                          <Chip label={q.topic || q.skill} size="small" variant="outlined"
+                            sx={{ fontSize: 10, height: 20, flexShrink: 0 }} />
+                        )}
+
+                        {/* Question text preview */}
+                        <Typography fontSize={13} fontWeight={600} color="text.primary"
+                          lineHeight={1.5} sx={{ flex: 1, minWidth: 0 }}
+                          noWrap title={q.question}>
+                          {q.question}
+                        </Typography>
+
+                        {/* Actions */}
+                        <Box display="flex" gap={0.5} flexShrink={0}>
+                          {/* Toggle active */}
+                          <Tooltip title={isActive ? "Deactivate (hide from exams)" : "Activate (include in exams)"}>
+                            <span>
+                              <IconButton size="small"
+                                disabled={isToggling || isDeleting}
+                                onClick={() => handleToggleActive(key, realIdx)}
+                                sx={{ color: isActive ? "#e65100" : "#2e7d32" }}>
+                                {isToggling
+                                  ? <CircularProgress size={14} />
+                                  : isActive
+                                  ? <RadioButtonUnchecked fontSize="small" />
+                                  : <CheckCircle fontSize="small" />}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+
+                          {/* Delete */}
+                          <Tooltip title="Permanently delete this question">
+                            <span>
+                              <IconButton size="small" color="error"
+                                disabled={isToggling || isDeleting}
+                                onClick={() => setConfirmDelete({
+                                  qType: key, index: realIdx,
+                                  text: q.question?.slice(0, 80) + (q.question?.length > 80 ? "…" : ""),
+                                })}>
+                                {isDeleting
+                                  ? <CircularProgress size={14} color="error" />
+                                  : <Delete fontSize="small" />}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </Box>
+                      </Box>
+
+                      {/* Expanded content */}
+                      <Box sx={{ px: 2, py: 1.2 }}>
+                        {/* MCQ options */}
+                        {key === "mcq" && q.options && (
+                          <Box display="flex" flexWrap="wrap" gap={0.8}>
+                            {q.options.map((opt, oi) => {
+                              const isCorrect = (Array.isArray(q.correct_answer)
+                                ? q.correct_answer : [q.correct_answer]).includes(String(opt));
+                              return (
+                                <Box key={oi} display="flex" alignItems="center" gap={0.5}
+                                  sx={{
+                                    px: 1.2, py: 0.4, borderRadius: 1.5, fontSize: 11,
+                                    bgcolor: isCorrect ? "#e8f5e9" : "#f5f5f5",
+                                    border: isCorrect ? "1.5px solid #a5d6a7" : "1px solid #e0e0e0",
+                                    color: isCorrect ? "#1b5e20" : "#555",
+                                    fontWeight: isCorrect ? 700 : 400,
+                                  }}>
+                                  {isCorrect && <CheckCircle sx={{ fontSize: 12 }} />}
+                                  <Typography fontSize={11}>{opt}</Typography>
+                                </Box>
+                              );
+                            })}
+                          </Box>
+                        )}
+
+                        {/* Subjective reference */}
+                        {key === "subjective" && q.reference_answer && (
+                          <Typography fontSize={11} color="text.secondary" lineHeight={1.6}
+                            sx={{ fontStyle: "italic" }} noWrap>
+                            Ref: {q.reference_answer.slice(0, 120)}{q.reference_answer.length > 120 ? "…" : ""}
+                          </Typography>
+                        )}
+
+                        {/* Coding language */}
+                        {key === "coding" && q.programming_language && (
+                          <Chip label={q.programming_language} size="small"
+                            sx={{ fontSize: 10, height: 18, bgcolor: "#1a1a2e", color: "#82aaff",
+                                  border: "1px solid #414868" }} />
+                        )}
+                      </Box>
+                    </Box>
+                  );
+                })}
+              </Box>
+            )
+          ))}
+        </>
+      );
+    })() : (
+      <Box display="flex" justifyContent="center" py={8}>
+        <Typography color="text.secondary">No data available</Typography>
+      </Box>
+    )}
+
+    {/* Confirm delete dialog */}
+    <Dialog open={!!confirmDelete} onClose={() => setConfirmDelete(null)} maxWidth="xs" fullWidth>
+      <DialogTitle sx={{ fontWeight: 700, color: "#c62828" }}>
+        ⚠ Permanently Delete Question?
+      </DialogTitle>
+      <DialogContent>
+        <Typography fontSize={13} color="text.secondary" mb={1}>
+          This action cannot be undone. The question will be removed from the bank forever.
+        </Typography>
+        <Box p={1.5} bgcolor="#fce4ec" borderRadius={1.5} border="1px solid #f48fb1">
+          <Typography fontSize={12} color="#c62828" fontStyle="italic">
+            "{confirmDelete?.text}"
+          </Typography>
+        </Box>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
+        <Button variant="contained" color="error" onClick={handleDeleteQuestion}
+          startIcon={<Delete />}>
+          Delete Permanently
+        </Button>
+      </DialogActions>
+    </Dialog>
+  </DialogContent>
+
+  <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
+    <Typography fontSize={11} color="text.secondary" flex={1}>
+      💡 Inactive questions are hidden from exam generation but kept in the bank
+    </Typography>
+    <Button variant="outlined" onClick={() => { setManageOpen(false); openManual(manageJob); }}>
+      + Add Question
+    </Button>
+    <Button variant="contained" onClick={() => setManageOpen(false)}>Done</Button>
+  </DialogActions>
+</Dialog>
+
+
+
+
+
+
+
 
 
             {/* Delete Dialog */}

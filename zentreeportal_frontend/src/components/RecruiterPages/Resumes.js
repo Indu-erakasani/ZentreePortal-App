@@ -359,7 +359,537 @@ const RawPdfViewerDialog = ({ open, onClose, raw }) => {
   );
 };
 
+// ── Exam & Monitoring Panel — embedded inside Candidate Detail ────────────────
+function ExamMonitoringPanel({ candidateId, candidateName, examMap }) {
+  const [exams,       setExams]       = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [selected,    setSelected]    = useState(null);
+  const [tab,         setTab]         = useState(0); // 0=Scores, 1=MCQ, 2=Monitoring
+  const [procData,    setProcData]    = useState(null);
+  const [procLoading, setProcLoading] = useState(false);
+  const [procTab,     setProcTab]     = useState(0); // 0=Events, 1=Snapshots
 
+  useEffect(() => {
+    if (!candidateId) return;
+    setLoading(true);
+    fetch(`${BASE}/exams/by-candidate/${candidateId}`, { headers: getHeaders() })
+      .then(r => r.json())
+      .then(res => {
+        const data = res.data || [];
+        setExams(data);
+        const completed = data.find(e => e.status === "Completed");
+        setSelected(completed || data[0] || null);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [candidateId]);
+
+  useEffect(() => {
+    if (!selected?._id || selected.status !== "Completed") {
+      setProcData(null); return;
+    }
+    setProcLoading(true); setProcData(null); setProcTab(0);
+    fetch(`${BASE}/exams/${selected._id}/proctoring`, { headers: getHeaders() })
+      .then(r => r.json())
+      .then(res => { if (res.success) setProcData(res.data); })
+      .catch(() => {})
+      .finally(() => setProcLoading(false));
+  }, [selected]);
+
+  const scoreColor = (s) =>
+    s >= 80 ? "#2e7d32" : s >= 60 ? "#1565c0" : s >= 40 ? "#f57c00" : "#c62828";
+  const scoreBg = (s) =>
+    s >= 80 ? "#e8f5e9" : s >= 60 ? "#e3f2fd" : s >= 40 ? "#fff8e1" : "#fce4ec";
+
+  if (loading) return (
+    <Box display="flex" justifyContent="center" alignItems="center" flex={1} py={6}>
+      <CircularProgress />
+    </Box>
+  );
+
+  if (exams.length === 0) return (
+    <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center"
+      flex={1} py={6} gap={2}>
+      <Assignment sx={{ fontSize: 56, color: "#e0e0e0" }} />
+      <Typography color="text.secondary" fontWeight={600}>No exams sent yet</Typography>
+      <Typography fontSize={12} color="text.disabled">
+        Use the Send Exam button (📋) in the candidates table to send a screening exam.
+      </Typography>
+    </Box>
+  );
+
+  const mcqAnswers  = selected?.answers?.mcq       || [];
+  const subjAnswers = selected?.answers?.subjective || [];
+  const codeAnswers = selected?.answers?.coding     || [];
+  const mcqPct = selected?.mcq_total > 0
+    ? Math.round((selected.mcq_correct / selected.mcq_total) * 100) : null;
+
+  const EXAM_STATUS_COLOR = {
+    Completed:   { bg: "#e8f5e9", color: "#2e7d32" },
+    "In Progress": { bg: "#e3f2fd", color: "#0277bd" },
+    Sent:        { bg: "#fff3e0", color: "#e65100" },
+    Expired:     { bg: "#f5f5f5", color: "#757575" },
+  };
+
+  return (
+    <Box display="flex" flex={1} overflow="hidden" width="100%">
+      {/* Left sidebar — exam list */}
+      <Box sx={{ width: 200, borderRight: "1px solid #e0e0e0", overflowY: "auto",
+                 bgcolor: "#fafafa", flexShrink: 0 }}>
+        <Typography fontSize={10} fontWeight={700} color="text.secondary"
+          textTransform="uppercase" letterSpacing={0.5} px={1.5} py={1}>
+          Sent Exams
+        </Typography>
+        {exams.map(e => {
+          const sc = EXAM_STATUS_COLOR[e.status] || EXAM_STATUS_COLOR.Sent;
+          return (
+            <Box key={e._id}
+              onClick={() => { setSelected(e); setTab(0); }}
+              sx={{
+                px: 1.5, py: 1.2, cursor: "pointer",
+                borderBottom: "1px solid #f0f0f0",
+                bgcolor: selected?._id === e._id ? "#e3f2fd" : "transparent",
+                borderLeft: selected?._id === e._id ? "3px solid #1565c0" : "3px solid transparent",
+                "&:hover": { bgcolor: "#f5f7fa" },
+              }}>
+              <Typography fontSize={11} fontWeight={700} noWrap>{e.exam_id}</Typography>
+              <Typography fontSize={10} color="text.secondary" noWrap>{e.job_title}</Typography>
+              <Box display="flex" gap={0.5} mt={0.4} flexWrap="wrap">
+                <Chip label={e.status} size="small"
+                  sx={{ fontSize: 8, height: 14, fontWeight: 700,
+                        bgcolor: sc.bg, color: sc.color }} />
+                {e.status === "Completed" && e.overall_score != null && (
+                  <Chip label={`${e.overall_score}%`} size="small"
+                    sx={{ fontSize: 8, height: 14,
+                          bgcolor: scoreBg(e.overall_score),
+                          color: scoreColor(e.overall_score), fontWeight: 700 }} />
+                )}
+              </Box>
+              <Typography fontSize={9} color="text.disabled" mt={0.2}>
+                {e.sent_at ? new Date(e.sent_at).toLocaleDateString("en-IN") : ""}
+              </Typography>
+            </Box>
+          );
+        })}
+      </Box>
+
+      {/* Right panel */}
+      <Box flex={1} display="flex" flexDirection="column" overflow="hidden">
+        {!selected ? (
+          <Box display="flex" justifyContent="center" alignItems="center" flex={1}>
+            <Typography color="text.secondary" fontSize={13}>Select an exam</Typography>
+          </Box>
+        ) : selected.status !== "Completed" ? (
+          <Box display="flex" flexDirection="column" alignItems="center"
+            justifyContent="center" flex={1} gap={2} p={3}>
+            <Schedule sx={{ fontSize: 48, color: "#e0e0e0" }} />
+            <Typography fontWeight={700} color="text.secondary" fontSize={14}>
+              Exam {selected.status === "Sent" ? "not yet started" : "in progress"}
+            </Typography>
+            <Typography fontSize={12} color="text.disabled">
+              Results appear once the candidate submits.
+            </Typography>
+          </Box>
+        ) : (
+          <>
+            {/* Score summary */}
+            <Box sx={{ p: 1.5, borderBottom: "1px solid #e0e0e0", bgcolor: "#f8f9fa", flexShrink: 0 }}>
+              <Box display="flex" gap={1.5} flexWrap="wrap" alignItems="center">
+                <Box>
+                  <Typography fontSize={9} color="text.secondary">Submitted</Typography>
+                  <Typography fontSize={11} fontWeight={600}>
+                    {selected.submitted_at
+                      ? new Date(selected.submitted_at).toLocaleString("en-IN") : "—"}
+                  </Typography>
+                </Box>
+                {mcqPct !== null && (
+                  <Box textAlign="center" px={1} py={0.5} borderRadius={1.5}
+                    sx={{ bgcolor: scoreBg(mcqPct), border: `1px solid ${scoreColor(mcqPct)}30` }}>
+                    <Typography fontSize={9} color="text.secondary">MCQ</Typography>
+                    <Typography fontSize={16} fontWeight={800} color={scoreColor(mcqPct)}>
+                      {mcqPct}%
+                    </Typography>
+                    <Typography fontSize={9} color="text.secondary">
+                      {selected.mcq_correct}/{selected.mcq_total}
+                    </Typography>
+                  </Box>
+                )}
+                {selected.subj_score != null && (
+                  <Box textAlign="center" px={1} py={0.5} borderRadius={1.5}
+                    sx={{ bgcolor: scoreBg(selected.subj_score), border: `1px solid ${scoreColor(selected.subj_score)}30` }}>
+                    <Typography fontSize={9} color="text.secondary">Written</Typography>
+                    <Typography fontSize={16} fontWeight={800} color={scoreColor(selected.subj_score)}>
+                      {selected.subj_score}%
+                    </Typography>
+                  </Box>
+                )}
+                {selected.code_score != null && (
+                  <Box textAlign="center" px={1} py={0.5} borderRadius={1.5}
+                    sx={{ bgcolor: scoreBg(selected.code_score), border: `1px solid ${scoreColor(selected.code_score)}30` }}>
+                    <Typography fontSize={9} color="text.secondary">Coding</Typography>
+                    <Typography fontSize={16} fontWeight={800} color={scoreColor(selected.code_score)}>
+                      {selected.code_score}%
+                    </Typography>
+                  </Box>
+                )}
+                {selected.overall_score != null && (
+                  <Box textAlign="center" px={1.5} py={0.5} borderRadius={1.5} ml="auto"
+                    sx={{ bgcolor: scoreBg(selected.overall_score),
+                          border: `2px solid ${scoreColor(selected.overall_score)}` }}>
+                    <Typography fontSize={9} color="text.secondary">Overall</Typography>
+                    <Typography fontSize={20} fontWeight={900} color={scoreColor(selected.overall_score)}>
+                      {selected.overall_score}%
+                    </Typography>
+                  </Box>
+                )}
+                {/* Integrity badge */}
+                {procData?.summary && (
+                  <Box textAlign="center" px={1} py={0.5} borderRadius={1.5}
+                    sx={{
+                      bgcolor: (procData.summary.integrity_score ?? 100) >= 80 ? "#e8f5e9"
+                             : (procData.summary.integrity_score ?? 100) >= 60 ? "#fff3e0" : "#fce4ec",
+                      border: `1px solid ${
+                        (procData.summary.integrity_score ?? 100) >= 80 ? "#a5d6a7"
+                      : (procData.summary.integrity_score ?? 100) >= 60 ? "#ffb74d" : "#f48fb1"}`,
+                    }}>
+                    <Typography fontSize={9} color="text.secondary">Integrity</Typography>
+                    <Typography fontSize={16} fontWeight={800}
+                      color={(procData.summary.integrity_score ?? 100) >= 80 ? "#2e7d32"
+                           : (procData.summary.integrity_score ?? 100) >= 60 ? "#e65100" : "#c62828"}>
+                      {procData.summary.integrity_score ?? 100}%
+                    </Typography>
+                    {procData.summary.alert_count > 0 && (
+                      <Typography fontSize={8} color="#c62828">
+                        {procData.summary.alert_count} alert(s)
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Box>
+            </Box>
+
+            {/* Tab buttons */}
+            <Box sx={{ px: 1.5, pt: 1, pb: 0, borderBottom: "1px solid #e0e0e0",
+                       display: "flex", gap: 0.8, flexShrink: 0, flexWrap: "wrap" }}>
+              {[
+                { label: `MCQ (${mcqAnswers.length})`,        val: 0, show: mcqAnswers.length > 0 },
+                { label: `Written (${subjAnswers.length})`,   val: 1, show: subjAnswers.length > 0 },
+                { label: `Coding (${codeAnswers.length})`,    val: 2, show: codeAnswers.length > 0 },
+              ].filter(t => t.show).map(t => (
+                <Button key={t.val} size="small" onClick={() => setTab(t.val)}
+                  variant={tab === t.val ? "contained" : "outlined"}
+                  sx={{ fontWeight: 700, textTransform: "none", fontSize: 11, py: 0.5,
+                        bgcolor: tab === t.val ? "#1a237e" : "transparent",
+                        borderColor: "#1a237e", color: tab === t.val ? "#fff" : "#1a237e" }}>
+                  {t.label}
+                </Button>
+              ))}
+              {/* Monitoring button */}
+              <Button size="small" onClick={() => setTab(99)}
+                variant={tab === 99 ? "contained" : "outlined"}
+                sx={{
+                  fontWeight: 700, textTransform: "none", fontSize: 11, py: 0.5, ml: "auto",
+                  bgcolor: tab === 99 ? "#b71c1c" : "transparent",
+                  borderColor: "#b71c1c", color: tab === 99 ? "#fff" : "#b71c1c",
+                }}>
+                🎥 Monitoring
+                {procData?.summary?.alert_count > 0 && (
+                  <Box component="span" sx={{
+                    ml: 0.5, bgcolor: "#ff5722", color: "#fff",
+                    borderRadius: "50%", width: 14, height: 14, fontSize: 8, fontWeight: 800,
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {procData.summary.alert_count}
+                  </Box>
+                )}
+              </Button>
+            </Box>
+
+            {/* Content */}
+            <Box flex={1} sx={{ overflowY: "auto", p: 1.5 }}>
+
+              {/* MCQ tab */}
+              {tab === 0 && mcqAnswers.map((ans, i) => (
+                <Box key={i} mb={1.5} p={1.5} borderRadius={2}
+                  sx={{ border: `1.5px solid ${ans.is_correct ? "#a5d6a7" : "#ef9a9a"}`,
+                        bgcolor: ans.is_correct ? "#f9fff9" : "#fff9f9" }}>
+                  <Box display="flex" justifyContent="space-between" mb={0.8}>
+                    <Typography fontSize={12} fontWeight={700}>Q{i + 1}: {ans.question_text}</Typography>
+                    <Chip label={ans.is_correct ? "✓ Correct" : "✗ Wrong"} size="small"
+                      sx={{ bgcolor: ans.is_correct ? "#2e7d32" : "#c62828",
+                            color: "#fff", fontSize: 10, fontWeight: 700 }} />
+                  </Box>
+                  <Typography fontSize={11} color="text.secondary">
+                  Selected: <strong>{ans.selected_option || "—"}</strong>
+                  {!ans.is_correct && ` | Correct: ${Array.isArray(ans.correct_answer) ? ans.correct_answer.join(", ") : (ans.correct_answer || "—")}`}
+                  </Typography>
+                </Box>
+              ))}
+
+              {/* Written tab */}
+              {tab === 1 && subjAnswers.map((ans, i) => (
+                <Box key={i} mb={1.5} p={1.5} borderRadius={2} border="1px solid #90caf9">
+                  <Box display="flex" justifyContent="space-between" mb={0.8}>
+                    <Typography fontSize={12} fontWeight={700} color="#0277bd">Written Q{i + 1}</Typography>
+                    <Box display="flex" gap={0.8} alignItems="center">
+                      <Chip label={ans.verdict || "—"} size="small"
+                        sx={{ fontSize: 10, bgcolor: "#e3f2fd", color: "#0277bd" }} />
+                      <Typography fontSize={13} fontWeight={800}>
+                        {ans.ai_score}/{ans.ai_max_score}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Typography fontSize={11} fontStyle="italic" color="text.secondary" mb={0.8}>
+                    {ans.question_text}
+                  </Typography>
+                  <Box p={1} bgcolor="#f5f5f5" borderRadius={1} mb={0.8}>
+                    <Typography fontSize={11}>{ans.answer || "No answer provided"}</Typography>
+                  </Box>
+                  <Typography fontSize={11} color="text.secondary">{ans.ai_feedback}</Typography>
+                </Box>
+              ))}
+
+              {/* Coding tab */}
+              {tab === 2 && codeAnswers.map((ans, i) => (
+                <Box key={i} mb={1.5} borderRadius={2}
+                  sx={{ border: "1px solid #3d3d5c", overflow: "hidden" }}>
+                  <Box sx={{ bgcolor: "#2d2d3f", px: 1.5, py: 0.8,
+                             display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography fontSize={11} fontWeight={700} color="#82aaff">
+                      Coding Q{i + 1} — {ans.programming_language}
+                    </Typography>
+                    <Box display="flex" gap={0.8} alignItems="center">
+                      <Chip label={ans.verdict || "—"} size="small"
+                        sx={{ fontSize: 9, bgcolor: "#1a1a2e", color: "#82aaff",
+                              border: "1px solid #414868" }} />
+                      <Typography fontSize={12} fontWeight={800} color="#a6e22e">
+                        {ans.ai_score}/{ans.ai_max_score}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Box sx={{ bgcolor: "#1a1a2e", p: 1.5 }}>
+                    <Typography fontSize={11} color="#a6e22e" fontFamily="monospace"
+                      sx={{ whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto" }}>
+                      {ans.code || "No code submitted"}
+                    </Typography>
+                  </Box>
+                  {ans.ai_feedback && (
+                    <Box sx={{ bgcolor: "#13131f", px: 1.5, py: 1 }}>
+                      <Typography fontSize={10} color="#a9b1d6">{ans.ai_feedback}</Typography>
+                    </Box>
+                  )}
+                </Box>
+              ))}
+
+              {/* ── Monitoring tab ── */}
+              {tab === 99 && (
+                procLoading ? (
+                  <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box>
+                ) : !procData ? (
+                  <Box p={3} textAlign="center">
+                    <Typography fontSize={12} color="text.secondary">
+                      No monitoring data available for this exam.
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Box>
+                    {/* Summary stat boxes */}
+                    <Box display="flex" gap={1} flexWrap="wrap" mb={1.5}>
+                      {[
+                        { label: "Integrity", val: `${procData.summary?.integrity_score ?? 100}%`,
+                          color: (procData.summary?.integrity_score ?? 100) >= 80 ? "#2e7d32" : "#c62828",
+                          bg:    (procData.summary?.integrity_score ?? 100) >= 80 ? "#e8f5e9" : "#fce4ec" },
+                        { label: "🚨 Alerts",     val: procData.summary?.alert_count    ?? 0, color: "#c62828", bg: "#fce4ec" },
+                        { label: "⚠️ Warnings",   val: procData.summary?.warning_count  ?? 0, color: "#e65100", bg: "#fff3e0" },
+                        { label: "📸 Snapshots",  val: procData.summary?.total_snapshots ?? 0, color: "#0277bd", bg: "#e3f2fd" },
+                        { label: "🎤 Voice",      val: procData.summary?.voice_events    ?? 0, color: "#6a1b9a", bg: "#f3e5f5" },
+                        { label: "🔄 Tab Switch", val: procData.summary?.tab_switches    ?? 0, color: "#e65100", bg: "#fff3e0" },
+                      ].map(({ label, val, color, bg }) => (
+                        <Box key={label} sx={{ px: 1.2, py: 0.8, borderRadius: 1.5,
+                          bgcolor: bg, border: `1px solid ${color}30`, textAlign: "center", minWidth: 72 }}>
+                          <Typography fontSize={8} fontWeight={700} color={color}
+                            textTransform="uppercase">{label}</Typography>
+                          <Typography fontSize={15} fontWeight={900} color={color}>{val}</Typography>
+                        </Box>
+                      ))}
+                    </Box>
+
+                    {/* Suspicious findings */}
+                    {procData.summary?.suspicious_findings?.length > 0 ? (
+                      <Box mb={1.5} p={1.2} bgcolor="#fce4ec" borderRadius={2}
+                        border="1px solid #f48fb1">
+                        <Typography fontSize={11} fontWeight={700} color="#c62828" mb={0.5}>
+                          ⚠️ Suspicious Activity
+                        </Typography>
+                        {procData.summary.suspicious_findings.map((f, i) => (
+                          <Typography key={i} fontSize={11} color="#b71c1c">• {f}</Typography>
+                        ))}
+                      </Box>
+                    ) : (
+                      <Box mb={1.5} p={1.2} bgcolor="#e8f5e9" borderRadius={2}
+                        border="1px solid #a5d6a7" display="flex" alignItems="center" gap={0.8}>
+                        <Typography fontSize={12}>✅</Typography>
+                        <Typography fontSize={11} fontWeight={700} color="#2e7d32">
+                          No suspicious activity detected
+                        </Typography>
+                      </Box>
+                    )}
+
+                    {/* Events / Snapshots sub-tabs */}
+
+
+{/* ── Full Exam Recording ── */}
+{procData?.summary?.has_recording && (
+  <Box mb={1.5} p={1.5} bgcolor="#1a1a2e" borderRadius={2} border="1px solid #3d3d5c">
+    <Box display="flex" alignItems="center" gap={1} mb={1}>
+      <VideoCall sx={{ color: "#82aaff", fontSize: 16 }} />
+      <Typography fontSize={11} fontWeight={700} color="#82aaff">
+        Full Exam Recording
+      </Typography>
+      <Typography fontSize={9} color="#6272a4" ml="auto">
+        {new Date(procData.summary.video_uploaded_at).toLocaleString("en-IN")}
+      </Typography>
+    </Box>
+    <video
+      controls
+      style={{ width: "100%", borderRadius: 6, maxHeight: 240, background: "#000" }}
+      src={`${BASE}/exams/proctor/${procData.exam_mongo_id || selected?._id}/video`}
+    >
+      Your browser does not support video playback.
+    </video>
+  </Box>
+)}
+
+{!procData?.summary?.has_recording && selected?.status === "Completed" && (
+  <Box mb={1.5} p={1.2} bgcolor="#1a1a2e" borderRadius={2} border="1px solid #3d3d5c"
+    display="flex" alignItems="center" gap={1}>
+    <VideoCall sx={{ color: "#6272a4", fontSize: 16 }} />
+    <Typography fontSize={11} color="#6272a4">
+      No recording available — candidate may have used an older exam version.
+    </Typography>
+  </Box>
+)}
+
+                    <Box display="flex" gap={0.8} mb={1}>
+                      {[
+                        { label: `Events (${procData.events?.length ?? 0})`, val: 0 },
+                        { label: `Snapshots (${procData.snapshots?.length ?? 0})`, val: 1 },
+                      ].map(t => (
+                        <Button key={t.val} size="small" onClick={() => setProcTab(t.val)}
+                          variant={procTab === t.val ? "contained" : "outlined"}
+                          sx={{ fontSize: 10, textTransform: "none",
+                                bgcolor: procTab === t.val ? "#37474f" : "transparent",
+                                borderColor: "#90a4ae",
+                                color: procTab === t.val ? "#fff" : "#546e7a" }}>
+                          {t.label}
+                        </Button>
+                      ))}
+                    </Box>
+
+                    {/* Events */}
+                    {procTab === 0 && (
+                      !procData.events?.length ? (
+                        <Box p={2} textAlign="center" bgcolor="#f5f5f5" borderRadius={1.5}>
+                          <Typography fontSize={11} color="text.disabled">✅ No events recorded</Typography>
+                        </Box>
+                      ) : procData.events.map((e, i) => (
+                        <Box key={i} display="flex" gap={1} p={1} mb={0.8} borderRadius={1.5}
+                          sx={{
+                            bgcolor: e.type === "alert" ? "#fce4ec"
+                                   : e.type === "warning" ? "#fff8e1" : "#f5f5f5",
+                            border: `1px solid ${e.type === "alert" ? "#f48fb1"
+                                   : e.type === "warning" ? "#ffe082" : "#e0e0e0"}`,
+                          }}>
+                          <Typography fontSize={16} flexShrink={0}>
+                            {e.type === "alert" ? "🚨" : e.type === "warning" ? "⚠️" : "ℹ️"}
+                          </Typography>
+                          <Box flex={1}>
+                            <Typography fontSize={11} fontWeight={600}
+                              color={e.type === "alert" ? "#c62828"
+                                   : e.type === "warning" ? "#e65100" : "#555"}>
+                              {e.msg}
+                            </Typography>
+                            <Typography fontSize={9} color="text.secondary">
+                              {new Date(e.ts).toLocaleString("en-IN")}
+                            </Typography>
+                          </Box>
+                          {e.snapshot && (
+                            <img src={e.snapshot} alt=""
+                              style={{ width: 60, height: 45, objectFit: "cover",
+                                       borderRadius: 4, border: "1px solid #ddd", flexShrink: 0 }} />
+                          )}
+                        </Box>
+                      ))
+                    )}
+
+                    {/* Snapshots grid */}
+                    {procTab === 1 && (
+                      !procData.snapshots?.length ? (
+                        <Box p={2} textAlign="center" bgcolor="#f5f5f5" borderRadius={1.5}>
+                          <Typography fontSize={11} color="text.disabled">No snapshots captured</Typography>
+                        </Box>
+                      ) : (
+                        <Box display="grid"
+                          gridTemplateColumns="repeat(auto-fill, minmax(120px, 1fr))" gap={1}>
+                          {[...procData.snapshots].reverse().map((s, i) => (
+                            <Box key={i} position="relative">
+                              <img src={s.dataUrl} alt={`snap-${i}`}
+                                style={{
+                                  width: "100%", borderRadius: 6, display: "block",
+                                  border: s.flag === "alert"   ? "2px solid #f44336"
+                                        : s.flag === "warning" ? "2px solid #fb8c00"
+                                        : "1px solid #e0e0e0",
+                                }} />
+                              {s.flag && s.flag !== "ok" && (
+                                <Box sx={{
+                                  position: "absolute", top: 3, right: 3,
+                                  bgcolor: s.flag === "alert" ? "#f44336" : "#fb8c00",
+                                  borderRadius: 0.8, px: 0.5, fontSize: 8,
+                                  color: "#fff", fontWeight: 700,
+                                }}>
+                                  {s.flag.toUpperCase()}
+                                </Box>
+                              )}
+                              <Typography fontSize={8} color="text.secondary"
+                                textAlign="center" mt={0.2}>
+                                {new Date(s.ts).toLocaleTimeString("en-IN")}
+                              </Typography>
+                              <Box display="flex" flexWrap="wrap" gap={0.2}
+                                justifyContent="center" mt={0.2}>
+                                {s.analysis?.face_detected === false && (
+                                  <Typography fontSize={7} color="#c62828">⚠ No face</Typography>
+                                )}
+                                {s.analysis?.multiple_people && (
+                                  <Typography fontSize={7} color="#c62828">⚠ Multi</Typography>
+                                )}
+                                {s.analysis?.phone_detected && (
+                                  <Typography fontSize={7} color="#c62828">⚠ Phone</Typography>
+                                )}
+                                {s.analysis?.looking_away && (
+                                  <Typography fontSize={7} color="#e65100">⚠ Away</Typography>
+                                )}
+                                {s.analysis?.face_detected
+                                  && !s.analysis?.multiple_people
+                                  && !s.analysis?.phone_detected
+                                  && !s.analysis?.looking_away && (
+                                  <Typography fontSize={7} color="#2e7d32">✓ OK</Typography>
+                                )}
+                              </Box>
+                            </Box>
+                          ))}
+                        </Box>
+                      )
+                    )}
+                  </Box>
+                )
+              )}
+            </Box>
+          </>
+        )}
+      </Box>
+    </Box>
+  );
+}
 
 
 function ScheduleInterviewCard({ tracking, candidate, onScheduled }) {
@@ -1869,7 +2399,7 @@ const handleTrackingIvSave = async (e) => {
       <Typography fontWeight={700} fontSize={18}>Candidate Details</Typography>
       <IconButton size="small" onClick={() => setDetailOpen(false)}><CloseIcon fontSize="small" /></IconButton>
     </Box>
-    <Tabs value={detailTab} onChange={(_, v) => setDetailTab(v)} sx={{ mt: 1 }}>
+    {/* <Tabs value={detailTab} onChange={(_, v) => setDetailTab(v)} sx={{ mt: 1 }}>
       <Tab label="Profile" />
       <Tab label={
         <Box display="flex" alignItems="center" gap={0.8}>
@@ -1883,7 +2413,42 @@ const handleTrackingIvSave = async (e) => {
           )}
         </Box>
       } />
-    </Tabs>
+    </Tabs> */}
+
+
+
+<Tabs value={detailTab} onChange={(_, v) => setDetailTab(v)} sx={{ mt: 1 }}>
+  <Tab label="Profile" />
+  <Tab label={
+    <Box display="flex" alignItems="center" gap={0.8}>
+      Pipeline
+      {candidateTracking && (
+        <Chip
+          label={candidateTracking.current_stage}
+          size="small"
+          sx={{ fontSize: 9, height: 16, bgcolor: "#e8eaf6", color: "#1a237e", fontWeight: 700 }}
+        />
+      )}
+    </Box>
+  } />
+  <Tab label={
+    <Box display="flex" alignItems="center" gap={0.8}>
+      Exam & Monitoring
+      {examMap[selected?._id]?.status === "Completed" && (
+        <Chip
+          label={examMap[selected?._id]?.overall_score != null
+            ? `${examMap[selected?._id].overall_score}%` : "Done"}
+          size="small"
+          sx={{ fontSize: 9, height: 16, bgcolor: "#e8f5e9", color: "#2e7d32", fontWeight: 700 }}
+        />
+      )}
+    </Box>
+  } />
+</Tabs>
+
+
+
+
   </DialogTitle>
 
   {/* ── Tab 0: Profile ── */}
@@ -2029,6 +2594,20 @@ const handleTrackingIvSave = async (e) => {
     )}
   </DialogContent>
 )}
+
+
+{/* ── Tab 2: Exam & Monitoring ── */}
+{detailTab === 2 && selected && (
+  <DialogContent sx={{ p: 0, display: "flex", overflow: "hidden", minHeight: 500 }}>
+    <ExamMonitoringPanel
+      candidateId={selected._id}
+      candidateName={selected.name}
+      examMap={examMap}
+    />
+  </DialogContent>
+)}
+
+
 </Dialog>
 
 {/* ── Tracking Interview Feedback Dialog (from Detail View) ──────────────── */}

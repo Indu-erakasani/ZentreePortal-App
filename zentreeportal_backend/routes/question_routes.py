@@ -10,9 +10,7 @@ from extensions import mongo
 question_bp = Blueprint("questions", __name__)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
 #  HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def _extract_gemini_text(response_json: dict) -> str:
     """Extract final answer text from Gemini response (thinking-model safe)."""
@@ -355,32 +353,44 @@ Rules:
 
 
 # ── Get all questions for a job ───────────────────────────────────────────────
+
 @question_bp.route("/jobs/<jid>", methods=["GET"])
 @jwt_required()
 def get_questions(jid):
-    """
-    GET /api/questions/jobs/<jid>
-    Returns the full question bank stored on the job document.
-    """
     job, err = _find_job(jid)
     if err:
         return err
 
+    show_all = request.args.get("show_all", "false").lower() == "true"
+
+    mcq  = job.get("mcq_questions",        []) or []
+    subj = job.get("subjective_questions",  []) or []
+    code = job.get("coding_questions",      []) or []
+
+    if not show_all:
+        mcq  = [q for q in mcq  if q.get("is_active", True)]
+        subj = [q for q in subj if q.get("is_active", True)]
+        code = [q for q in code if q.get("is_active", True)]
+
     return jsonify(
         success=True,
         data={
-            "mcq_questions":              job.get("mcq_questions",        []),
-            "subjective_questions":       job.get("subjective_questions",  []),
-            "coding_questions":           job.get("coding_questions",      []),
-            "mcq_questions_count":        job.get("mcq_questions_count",        0),
-            "subjective_questions_count": job.get("subjective_questions_count",  0),
-            "coding_questions_count":     job.get("coding_questions_count",      0),
+            "mcq_questions":              mcq,
+            "subjective_questions":       subj,
+            "coding_questions":           code,
+            "mcq_questions_count":        len([q for q in (job.get("mcq_questions") or []) if q.get("is_active", True)]),
+            "subjective_questions_count": len([q for q in (job.get("subjective_questions") or []) if q.get("is_active", True)]),
+            "coding_questions_count":     len([q for q in (job.get("coding_questions") or []) if q.get("is_active", True)]),
+            "mcq_total":                  len(job.get("mcq_questions",        []) or []),
+            "subj_total":                 len(job.get("subjective_questions",  []) or []),
+            "code_total":                 len(job.get("coding_questions",      []) or []),
             "questions_generated_at":     job.get("questions_generated_at", ""),
             "generation_history":         job.get("generation_history",    []),
+            "show_all":                   show_all,
         }
     ), 200
-
-
+    
+    
 # ── Clear all questions for a job ─────────────────────────────────────────────
 @question_bp.route("/jobs/<jid>/clear", methods=["DELETE"])
 @jwt_required()
@@ -467,3 +477,136 @@ def get_generation_history(jid):
         success=True,
         data=job.get("generation_history", [])
     ), 200
+    
+    
+# ── Add questions manually ────────────────────────────────────────────────────
+@question_bp.route("/jobs/<jid>/manual", methods=["POST"])
+@jwt_required()
+def add_manual_questions(jid):
+    """
+    POST /api/questions/jobs/<jid>/manual
+    Body:
+    {
+        "type": "mcq" | "subjective" | "coding",
+        "question": { ...question object... }
+    }
+    """
+    job, err = _find_job(jid)
+    if err:
+        return err
+
+    data  = request.get_json(silent=True) or {}
+    qtype = data.get("type", "")
+    q     = data.get("question", {})
+
+    if qtype not in ("mcq", "subjective", "coding"):
+        return jsonify(success=False, message="type must be mcq, subjective, or coding"), 400
+    if not q.get("question", "").strip():
+        return jsonify(success=False, message="question text is required"), 400
+
+    field_map = {
+        "mcq":        ("mcq_questions",        "mcq_questions_count"),
+        "subjective": ("subjective_questions",  "subjective_questions_count"),
+        "coding":     ("coding_questions",      "coding_questions_count"),
+    }
+    field, count_field = field_map[qtype]
+    existing = list(job.get(field, []) or [])
+
+    # Duplicate check
+    if _is_duplicate(q["question"], [e.get("question", "") for e in existing]):
+        return jsonify(success=False, message="A similar question already exists in the bank"), 409
+
+    existing.append(q)
+    mongo.db.jobs.update_one(
+        {"_id": job["_id"]},
+        {"$set": {
+            field:        existing,
+            count_field:  len(existing),
+            "updated_at": datetime.utcnow(),
+        }}
+    )
+    return jsonify(
+        success=True,
+        message=f"Question added. Bank now has {len(existing)} {qtype} questions.",
+        data={"total": len(existing)}
+    ), 201
+    
+    
+    
+# ── Toggle question active/inactive ──────────────────────────────────────────
+@question_bp.route("/jobs/<jid>/<q_type>/<int:index>/toggle", methods=["PUT"])
+@jwt_required()
+def toggle_question_active(jid, q_type, index):
+    """
+    PUT /api/questions/jobs/<jid>/<q_type>/<index>/toggle
+    Toggles is_active field on a question (default True if missing).
+    """
+    job, err = _find_job(jid)
+    if err:
+        return err
+
+    field_map = {
+        "mcq":        ("mcq_questions",        "mcq_questions_count"),
+        "subjective": ("subjective_questions",  "subjective_questions_count"),
+        "coding":     ("coding_questions",      "coding_questions_count"),
+    }
+    if q_type not in field_map:
+        return jsonify(success=False, message="q_type must be mcq, subjective, or coding"), 400
+
+    field, count_field = field_map[q_type]
+    questions = list(job.get(field, []) or [])
+
+    if index < 0 or index >= len(questions):
+        return jsonify(success=False, 
+                      message=f"Index {index} out of range"), 400
+
+    # Toggle: if currently active (or missing), set inactive; else set active
+    current = questions[index].get("is_active", True)
+    questions[index]["is_active"] = not current
+
+    # Recount only active questions
+    active_count = sum(1 for q in questions if q.get("is_active", True))
+
+    mongo.db.jobs.update_one(
+        {"_id": job["_id"]},
+        {"$set": {
+            field:        questions,
+            count_field:  active_count,
+            "updated_at": datetime.utcnow(),
+        }}
+    )
+    new_state = questions[index]["is_active"]
+    return jsonify(
+        success=True,
+        message=f"Question {'activated' if new_state else 'deactivated'}.",
+        data={
+            "is_active":    new_state,
+            "active_count": active_count,
+            "total":        len(questions),
+        }
+    ), 200
+
+
+# ── Update active counts for all question types (maintenance) ─────────────────
+@question_bp.route("/jobs/<jid>/sync-counts", methods=["POST"])
+@jwt_required()
+def sync_counts(jid):
+    """Recalculates active counts — useful after bulk operations."""
+    job, err = _find_job(jid)
+    if err:
+        return err
+
+    mcq   = job.get("mcq_questions",        []) or []
+    subj  = job.get("subjective_questions",  []) or []
+    code  = job.get("coding_questions",      []) or []
+
+    mongo.db.jobs.update_one(
+        {"_id": job["_id"]},
+        {"$set": {
+            "mcq_questions_count":        sum(1 for q in mcq  if q.get("is_active", True)),
+            "subjective_questions_count": sum(1 for q in subj if q.get("is_active", True)),
+            "coding_questions_count":     sum(1 for q in code if q.get("is_active", True)),
+            "updated_at": datetime.utcnow(),
+        }}
+    )
+    return jsonify(success=True, message="Counts synced"), 200

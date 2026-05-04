@@ -102,7 +102,8 @@ def create_client():
             payment_terms   = data.get("payment_terms", "Net 30"),
             relationship_status = data.get("relationship_status", "Active"),
             account_manager = data.get("account_manager", ""),
-            billing_rate    = float(data.get("billing_rate", 0)),
+            # billing_rate    = float(data.get("billing_rate", 0)),
+            billing_rate = float(data.get("billing_rate") or 0),
             notes           = data.get("notes", ""),
         )
         result = mongo.db.clients.insert_one(doc)
