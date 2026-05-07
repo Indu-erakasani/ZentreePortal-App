@@ -886,7 +886,8 @@ function useProctoring(examToken) {
     // cv.width = 320; cv.height = 240;
     cv.width = 640; cv.height = 480;
     const ctx = cv.getContext("2d");
-    ctx.drawImage(video, 0, 0, 320, 240);
+    // ctx.drawImage(video, 0, 0, 320, 240);
+    ctx.drawImage(video, 0, 0, 640, 480);
 
     // Black frame check
     const imageData = ctx.getImageData(0, 0, 320, 240);
@@ -1645,8 +1646,179 @@ function ResultScreen({ result, exam, events, snaps }) {
             </div>
           </div>
         )}
+{tab === "proctoring" && (
+  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-        {tab === "proctoring" && (
+    {/* ── Summary stat cards ── */}
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+      gap: 10,
+    }}>
+      {[
+        { label: "Integrity",        val: `${integrityScore}%`,  emoji: "🛡️",
+          bg: integrityScore >= 80 ? "#e8f5e9" : integrityScore >= 60 ? "#fff3e0" : "#fce4ec",
+          color: integrityScore >= 80 ? "#2e7d32" : integrityScore >= 60 ? "#e65100" : "#c62828" },
+        { label: "🚨 Alerts",        val: alertCount,            emoji: "",  bg: "#fce4ec", color: "#c62828" },
+        { label: "⚠️ Warnings",      val: warnCount,             emoji: "",  bg: "#fff3e0", color: "#e65100" },
+        { label: "👁️ Gaze Away",     val: events.filter(e => e.msg?.toLowerCase().includes("iris") || e.msg?.toLowerCase().includes("looking away") || e.msg?.toLowerCase().includes("gaze")).length,
+          emoji: "", bg: "#e8eaf6", color: "#1a237e" },
+        { label: "📱 Phone",         val: events.filter(e => e.msg?.toLowerCase().includes("phone")).length,
+          emoji: "", bg: "#fce4ec", color: "#880e4f" },
+        { label: "👤 Person",        val: events.filter(e => e.msg?.toLowerCase().includes("person") || e.msg?.toLowerCase().includes("background")).length,
+          emoji: "", bg: "#fce4ec", color: "#c62828" },
+        { label: "🔄 Tab Switch",    val: events.filter(e => e.msg?.toLowerCase().includes("tab") || e.msg?.toLowerCase().includes("switch")).length,
+          emoji: "", bg: "#fff3e0", color: "#e65100" },
+        { label: "🎤 Voice",         val: events.filter(e => e.msg?.toLowerCase().includes("voice") || e.msg?.toLowerCase().includes("talking") || e.msg?.toLowerCase().includes("audio")).length,
+          emoji: "", bg: "#f3e5f5", color: "#6a1b9a" },
+        { label: "📸 Snapshots",     val: snaps.length,          emoji: "", bg: "#e3f2fd", color: "#0277bd" },
+        { label: "🚩 Flagged",       val: flagged.length,        emoji: "", bg: "#fff3e0", color: "#e65100" },
+      ].map(({ label, val, bg, color }) => (
+        <div key={label} style={{
+          background: bg, borderRadius: 10,
+          padding: "10px 12px", textAlign: "center",
+          border: `1px solid ${color}30`,
+        }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
+            {label}
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 900, color }}>{val}</div>
+        </div>
+      ))}
+    </div>
+
+    {/* ── Suspicious findings summary ── */}
+    {alertCount > 0 || warnCount > 3 ? (
+      <div style={{
+        background: "#fce4ec", borderRadius: 12,
+        border: "1px solid #f48fb1", padding: "14px 18px",
+      }}>
+        <div style={{ fontWeight: 700, color: "#c62828", marginBottom: 8, fontSize: 14 }}>
+          ⚠️ Suspicious Activity Summary
+        </div>
+        {[
+          alertCount > 0 && `• ${alertCount} critical alert(s) require review`,
+          events.filter(e => e.msg?.toLowerCase().includes("phone")).length > 0 &&
+            `• Phone detected ${events.filter(e => e.msg?.toLowerCase().includes("phone")).length} time(s)`,
+          events.filter(e => e.msg?.toLowerCase().includes("person") || e.msg?.toLowerCase().includes("background")).length > 0 &&
+            `• Another person appeared ${events.filter(e => e.msg?.toLowerCase().includes("person") || e.msg?.toLowerCase().includes("background")).length} time(s)`,
+          events.filter(e => e.msg?.toLowerCase().includes("iris") || e.msg?.toLowerCase().includes("looking away")).length > 2 &&
+            `• Candidate looked away from screen ${events.filter(e => e.msg?.toLowerCase().includes("iris") || e.msg?.toLowerCase().includes("looking away")).length} times`,
+          events.filter(e => e.msg?.toLowerCase().includes("tab") || e.msg?.toLowerCase().includes("switch")).length > 0 &&
+            `• Tab switching detected ${events.filter(e => e.msg?.toLowerCase().includes("tab") || e.msg?.toLowerCase().includes("switch")).length} time(s)`,
+          events.filter(e => e.msg?.toLowerCase().includes("voice") || e.msg?.toLowerCase().includes("talking")).length > 3 &&
+            `• Voice/talking detected ${events.filter(e => e.msg?.toLowerCase().includes("voice") || e.msg?.toLowerCase().includes("talking")).length} times`,
+        ].filter(Boolean).map((finding, i) => (
+          <div key={i} style={{ fontSize: 13, color: "#b71c1c", marginTop: 4 }}>{finding}</div>
+        ))}
+      </div>
+    ) : (
+      <div style={{
+        background: "#e8f5e9", borderRadius: 12,
+        border: "1px solid #a5d6a7", padding: "12px 18px",
+        display: "flex", alignItems: "center", gap: 8,
+      }}>
+        <span style={{ fontSize: 20 }}>✅</span>
+        <span style={{ color: "#2e7d32", fontWeight: 600, fontSize: 14 }}>
+          No suspicious activity detected
+        </span>
+      </div>
+    )}
+
+    {/* ── Event timeline with icons and categories ── */}
+    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e0e0e0", overflow: "hidden" }}>
+      <div style={{
+        padding: "12px 18px", borderBottom: "1px solid #f0f0f0",
+        background: "#f8f9fa", fontWeight: 700, fontSize: 14,
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        <span>Event Timeline ({events.length})</span>
+        {events.length > 0 && (
+          <span style={{ fontSize: 11, color: "#999" }}>Most recent first</span>
+        )}
+      </div>
+      <div style={{ maxHeight: 400, overflowY: "auto" }}>
+        {events.length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center", color: "#2e7d32", fontSize: 14 }}>
+            ✅ No proctoring events recorded
+          </div>
+        ) : [...events].reverse().map((e, idx) => {
+          // categorize event
+          const msg = e.msg?.toLowerCase() || "";
+          const category =
+            msg.includes("phone")                                    ? { icon: "📱", label: "Phone", color: "#880e4f", bg: "#fce4ec" } :
+            msg.includes("person") || msg.includes("background")     ? { icon: "👤", label: "Person", color: "#c62828", bg: "#fce4ec" } :
+            msg.includes("tab") || msg.includes("switch")            ? { icon: "🔄", label: "Tab Switch", color: "#e65100", bg: "#fff3e0" } :
+            msg.includes("voice") || msg.includes("talking") || msg.includes("audio") ? { icon: "🎤", label: "Voice", color: "#6a1b9a", bg: "#f3e5f5" } :
+            msg.includes("iris") || msg.includes("looking away") || msg.includes("gaze") ? { icon: "👁️", label: "Gaze", color: "#1a237e", bg: "#e8eaf6" } :
+            msg.includes("book") || msg.includes("paper") || msg.includes("notes")    ? { icon: "📋", label: "Material", color: "#e65100", bg: "#fff3e0" } :
+            msg.includes("earphone") || msg.includes("earbud")       ? { icon: "🎧", label: "Earphone", color: "#880e4f", bg: "#fce4ec" } :
+            msg.includes("hand")                                      ? { icon: "✋", label: "Hand", color: "#e65100", bg: "#fff3e0" } :
+            e.type === "alert"                                         ? { icon: "🚨", label: "Alert", color: "#c62828", bg: "#fce4ec" } :
+                                                                        { icon: "⚠️", label: "Warning", color: "#e65100", bg: "#fff3e0" };
+
+          return (
+            <div key={idx} style={{
+              padding: "10px 16px",
+              borderBottom: "1px solid #f5f5f5",
+              display: "flex", gap: 12, alignItems: "flex-start",
+              background: e.type === "alert" ? "#fff9f9" : "#fffdf8",
+            }}>
+              {/* Icon + category badge */}
+              <div style={{ flexShrink: 0, textAlign: "center" }}>
+                <div style={{ fontSize: 20 }}>{category.icon}</div>
+                <div style={{
+                  fontSize: 8, fontWeight: 700,
+                  color: category.color,
+                  background: category.bg,
+                  borderRadius: 3, padding: "1px 4px",
+                  marginTop: 2, whiteSpace: "nowrap",
+                }}>{category.label}</div>
+              </div>
+
+              {/* Event details */}
+              <div style={{ flex: 1 }}>
+                <div style={{
+                  fontSize: 13, fontWeight: 600,
+                  color: e.type === "alert" ? "#c62828" : "#e65100",
+                  marginBottom: 2,
+                }}>{e.msg}</div>
+                <div style={{ fontSize: 11, color: "#aaa" }}>
+                  {new Date(e.ts).toLocaleTimeString("en-IN", {
+                    hour: "2-digit", minute: "2-digit", second: "2-digit"
+                  })}
+                </div>
+              </div>
+
+              {/* Snapshot thumbnail if available */}
+              {e.snapshot && (
+                <img src={e.snapshot} alt="snapshot"
+                  style={{
+                    width: 64, height: 48, objectFit: "cover",
+                    borderRadius: 6, flexShrink: 0,
+                    border: `2px solid ${e.type === "alert" ? "#f44336" : "#fb8c00"}`,
+                  }}
+                />
+              )}
+
+              {/* Severity badge */}
+              <div style={{
+                flexShrink: 0, padding: "2px 8px", borderRadius: 12,
+                fontSize: 10, fontWeight: 700,
+                background: e.type === "alert" ? "#c62828" : "#e65100",
+                color: "#fff",
+                alignSelf: "center",
+              }}>
+                {e.type?.toUpperCase()}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  </div>
+)}
+        {/* {tab === "proctoring" && (
           <div style={{ background: "#fff", borderRadius: 16, padding: 20, border: "1px solid #e0e0e0" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <div style={{ fontWeight: 700, fontSize: 15 }}>Proctoring Events ({events.length})</div>
@@ -1680,9 +1852,136 @@ function ResultScreen({ result, exam, events, snaps }) {
               ))
             }
           </div>
+        )} */}
+{tab === "snapshots" && (
+  <div style={{ background: "#fff", borderRadius: 16, padding: 20, border: "1px solid #e0e0e0" }}>
+    
+    {/* Filter bar */}
+    <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+      <span style={{ fontWeight: 700, fontSize: 14 }}>
+        Captured Snapshots ({snaps.length})
+      </span>
+      <span style={{ marginLeft: "auto", fontSize: 12 }}>
+        {flagged.length > 0 && (
+          <span style={{ color: "#c62828", fontWeight: 600 }}>⚠ {flagged.length} flagged</span>
         )}
+      </span>
+    </div>
 
-        {tab === "snapshots" && (
+    {snaps.length === 0 ? (
+      <div style={{ color: "#999", textAlign: "center", padding: 36 }}>No snapshots captured</div>
+    ) : (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 }}>
+        {[...snaps].reverse().map((s, idx) => {
+          // const ai = s.ai || {};
+          const ai = s.ai || s.analysis || {};
+          const isAlert   = ai.flag === "alert";
+          const isWarning = ai.flag === "warning";
+
+          // determine what was detected
+          const detections = [
+            ai.phone_detected         && { label: "📱 Phone",      color: "#880e4f" },
+            ai.background_person_detected && { label: "👤 Person",  color: "#c62828" },
+            ai.earphone_detected      && { label: "🎧 Earphone",   color: "#880e4f" },
+            ai.book_detected          && { label: "📚 Notes",       color: "#e65100" },
+            ai.paper_detected         && { label: "📄 Paper",       color: "#e65100" },
+            !ai.iris_on_screen && ai.iris_on_screen !== undefined && { label: "👁️ Gaze Away", color: "#1a237e" },
+            ai.mouth_movement         && { label: "🗣️ Talking",    color: "#6a1b9a" },
+            ai.multiple_people        && { label: "👥 Multi",       color: "#c62828" },
+            ai.suspicious_hand_movement && { label: "✋ Hand",      color: "#e65100" },
+            !ai.face_detected         && { label: "😶 No Face",     color: "#c62828" },
+            !ai.candidate_present     && { label: "🚪 Left Frame",  color: "#c62828" },
+          ].filter(Boolean);
+
+          return (
+            <div key={idx} style={{ position: "relative" }}>
+              {/* Snapshot image */}
+              <div style={{ position: "relative", borderRadius: 8, overflow: "hidden" }}>
+                <img src={s.dataUrl} alt={`snap-${idx}`}
+                  style={{
+                    width: "100%", display: "block",
+                    border: isAlert   ? "2px solid #f44336"
+                          : isWarning ? "2px solid #fb8c00"
+                          : "1.5px solid #e0e0e0",
+                    borderRadius: 8,
+                  }}
+                />
+
+                {/* Flag badge top-right */}
+                {ai.flag && ai.flag !== "ok" && (
+                  <div style={{
+                    position: "absolute", top: 4, right: 4,
+                    background: isAlert ? "#f44336" : "#fb8c00",
+                    borderRadius: 4, padding: "2px 6px",
+                    fontSize: 9, color: "#fff", fontWeight: 800,
+                  }}>
+                    {isAlert ? "🚨 ALERT" : "⚠️ WARN"}
+                  </div>
+                )}
+
+                {/* OK badge */}
+                {ai.flag === "ok" && (
+                  <div style={{
+                    position: "absolute", top: 4, right: 4,
+                    background: "rgba(46,125,50,0.8)",
+                    borderRadius: 4, padding: "2px 6px",
+                    fontSize: 8, color: "#fff", fontWeight: 700,
+                  }}>✓ OK</div>
+                )}
+
+                {/* Gaze indicator */}
+                {ai.eye_direction && ai.eye_direction !== "center" && (
+                  <div style={{
+                    position: "absolute", bottom: 4, left: 4,
+                    background: "rgba(0,0,0,0.75)",
+                    borderRadius: 4, padding: "2px 6px",
+                    fontSize: 9, color: "#fff",
+                  }}>
+                    👁️ {ai.eye_direction}
+                  </div>
+                )}
+              </div>
+
+              {/* Timestamp */}
+              <div style={{ fontSize: 9, color: "#999", marginTop: 3, textAlign: "center" }}>
+                {new Date(s.ts).toLocaleTimeString("en-IN", {
+                  hour: "2-digit", minute: "2-digit", second: "2-digit"
+                })}
+              </div>
+
+              {/* Detection badges */}
+              {detections.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 2, marginTop: 3 }}>
+                  {detections.slice(0, 3).map((d, di) => (
+                    <div key={di} style={{
+                      fontSize: 8, fontWeight: 600,
+                      color: d.color, background: d.color + "15",
+                      border: `1px solid ${d.color}40`,
+                      borderRadius: 3, padding: "1px 4px",
+                    }}>{d.label}</div>
+                  ))}
+                  {detections.length > 3 && (
+                    <div style={{ fontSize: 8, color: "#999", padding: "1px 4px" }}>
+                      +{detections.length - 3}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Iris/gaze info */}
+              {ai.iris_on_screen === false && (
+                <div style={{ fontSize: 8, color: "#1a237e", fontWeight: 600, marginTop: 2 }}>
+                  👁️ Iris: {ai.eye_direction || "away"} ({ai.gaze_confidence || "?"})
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>
+)}
+        {/* {tab === "snapshots" && (
           <div style={{ background: "#fff", borderRadius: 16, padding: 20, border: "1px solid #e0e0e0" }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>
               Captured Frames ({snaps.length})
@@ -1719,7 +2018,7 @@ function ResultScreen({ result, exam, events, snaps }) {
                 </div>
             }
           </div>
-        )}
+        )} */}
 
         {tab === "feedback" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -2176,7 +2475,23 @@ export default function ExamPage() {
               <p style={{ fontSize: 15, lineHeight: 1.8, fontWeight: 500, color: "#1a1a2e", marginBottom: 24, marginTop: 0, whiteSpace: "pre-wrap" }}>
                 {q?.question}
               </p>
-
+               {q?.image_file_id && (
+                    <div
+                      component="img"
+                      src={`${process.env.REACT_APP_API_BASE_URL}/exams/question-image/${q.image_file_id}`}
+                      alt="Question image"
+                      sx={{
+                        maxWidth: "100%",
+                        maxHeight: 300,
+                        borderRadius: 2,
+                        mt: 1,
+                        mb: 1,
+                        border: "1px solid #e0e0e0",
+                        display: "block",
+                      }}
+                      onError={(e) => { e.target.style.display = "none"; }}
+                    />
+                  )}
               {/* MCQ */}
               {type === "mcq" && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

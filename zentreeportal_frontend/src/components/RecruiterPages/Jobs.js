@@ -13,7 +13,7 @@ import {
     Add, Search, Edit, Delete, Visibility, Work, People,
     AccessTime, TrendingUp, ReportProblem, Person, WorkOff,
     Business, Code, Quiz, QuestionAnswer, Assignment,
-    CheckCircle, RadioButtonUnchecked, FilterList, Close as CloseIcon,
+    CheckCircle, RadioButtonUnchecked, FilterList, Close as CloseIcon,CloudUpload
 } from "@mui/icons-material";
 
 const BASE = process.env.REACT_APP_API_BASE_URL;
@@ -146,6 +146,19 @@ const MCQQuestionCard = ({ question: q, index }) => {
                 {isMulti && <Chip label="Multi-select" size="small" sx={{ bgcolor: "#e8eaf6", color: "#1a237e", fontWeight: 600, fontSize: 10, height: 20, flexShrink: 0, mt: 0.2 }} />}
                 <Typography fontSize={13} fontWeight={600} color="text.primary" lineHeight={1.5}>{q.question}</Typography>
             </Box>
+            {q.image_file_id && (
+    <Box mt={1} mb={0.5} px={2} pb={1}>
+        <img
+            src={`${process.env.REACT_APP_API_BASE_URL}/exams/question-image/${q.image_file_id}`}
+            alt="question visual"
+            style={{
+                maxHeight: 220, maxWidth: "100%", borderRadius: 6,
+                border: "1px solid #e0e0e0", objectFit: "contain",
+                display: "block",
+            }}
+        />
+    </Box>
+)}
             <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 0.8 }}>
                 {q.options?.map((opt, j) => { const isCorrect = correctAnswers.includes(String(opt)); return (
                     <Box key={j} display="flex" alignItems="center" gap={1.2}
@@ -169,6 +182,19 @@ const SubjectiveQuestionCard = ({ question: q, index }) => {
                 {q.difficulty && <Chip label={q.difficulty} size="small" sx={{ fontSize: 10, height: 20, fontWeight: 700, bgcolor: diffStyle.bg, color: diffStyle.text, border: `1px solid ${diffStyle.border}`, flexShrink: 0, mt: 0.2 }} />}
                 <Typography fontSize={13} fontWeight={600} color="text.primary" lineHeight={1.5} sx={{ flex: 1 }}>{q.question}</Typography>
             </Box>
+            {q.image_file_id && (
+                <Box mt={1} mb={0.5} px={2} pb={1}>
+                    <img
+                        src={`${process.env.REACT_APP_API_BASE_URL}/exams/question-image/${q.image_file_id}`}
+                        alt="question visual"
+                        style={{
+                            maxHeight: 220, maxWidth: "100%", borderRadius: 6,
+                            border: "1px solid #e0e0e0", objectFit: "contain",
+                            display: "block",
+                        }}
+                    />
+                </Box>
+            )}
             <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 1.5 }}>
                 {q.reference_answer && <Box><Typography fontSize={11} fontWeight={700} color="#2e7d32" textTransform="uppercase" letterSpacing={0.5} mb={0.5}>Reference Answer</Typography><Box sx={{ bgcolor: "#e8f5e9", border: "1px solid #a5d6a7", borderRadius: 1.5, px: 1.5, py: 1 }}><Typography fontSize={12} color="#1b5e20" lineHeight={1.7} sx={{ whiteSpace: "pre-wrap" }}>{q.reference_answer}</Typography></Box></Box>}
                 {q.key_points && <Box><Typography fontSize={11} fontWeight={700} color="#e65100" textTransform="uppercase" letterSpacing={0.5} mb={0.5}>Key Points</Typography><Box sx={{ bgcolor: "#fff8e1", border: "1px solid #ffe082", borderRadius: 1.5, px: 1.5, py: 1 }}><Typography fontSize={12} color="#bf360c" lineHeight={1.7} sx={{ whiteSpace: "pre-wrap" }}>{q.key_points}</Typography></Box></Box>}
@@ -181,7 +207,21 @@ const CodingQuestionCard = ({ question: q, index }) => (
         <Box sx={{ bgcolor: "#2d2d3f", px: 2, py: 1, display: "flex", alignItems: "center", gap: 1.5, borderBottom: "1px solid #3d3d5c" }}>
             <Box display="flex" gap={0.6}>{["#ff5f57","#febc2e","#28c840"].map(c => <Box key={c} sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: c }} />)}</Box>
             <Code sx={{ fontSize: 14, color: "#82aaff" }} /><Typography fontSize={12} fontWeight={700} color="#82aaff">Problem {index + 1}</Typography>
+
         </Box>
+        {q.image_file_id && (
+            <Box mt={1.5} mb={0.5}>
+                <img
+                    src={`${process.env.REACT_APP_API_BASE_URL}/exams/question-image/${q.image_file_id}`}
+                    alt="question visual"
+                    style={{
+                        maxHeight: 220, maxWidth: "100%", borderRadius: 6,
+                        border: "1px solid #414868", objectFit: "contain",
+                        display: "block",
+                    }}
+                />
+            </Box>
+        )}
         <Box sx={{ bgcolor: "#1e1e2e", px: 2.5, py: 2 }}>
             <Typography fontSize={12} color="#cdd6f4" lineHeight={1.9} sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "'Fira Code','Consolas',monospace" }}>{typeof q === "string" ? q : q.question || JSON.stringify(q)}</Typography>
         </Box>
@@ -316,6 +356,8 @@ const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${
         reference_answer: "", key_points: "", skill: "",
         // Coding fields
         programming_language: "Python", 
+        image_base64: "",      
+        image_preview: "",     
     });
 
     // ── View questions state ──────────────────────────────────────────────────
@@ -345,7 +387,7 @@ const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${
         return mQ && (!statusF || j.status === statusF) && (!priorityF || j.priority === priorityF) && (!clientF || j.client_id === clientF);
     });
 
-    // const openCreate = () => { setSelected(null); setFormData(EMPTY_FORM); setFormOpen(true); };
+  
     
     const openCreate = () => {
       setSelected(null);
@@ -358,7 +400,6 @@ const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${
       setFormOpen(true);
     };
     const openEdit   = j => { setSelected(j); setFormData({ ...EMPTY_FORM, ...j, skills: Array.isArray(j.skills) ? j.skills.join(", ") : (j.skills||""), secondary_skills: Array.isArray(j.secondary_skills) ? j.secondary_skills.join(", ") : (j.secondary_skills||""), deadline: j.deadline ? j.deadline.split("T")[0] : "" }); setFormOpen(true); };
-    // const openDetail = j => { setSelected(j); setDetailOpen(true); };
     const openDetail = async (j) => {
         setSelected(j);
         setDetailOpen(true);
@@ -426,6 +467,8 @@ const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${
       setManualForm({
           question: "", options: ["", "", "", ""], correct_answer: "", topic: "", difficulty: "Medium",
           reference_answer: "", key_points: "", skill: "", programming_language: job?.programming_language || "Python",
+          image_base64: "",
+          image_preview: "",
       });
       setManualOpen(true);
   };
@@ -446,6 +489,7 @@ const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${
               correct_answer: [manualForm.correct_answer.trim()],
               topic: manualForm.topic.trim(),
               difficulty: manualForm.difficulty,
+              image_base64: manualForm.image_base64 || null,
           };
       } else if (manualType === "subjective") {
           questionObj = {
@@ -454,6 +498,7 @@ const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${
               key_points: manualForm.key_points.trim(),
               skill: manualForm.skill.trim(),
               difficulty: manualForm.difficulty,
+              image_base64: manualForm.image_base64 || null,
           };
       } else {
           questionObj = {
@@ -461,6 +506,7 @@ const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${
               programming_language: manualForm.programming_language,
               difficulty: manualForm.difficulty,
               topic: manualForm.topic.trim(),
+              image_base64: manualForm.image_base64 || null,
           };
       }
 
@@ -477,6 +523,25 @@ const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${
           setManualSaving(false);
       }
   };
+
+  const handleQuestionImageUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        const base64 = reader.result.split(",")[1];
+        setManualForm(p => ({
+            ...p,
+            image_base64: base64,
+            image_preview: reader.result,
+        }));
+    };
+    reader.readAsDataURL(file);
+};
+
+const clearQuestionImage = () => {
+  setManualForm(p => ({ ...p, image_base64: "", image_preview: "" }));
+};
 
 
   const openManage = async (job) => {
@@ -838,6 +903,16 @@ const handleDeleteQuestion = async () => {
                             {q.question}
                           </Typography>
                         </Box>
+                        {q.image_file_id && (
+                          <Box px={2} pt={1.5} pb={0.5}>
+                            <img
+                              src={`${process.env.REACT_APP_API_BASE_URL}/exams/question-image/${q.image_file_id}`}
+                              alt="question visual"
+                              style={{ maxHeight: 200, maxWidth: "100%", borderRadius: 6,
+                                border: "1px solid #e0e0e0", objectFit: "contain", display: "block" }}
+                            />
+                          </Box>
+                        )}
                         {/* Options */}
                         <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 0.7 }}>
                           {(q.options || []).map((opt, j) => {
@@ -889,6 +964,17 @@ const handleDeleteQuestion = async () => {
                             {q.question}
                           </Typography>
                         </Box>
+                        {q.image_file_id && (
+                          <Box px={2} pt={1.5} pb={0.5}>
+                            <img
+                              src={`${process.env.REACT_APP_API_BASE_URL}/exams/question-image/${q.image_file_id}`}
+                              alt="question visual"
+                              style={{ maxHeight: 200, maxWidth: "100%", borderRadius: 6,
+                                border: "1px solid #e0e0e0", objectFit: "contain", display: "block" }}
+                            />
+                          </Box>
+                        )}
+
                         {/* Reference answer + key points */}
                         <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 1.5 }}>
                           {q.reference_answer && (
@@ -1543,6 +1629,66 @@ const handleDeleteQuestion = async () => {
       sx={{ mb: 2 }}
     />
 
+
+
+{/* ── Question Image Upload ── */}
+<Box mb={2} p={1.5} bgcolor="#f5f7fa" borderRadius={2} border="1px dashed #90caf9">
+    <Typography fontSize={11} fontWeight={700} color="#0277bd" mb={1}>
+        Question Image (optional) — attach a diagram, chart, or visual
+    </Typography>
+    {manualForm.image_preview ? (
+        <Box position="relative" display="inline-block" width="100%">
+            <img
+                src={manualForm.image_preview}
+                alt="question visual"
+                style={{
+                    maxHeight: 200, maxWidth: "100%", borderRadius: 6,
+                    border: "1px solid #e0e0e0", objectFit: "contain",
+                    display: "block",
+                }}
+            />
+            <Box display="flex" alignItems="center" gap={1} mt={0.8}>
+                <CheckCircle sx={{ fontSize: 14, color: "#2e7d32" }} />
+                <Typography fontSize={11} color="#2e7d32" fontWeight={600}>
+                    Image attached
+                </Typography>
+                <Button size="small" color="error"
+                    onClick={clearQuestionImage}
+                    sx={{ fontSize: 10, py: 0.2, ml: "auto" }}>
+                    Remove
+                </Button>
+            </Box>
+        </Box>
+    ) : (
+        <Box
+            onClick={() => document.getElementById("q-img-input").click()}
+            sx={{
+                cursor: "pointer", display: "flex", alignItems: "center",
+                gap: 1.5, py: 1, px: 1.5, borderRadius: 1.5,
+                bgcolor: "#fff", border: "1px solid #e0e0e0",
+                "&:hover": { bgcolor: "#e3f2fd", borderColor: "#0277bd" },
+                transition: "all 0.15s",
+            }}>
+            <CloudUpload sx={{ fontSize: 20, color: "#90caf9" }} />
+            <Box>
+                <Typography fontSize={12} fontWeight={600} color="#0277bd">
+                    Click to upload image
+                </Typography>
+                <Typography fontSize={10} color="text.secondary">
+                    PNG, JPG, GIF · Max 5MB
+                </Typography>
+            </Box>
+        </Box>
+    )}
+    <input
+        id="q-img-input"
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={handleQuestionImageUpload}
+    />
+</Box>
+
     {/* Common: difficulty + topic/skill row */}
     <Grid container spacing={2} mb={2}>
       <Grid item xs={12} sm={4}>
@@ -1942,7 +2088,17 @@ const handleDeleteQuestion = async () => {
                           </Tooltip>
                         </Box>
                       </Box>
-
+                      {q.image_file_id && (
+                        <Box px={2} pt={1.5} pb={0.5}
+                          sx={{ bgcolor: isActive ? "#fff" : "#fffde7" }}>
+                          <img
+                            src={`${process.env.REACT_APP_API_BASE_URL}/exams/question-image/${q.image_file_id}`}
+                            alt="question visual"
+                            style={{ maxHeight: 180, maxWidth: "100%", borderRadius: 6,
+                              border: "1px solid #e0e0e0", objectFit: "contain", display: "block" }}
+                          />
+                        </Box>
+                      )}
                       {/* Expanded content */}
                       <Box sx={{ px: 2, py: 1.2 }}>
                         {/* MCQ options */}

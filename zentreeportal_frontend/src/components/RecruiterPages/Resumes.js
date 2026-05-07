@@ -619,6 +619,16 @@ function ExamMonitoringPanel({ candidateId, candidateName, examMap }) {
                       sx={{ bgcolor: ans.is_correct ? "#2e7d32" : "#c62828",
                             color: "#fff", fontSize: 10, fontWeight: 700 }} />
                   </Box>
+
+                  {ans.image_file_id && (
+                    <Box component="img"
+                      src={`${BASE}/exams/question-image/${ans.image_file_id}`}
+                      alt="Question"
+                      sx={{ maxWidth: "100%", maxHeight: 200, borderRadius: 1.5,
+                            mb: 0.8, border: "1px solid #e0e0e0", display: "block" }}
+                      onError={e => { e.target.style.display = "none"; }}
+                    />
+                  )}
                   <Typography fontSize={11} color="text.secondary">
                   Selected: <strong>{ans.selected_option || "—"}</strong>
                   {!ans.is_correct && ` | Correct: ${Array.isArray(ans.correct_answer) ? ans.correct_answer.join(", ") : (ans.correct_answer || "—")}`}

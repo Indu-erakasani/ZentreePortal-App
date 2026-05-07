@@ -486,7 +486,7 @@ const NAV_ITEMS = [
     label: "Recruiter Analytics",
     icon:  <People />,
     paths: ["/manager/recruiters"],
-    roles: ["admin", "manager"],
+    roles: ["admin", "manager","recruiter"],
   },
   {
     label: "Clients",
@@ -523,7 +523,7 @@ const NAV_ITEMS = [
     label: "Bench People",
     icon:  <PersonOutline />,
     paths: ["/bench"],
-    roles: ["admin", "hr", "manager"],
+    roles: ["admin", "hr", "manager","recruiter"],
   },
   {
     label: "Employees",

@@ -6,6 +6,10 @@ from datetime import datetime
 import os, json, difflib
 import requests as http
 from extensions import mongo
+import base64 as b64mod, gridfs
+from bson import ObjectId
+
+
 
 question_bp = Blueprint("questions", __name__)
 
@@ -283,6 +287,10 @@ Rules:
     unique_mcq,  dup_mcq  = _dedup(new_mcq,  existing_mcq)
     unique_subj, dup_subj = _dedup(new_subj, existing_subj)
     unique_code, dup_code = _dedup(new_code, existing_code, key="question")
+    
+    for q in unique_mcq:  q.setdefault("image_file_id", None)
+    for q in unique_subj: q.setdefault("image_file_id", None)
+    for q in unique_code: q.setdefault("image_file_id", None)
 
     total_dups = dup_mcq + dup_subj + dup_code
 
@@ -498,6 +506,42 @@ def add_manual_questions(jid):
     data  = request.get_json(silent=True) or {}
     qtype = data.get("type", "")
     q     = data.get("question", {})
+    
+        # ── NEW: handle optional image ────────────────────────────────────────
+
+    image_b64 = q.pop("image_base64", None)
+    image_file_id = None
+    if image_b64:
+        try:
+            # Detect mime type from base64 data URI prefix if present
+            content_type = "image/jpeg"  # default
+            if image_b64.startswith("data:"):
+                mime_part = image_b64.split(";")[0].split(":")[1]
+                content_type = mime_part
+                image_b64 = image_b64.split(",")[1]  # strip data URI prefix
+
+            # Pick extension from mime type
+            ext_map = {
+                "image/jpeg": "jpg", "image/png": "png",
+                "image/gif": "gif",  "image/webp": "webp",
+            }
+            ext = ext_map.get(content_type, "jpg")
+
+            image_data = b64mod.b64decode(image_b64)
+            fs = gridfs.GridFS(mongo.db)
+            file_id = fs.put(
+                image_data,
+                filename     = f"qimg_{jid}_{datetime.utcnow().timestamp()}.{ext}",
+                content_type = content_type, 
+            )
+            image_file_id = str(file_id)
+            q["image_file_id"] = image_file_id
+            print(f"[Image Store] file_id={image_file_id}, content_type={content_type}, size={len(image_data)} bytes")
+        except Exception as e:
+            print(f"[Manual Question] Image store failed: {e}")
+            q["image_file_id"] = None
+    else:
+        q["image_file_id"] = None
 
     if qtype not in ("mcq", "subjective", "coding"):
         return jsonify(success=False, message="type must be mcq, subjective, or coding"), 400
@@ -528,10 +572,14 @@ def add_manual_questions(jid):
     return jsonify(
         success=True,
         message=f"Question added. Bank now has {len(existing)} {qtype} questions.",
-        data={"total": len(existing)}
+        data={
+            "total":         len(existing),
+            "image_file_id": image_file_id,  
+            "question":      q,             
+        }
     ), 201
     
-    
+  
     
 # ── Toggle question active/inactive ──────────────────────────────────────────
 @question_bp.route("/jobs/<jid>/<q_type>/<int:index>/toggle", methods=["PUT"])

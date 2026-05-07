@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from extensions import mongo
 import gridfs
-
+import base64
 
 
 exam_bp = Blueprint("exams", __name__)
@@ -79,6 +79,33 @@ def _gemini_call(prompt: str, max_retries: int = 2) -> str:
                 continue
             raise ValueError("Gemini timed out")
     raise ValueError("Gemini failed after retries")
+def _store_question_image(b64_image: str, job_id: str) -> str:
+    """Store question image in GridFS, return file_id string."""
+    try:
+        image_data = base64.b64decode(b64_image)
+        fs = gridfs.GridFS(mongo.db)
+        file_id = fs.put(
+            image_data,
+            filename=f"qimg_{job_id}_{datetime.utcnow().timestamp()}.jpg",
+            content_type="image/jpeg",
+        )
+        return str(file_id)
+    except Exception as e:
+        print(f"[Question Image] Store failed: {e}")
+        return None
+
+
+def _normalize_option(text: str) -> str:
+    """
+    Strip leading option labels like 'A)', 'A.', 'a)', '(A)' and lowercase+strip.
+    Ensures 'A. Polymorphism' matches 'Polymorphism' if stored that way.
+    """
+    import re
+    text = text.strip()
+    # Remove prefix like "A)", "A.", "(A)", "a)", "1.", "1)"
+    text = re.sub(r'^[\(\s]*[A-Da-d1-4][\.\)\s]+', '', text).strip()
+    return text.lower()
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -160,7 +187,6 @@ def _call_grading_model(prompt: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  AI GRADING — SUBJECTIVE
 # ═══════════════════════════════════════════════════════════════════════════════
-
 def _ai_grade_subjective(question: str, reference_answer: str,
                           key_points: str, candidate_answer: str) -> dict:
     if not candidate_answer.strip():
@@ -171,37 +197,46 @@ def _ai_grade_subjective(question: str, reference_answer: str,
             "verdict": "No Answer"
         }
 
-    prompt = f"""You are an expert technical interviewer evaluating a candidate's written answer.
+    prompt = f"""You are a strict technical interviewer grading a candidate's written answer.
 
-QUESTION:
+QUESTION BEING EVALUATED:
 {question}
 
-REFERENCE ANSWER (for your reference only, do not share with candidate):
+REFERENCE ANSWER (internal — do not reveal to candidate):
 {reference_answer or "Not provided"}
 
-KEY POINTS THAT SHOULD BE COVERED:
+KEY POINTS THAT MUST BE COVERED FOR FULL MARKS:
 {key_points or "Not provided"}
 
 CANDIDATE'S ANSWER:
 {candidate_answer}
 
-Evaluate the answer strictly based on the QUESTION above and return ONLY this JSON:
+STRICT GRADING RULES:
+1. Grade ONLY based on how well the answer addresses THIS specific question.
+2. If the answer is completely off-topic or does not address the question at all → score MUST be 0.
+3. If the answer is vague or generic without any specific technical content → score MUST be 1-2.
+4. Only award marks for content that is DIRECTLY relevant and TECHNICALLY CORRECT for this question.
+5. Do NOT give benefit of the doubt. Missing a key point = score deduction.
+6. An answer that is long but irrelevant still scores 0-2.
+
+SCORING GUIDE (strict):
+10 = All key points covered with accurate technical depth
+8-9 = Most key points with good accuracy, minor gaps only
+6-7 = Majority of key points, some gaps or inaccuracies
+4-5 = Partial coverage, shows understanding but misses critical points
+2-3 = Very limited, barely touches the topic
+1   = Mentions topic name only, no substance
+0   = Off-topic, empty, or completely wrong
+
+Return ONLY this JSON (no markdown, no extra text):
 {{
   "score": <integer 0-10>,
   "max_score": 10,
-  "feedback": "<2-3 sentences of specific constructive feedback>",
-  "key_points_covered": ["<specific point the candidate correctly addressed>"],
-  "key_points_missed": ["<specific point the candidate did not address>"],
-  "verdict": "<one of: Excellent|Good|Adequate|Poor|No Answer>"
-}}
-
-Scoring:
-9-10 = Covers all key points with depth and accurate technical detail
-7-8  = Covers most key points with good understanding
-5-6  = Partial coverage, shows some understanding
-3-4  = Basic awareness but misses critical points
-1-2  = Very limited, mostly irrelevant
-0    = No answer or completely off-topic"""
+  "feedback": "<2-3 sentences of specific, direct feedback citing what was/wasn't addressed>",
+  "key_points_covered": ["<point the candidate correctly addressed>"],
+  "key_points_missed": ["<key point the candidate missed entirely>"],
+  "verdict": "<Excellent|Good|Adequate|Poor|No Answer>"
+}}"""
 
     try:
         raw   = _call_grading_model(prompt)
@@ -210,6 +245,14 @@ Scoring:
             clean = clean[clean.index("{"):clean.rindex("}") + 1]
         result = json.loads(clean)
         result["score"] = max(0, min(10, int(result.get("score", 0))))
+
+        # Hard override: if key_points_covered is empty and score > 2, clamp it
+        if not result.get("key_points_covered") and result.get("score", 0) > 2:
+            result["score"] = min(result["score"], 2)
+            result["feedback"] = (
+                "The answer did not clearly address the required key points. "
+                + result.get("feedback", "")
+            )
         return result
     except json.JSONDecodeError:
         return {
@@ -225,12 +268,10 @@ Scoring:
             "key_points_covered": [], "key_points_missed": [],
             "verdict": "Error"
         }
+        
+        
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #  AI GRADING — CODING
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def _ai_grade_coding(question: str, language: str, code: str,
                       run_output: str, run_status: str) -> dict:
     if not code.strip():
@@ -242,41 +283,56 @@ def _ai_grade_coding(question: str, language: str, code: str,
             "verdict": "No Answer"
         }
 
-    prompt = f"""You are an expert software engineer evaluating a coding solution.
+    # Determine execution success for scoring context
+    ran_successfully = run_status in (
+        "Accepted", "Compilation Error" is False and run_output
+    )
+    has_output      = bool(run_output and run_output.strip())
+    has_error       = "error" in (run_status or "").lower() or \
+                      "error" in (run_output  or "").lower()
 
-PROBLEM STATEMENT:
+    prompt = f"""You are a senior software engineer doing a strict technical interview code review.
+
+PROBLEM STATEMENT (this is the ONLY problem the candidate must solve):
 {question}
 
-REQUIRED LANGUAGE: {language}
+REQUIRED PROGRAMMING LANGUAGE: {language}
+(Any submission NOT in {language} automatically scores 0 — no exceptions)
 
-CANDIDATE'S CODE:
-{code}
-
+CANDIDATE'S SUBMITTED CODE: {code}
 EXECUTION RESULT:
-- Status : {run_status or "Not tested"}
-- Output : {run_output or "No output"}
+- Status : {run_status or "Not executed"}
+- Output : {run_output or "No output captured"}
+- Has errors: {"Yes" if has_error else "No"}
 
-Return ONLY this JSON:
+STRICT GRADING RULES:
+1. LANGUAGE CHECK FIRST: If code is not written in {language}, set score=0, language_correct=false, verdict="Wrong Language". Stop.
+2. RELEVANCE CHECK: Does the code attempt to solve the stated problem? If it solves a completely different problem, score=0-1.
+3. CORRECTNESS: Does the logic actually solve the problem correctly for all cases?
+4. EXECUTION: If the code ran and produced wrong output, maximum score is 5 regardless of code quality.
+5. ERRORS: Compilation/runtime errors reduce score significantly — maximum 4 if code doesn't run at all.
+6. Do NOT reward clean-looking code that is logically wrong. Logic correctness outweighs style.
+
+SCORING GUIDE:
+10 = Correct solution, handles edge cases, clean code, runs perfectly
+8-9 = Correct logic, minor issues (style, missed 1 edge case), runs correctly
+6-7 = Mostly correct, small logical gap or handles only basic cases
+4-5 = Partial — right approach but wrong output, OR runs but incorrect result
+2-3 = Attempts the problem but fundamental logic is wrong
+1   = Code exists but completely wrong approach
+0   = Wrong language, empty, or solves a completely different problem
+
+Return ONLY this JSON (no markdown):
 {{
   "score": <integer 0-10>,
   "max_score": 10,
-  "feedback": "<2-3 sentences of specific technical feedback>",
-  "language_correct": <true if code is in {language}>,
+  "feedback": "<2-3 sentences citing specific issues: what the code does right/wrong, referencing the actual code logic>",
+  "language_correct": <true|false>,
   "code_quality": "<Excellent|Good|Adequate|Poor>",
-  "logic_correct": <true if core logic is correct>,
-  "edge_cases_handled": <true if edge cases handled>,
+  "logic_correct": <true if core algorithm solves the problem>,
+  "edge_cases_handled": <true if handles empty input, 0, negatives, boundaries etc>,
   "verdict": "<Excellent|Good|Adequate|Poor|No Answer|Wrong Language>"
-}}
-
-Scoring:
-9-10 = Correct, clean, handles edge cases
-7-8  = Correct logic, minor issues
-5-6  = Works for basic cases
-3-4  = Wrong output but understands problem
-1-2  = Poor attempt
-0    = Wrong language or empty
-
-CRITICAL: If code is NOT in {language}, set language_correct=false, score=0, verdict="Wrong Language"."""
+}}"""
 
     try:
         raw   = _call_grading_model(prompt)
@@ -285,6 +341,20 @@ CRITICAL: If code is NOT in {language}, set language_correct=false, score=0, ver
             clean = clean[clean.index("{"):clean.rindex("}") + 1]
         result = json.loads(clean)
         result["score"] = max(0, min(10, int(result.get("score", 0))))
+
+        # Hard override: wrong language always 0
+        if not result.get("language_correct", True):
+            result["score"] = 0
+            result["verdict"] = "Wrong Language"
+
+        # Hard override: if execution shows errors and score > 4, clamp
+        if has_error and not has_output and result.get("score", 0) > 4:
+            result["score"] = min(result["score"], 4)
+            result["feedback"] = (
+                f"Code did not execute successfully ({run_status}). "
+                + result.get("feedback", "")
+            )
+
         return result
     except json.JSONDecodeError:
         return {
@@ -302,15 +372,14 @@ CRITICAL: If code is NOT in {language}, set language_correct=false, score=0, ver
             "logic_correct": False, "edge_cases_handled": False,
             "verdict": "Error"
         }
+        
+        
+        
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
 #  GENERAL HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
 
-# def _next_exam_id() -> str:
-#     count = mongo.db.exams.count_documents({})
-#     return f"EXM{str(count + 1).zfill(4)}"
+
 def _next_exam_id() -> str:
     result = mongo.db.counters.find_one_and_update(
         {"_id": "exam_id"},
@@ -328,10 +397,6 @@ def _next_notif_id() -> str:
     )
     return f"NTF{str(result['seq']).zfill(4)}"
 
-
-# def _next_notif_id() -> str:
-#     count = mongo.db.notifications.count_documents({})
-#     return f"NTF{str(count + 1).zfill(4)}"
 
 
 def _serialize(doc: dict) -> dict:
@@ -413,20 +478,67 @@ def _send_exam_email(to_email, candidate_name, job_title,
         return False
 
 
+# def _build_proctoring_summary(events: list, snapshots: list) -> dict:
+#     """Compute integrity metrics from proctoring data."""
+#     alert_count   = sum(1 for e in events if e.get("type") == "alert")
+#     warning_count = sum(1 for e in events if e.get("type") == "warning")
+#     flagged_snaps = sum(1 for s in snapshots if s.get("flag") not in ("ok", None, ""))
+#     return {
+#         "total_events":      len(events),
+#         "alert_count":       alert_count,
+#         "warning_count":     warning_count,
+#         "total_snapshots":   len(snapshots),
+#         "flagged_snapshots": flagged_snaps,
+#         "integrity_score":   max(0, 100 - (alert_count * 15) - (warning_count * 5)),
+#     }
 def _build_proctoring_summary(events: list, snapshots: list) -> dict:
     """Compute integrity metrics from proctoring data."""
-    alert_count   = sum(1 for e in events if e.get("type") == "alert")
-    warning_count = sum(1 for e in events if e.get("type") == "warning")
-    flagged_snaps = sum(1 for s in snapshots if s.get("flag") not in ("ok", None, ""))
-    return {
-        "total_events":      len(events),
-        "alert_count":       alert_count,
-        "warning_count":     warning_count,
-        "total_snapshots":   len(snapshots),
-        "flagged_snapshots": flagged_snaps,
-        "integrity_score":   max(0, 100 - (alert_count * 15) - (warning_count * 5)),
-    }
+    alert_count    = sum(1 for e in events if e.get("type") == "alert")
+    warning_count  = sum(1 for e in events if e.get("type") == "warning")
+    flagged_snaps  = sum(1 for s in snapshots if s.get("flag") not in ("ok", None, ""))
+    
+    # ── NEW: detailed counts ───────────────────────────────────────────────────
+    gaze_events    = sum(1 for e in events if "iris" in e.get("msg","").lower() 
+                         or "looking away" in e.get("msg","").lower()
+                         or "gaze" in e.get("msg","").lower())
+    phone_events   = sum(1 for e in events if "phone" in e.get("msg","").lower())
+    person_events  = sum(1 for e in events if "person" in e.get("msg","").lower()
+                         or "background" in e.get("msg","").lower())
+    tab_events     = sum(1 for e in events if "tab" in e.get("msg","").lower()
+                         or "switch" in e.get("msg","").lower())
+    voice_events   = sum(1 for e in events if "voice" in e.get("msg","").lower()
+                         or "audio" in e.get("msg","").lower()
+                         or "talking" in e.get("msg","").lower())
 
+    # Suspicious findings for summary
+    suspicious_findings = []
+    if alert_count > 0:
+        suspicious_findings.append(f"{alert_count} critical alert(s) detected")
+    if gaze_events > 2:
+        suspicious_findings.append(f"Candidate looked away from screen {gaze_events} times")
+    if phone_events > 0:
+        suspicious_findings.append(f"Phone detected {phone_events} time(s)")
+    if person_events > 0:
+        suspicious_findings.append(f"Another person detected {person_events} time(s)")
+    if tab_events > 0:
+        suspicious_findings.append(f"Tab/window switching detected {tab_events} time(s)")
+    if voice_events > 3:
+        suspicious_findings.append(f"Voice/talking detected {voice_events} times")
+
+    return {
+        "total_events":          len(events),
+        "alert_count":           alert_count,
+        "warning_count":         warning_count,
+        "total_snapshots":       len(snapshots),
+        "flagged_snapshots":     flagged_snaps,
+        "gaze_away_events":      gaze_events,
+        "phone_events":          phone_events,
+        "background_person_events": person_events,
+        "tab_switch_events":     tab_events,
+        "voice_events":          voice_events,
+        "suspicious_findings":   suspicious_findings,
+        "integrity_score":       max(0, 100 - (alert_count * 15) - (warning_count * 5)),
+    }
 
 def _create_recruiter_notification(recruiter_id: str, exam_doc: dict):
     proctor_summary = exam_doc.get("proctoring_summary", {})
@@ -456,9 +568,7 @@ def _create_recruiter_notification(recruiter_id: str, exam_doc: dict):
     mongo.db.notifications.insert_one(notif)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
 #  COMPILE CODE (proxy to Judge0 CE)
-# ═══════════════════════════════════════════════════════════════════════════════
 
 @exam_bp.route("/compile", methods=["POST"])
 def compile_code():
@@ -498,9 +608,7 @@ def compile_code():
         return jsonify(success=False, message=f"Compiler error: {str(e)}"), 500
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
 #  SEND EXAM
-# ═══════════════════════════════════════════════════════════════════════════════
 
 @exam_bp.route("/send", methods=["POST"])
 @jwt_required()
@@ -692,18 +800,20 @@ def take_exam(token):
             {"$set": {"status": "In Progress", "started_at": datetime.utcnow()}}
         )
 
-    # Strip correct answers — never send to candidate
+    
     safe_mcq = [{
-        "question":   q.get("question"),
-        "options":    q.get("options", []),
-        "topic":      q.get("topic", ""),
-        "difficulty": q.get("difficulty", ""),
+        "question":      q.get("question"),
+        "options":       q.get("options", []),
+        "topic":         q.get("topic", ""),
+        "difficulty":    q.get("difficulty", ""),
+        "image_file_id": q.get("image_file_id"),  
     } for q in (exam.get("mcq_questions") or [])]
 
     safe_subj = [{
-        "question":   q.get("question"),
-        "skill":      q.get("skill", ""),
-        "difficulty": q.get("difficulty", ""),
+        "question":      q.get("question"),
+        "skill":         q.get("skill", ""),
+        "difficulty":    q.get("difficulty", ""),
+        "image_file_id": q.get("image_file_id"),  
     } for q in (exam.get("subjective_questions") or [])]
 
     safe_code = [{
@@ -711,6 +821,7 @@ def take_exam(token):
         "programming_language": q.get("programming_language", "Python"),
         "difficulty":           q.get("difficulty", ""),
         "topic":                q.get("topic", ""),
+        "image_file_id":        q.get("image_file_id"),   
     } for q in (exam.get("coding_questions") or [])]
 
     return jsonify(success=True, data={
@@ -765,28 +876,57 @@ def submit_exam(token):
     subj_questions = exam.get("subjective_questions",  [])
     code_questions = exam.get("coding_questions",      [])
 
+
+
     # ── 1. Grade MCQ ─────────────────────────────────────────────────────────
     mcq_correct = 0
     graded_mcq  = []
+
     for ans in mcq_answers:
         idx      = ans.get("question_index", -1)
-        selected = ans.get("selected_option", "")
-        if 0 <= idx < len(mcq_questions):
-            q            = mcq_questions[idx]
-            correct_list = q.get("_correct", [])
-            is_correct   = selected in correct_list
-            if is_correct:
-                mcq_correct += 1
-            graded_mcq.append({
-                "question_index":  idx,
-                "question_text":   q.get("question", ""),
-                "options":         q.get("options", []),
-                "topic":           q.get("topic", ""),
-                "difficulty":      q.get("difficulty", ""),
-                "selected_option": selected,
-                "is_correct":      is_correct,
-                "correct_answer":  correct_list,
-            })
+        selected = ans.get("selected_option", "").strip()
+
+        if not (0 <= idx < len(mcq_questions)):
+            continue
+
+        q            = mcq_questions[idx]
+        correct_list = q.get("_correct", [])
+        options      = q.get("options", [])
+
+        # Attempt 1: direct match (selected text == correct text exactly)
+        is_correct = selected in correct_list
+
+        # Attempt 2: normalized match (handles 'A. text' vs 'text' mismatches)
+        if not is_correct and selected:
+            norm_selected = _normalize_option(selected)
+            for correct_opt in correct_list:
+                if norm_selected == _normalize_option(correct_opt):
+                    is_correct = True
+                    break
+
+        # Attempt 3: if candidate sent just the label letter ('A','B','C','D')
+        # resolve it to the actual option text and compare
+        if not is_correct and selected.upper() in ('A', 'B', 'C', 'D'):
+            label_index = ord(selected.upper()) - ord('A')  # A=0, B=1 ...
+            if 0 <= label_index < len(options):
+                resolved = options[label_index]
+                is_correct = resolved in correct_list or \
+                    _normalize_option(resolved) in [_normalize_option(c) for c in correct_list]
+
+        if is_correct:
+            mcq_correct += 1
+
+        graded_mcq.append({
+            "question_index":  idx,
+            "question_text":   q.get("question", ""),
+            "options":         options,
+            "topic":           q.get("topic", ""),
+            "difficulty":      q.get("difficulty", ""),
+            "selected_option": selected,
+            "is_correct":      is_correct,
+            "correct_answer":  correct_list,
+            "image_file_id":   q.get("image_file_id"), 
+        })
 
     mcq_score = round((mcq_correct / len(mcq_questions)) * 100) if mcq_questions else 0
 
@@ -814,6 +954,7 @@ def submit_exam(token):
                 "question_text":      q.get("question", ""),
                 "skill":              q.get("skill", ""),
                 "difficulty":         q.get("difficulty", ""),
+                "image_file_id": q.get("image_file_id"),
                 "answer":             answer_text,
                 "ai_score":           ai_result.get("score", 0),
                 "ai_max_score":       ai_result.get("max_score", 10),
@@ -821,6 +962,7 @@ def submit_exam(token):
                 "key_points_covered": ai_result.get("key_points_covered", []),
                 "key_points_missed":  ai_result.get("key_points_missed", []),
                 "verdict":            ai_result.get("verdict", ""),
+                
             })
             if i < len(subj_answers) - 1:
                 time.sleep(1)
@@ -857,6 +999,7 @@ def submit_exam(token):
                 "programming_language": lang,
                 "difficulty":           q.get("difficulty", ""),
                 "topic":                q.get("topic", ""),
+                "image_file_id": q.get("image_file_id"),
                 "code":                 code,
                 "run_output":           ans.get("run_output", ""),
                 "run_stderr":           ans.get("run_stderr", ""),
@@ -892,11 +1035,6 @@ def submit_exam(token):
     )
 
     # ── 5. Process proctoring snapshots ──────────────────────────────────────
-    # Merge live events stored during exam + events sent at submit time
-    # (avoid duplicates by using IDs or timestamps)
-    
-    # live_events = exam.get("proctoring_events", [])
-    # all_events  = live_events  # already stored via /proctor/<token>/event
     
     live_events            = exam.get("proctoring_events", [])
     all_events             = live_events + proctor_events_from_sub   # merge both
@@ -904,7 +1042,6 @@ def submit_exam(token):
     # Store snapshots from submit payload (cap at 80)
     stored_snapshots = []
     # for snap in proctor_snapshots_from_sub[:80]:
-    
     
     # Keep all flagged snapshots + sample of ok ones, max 80 total
     flagged_snaps = [s for s in proctor_snapshots_from_sub if s.get("analysis", {}).get("flag") != "ok"]
@@ -1329,178 +1466,110 @@ def analyze_snapshot(token):
     if not b64 or len(b64) < 1000:
         return jsonify(success=True, data={"flag": "ok", "reason": "image_too_small"}), 200
 
-    # prompt = """
-    # Analyze this online exam webcam frame and monitoring context. Return ONLY this JSON (no markdown):
 
-    # {
-    # "face_detected": true,
-    # "face_count": 1,
-    # "looking_away": false,
-    # "eye_direction": "center",
-    # "eyes_closed": false,
-    # "head_movement": "stable",
-    # "mouth_movement": false,
-    # "person_moving": false,
-    # "phone_detected": false,
-    # "book_detected": false,
-    # "paper_detected": false,
-    # "multiple_people": false,
-    # "partial_face_visible": false,
-    # "voice_detected": false,
-    # "background_noise": false,
-    # "suspicious_action": false,
-    # "flag": "ok",
-    # "reason": ""
-    # }
-
-    # Rules:
-    # - face_detected = true if face clearly visible
-    # - face_count = number of visible faces
-    # - looking_away = true if candidate not looking at screen
-    # - eye_direction = center / left / right / up / down / closed
-    # - eyes_closed = true if eyes closed for unusual duration
-    # - head_movement = stable / left / right / up / down / excessive
-    # - mouth_movement = true if candidate appears talking
-    # - person_moving = true if candidate frequently moves away or changes position
-    # - phone_detected = true if mobile phone visible
-    # - book_detected = true if books/notes visible
-    # - paper_detected = true if paper/chits visible
-    # - multiple_people = true if more than one person visible
-    # - partial_face_visible = true if face partially outside frame
-    # - voice_detected = true if speech detected
-    # - background_noise = true if suspicious external sound detected
-    # - suspicious_action = true if any cheating-related behavior found
-
-    # Flag Rules:
-    # - flag = "alert" if:
-    # no face detected, multiple people, phone detected, notes/book detected, repeated voice, candidate left frame
-
-    # - flag = "warning" if:
-    # looking away, excessive movement, partial face visible, frequent talking, unusual eye movement
-
-    # - flag = "ok" if:
-    # one face visible, candidate attentive, no suspicious object/activity
-
-    # Also track and record every suspicious event with accurate reason without missing any activity.
-    # """
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    # prompt = """
-    #     You are a strict exam proctoring AI. Analyze this webcam frame carefully.
-    #     Return ONLY this JSON (no markdown, no backticks):
-
-    #     {
-    #     "face_detected": true,
-    #     "face_count": 1,
-    #     "background_person_detected": false,
-    #     "looking_away": false,
-    #     "eye_direction": "center",
-    #     "eyes_closed": false,
-    #     "head_movement": "stable",
-    #     "mouth_movement": false,
-    #     "person_moving": false,
-    #     "phone_detected": false,
-    #     "book_detected": false,
-    #     "paper_detected": false,
-    #     "multiple_people": false,
-    #     "partial_face_visible": false,
-    #     "voice_detected": false,
-    #     "background_noise": false,
-    #     "suspicious_action": false,
-    #     "flag": "ok",
-    #     "reason": ""
-    #     }
-
-    #     Detection Rules (be STRICT and thorough):
-    #     - face_detected = true if the primary candidate face is clearly visible
-    #     - face_count = count ALL visible human faces including background, reflections, posters
-    #     - background_person_detected = true if ANY other human/person is visible ANYWHERE in the frame (background, reflection, doorway, walking behind, sitting nearby) — this is CRITICAL, check entire frame carefully
-    #     - looking_away = true if eyes/head not directed at screen
-    #     - mouth_movement = true if lips are moving (talking/whispering)
-    #     - phone_detected = true if any mobile device is visible
-    #     - book_detected = true if books, notes, or printed material visible
-    #     - multiple_people = true if face_count > 1 OR background_person_detected = true
-    #     - suspicious_action = true if ANY suspicious behavior is found
-
-    #     Flag Rules — be STRICT:
-    #     - flag = "alert" if ANY of these are true:
-    #     * face_detected is false (no candidate face)
-    #     * multiple_people is true (INCLUDES background persons)
-    #     * background_person_detected is true
-    #     * face_count > 1
-    #     * phone_detected is true
-    #     * book_detected or paper_detected is true
-
-    #     - flag = "warning" if ANY of these are true:
-    #     * looking_away is true
-    #     * excessive head movement
-    #     * partial_face_visible is true
-    #     * mouth_movement is true (possible talking)
-    #     * person_moving excessively
-
-    #     - flag = "ok" ONLY if:
-    #     * Exactly one face visible
-    #     * No background persons at all
-    #     * No suspicious objects
-    #     * Candidate appears attentive
-
-    #     IMPORTANT: Even a partial person, silhouette, or someone walking in the background counts as background_person_detected=true.
-    #     Set reason to a clear description of what was detected.
-    #     """
-    
-    
-    prompt = """You are a STRICT AI exam proctor. Your job is to detect ANY suspicious activity.
-    Analyze this webcam frame with extreme attention to detail — scan the ENTIRE image including edges, background, and foreground.
+     
+    prompt = """You are an ULTRA-STRICT AI exam proctoring system. Analyze this webcam frame with MAXIMUM attention.
+    Scan the ENTIRE image — every pixel, every corner, background, foreground, edges.
 
     Return ONLY valid JSON, no markdown, no explanation:
 
-    {"face_detected":true,"face_count":1,"candidate_present":true,"background_person_detected":false,"looking_away":false,"eye_direction":"center","eyes_closed":false,"mouth_movement":false,"phone_detected":false,"book_detected":false,"paper_detected":false,"multiple_people":false,"suspicious_action":false,"flag":"ok","reason":""}
+    {
+    "face_detected": true,
+    "face_count": 1,
+    "candidate_present": true,
+    "background_person_detected": false,
+    "looking_away": false,
+    "eye_direction": "center",
+    "iris_on_screen": true,
+    "gaze_confidence": "high",
+    "eyes_closed": false,
+    "eyes_closed_duration": "none",
+    "head_tilt": "straight",
+    "head_movement": "stable",
+    "mouth_movement": false,
+    "whispering": false,
+    "phone_detected": false,
+    "phone_location": "",
+    "earphone_detected": false,
+    "book_detected": false,
+    "paper_detected": false,
+    "secondary_screen_detected": false,
+    "multiple_people": false,
+    "tab_switch_suspected": false,
+    "suspicious_hand_movement": false,
+    "person_leaning": false,
+    "flag": "ok",
+    "reason": "",
+    "confidence": "high"
+    }
 
-    DETECTION INSTRUCTIONS — scan carefully for each:
+    DETECTION INSTRUCTIONS — be EXTREMELY thorough:
 
-    face_detected: Is the primary candidate face clearly visible and centered?
-    face_count: Count EVERY human face in the ENTIRE image — foreground AND background
-    candidate_present: Is the candidate sitting in front of camera? false if they left the frame
-    background_person_detected: Look at the ENTIRE background carefully — is there ANY other human, partial body, silhouette, or person visible ANYWHERE? Even partially visible persons count. CHECK THOROUGHLY.
-    looking_away: Is the candidate looking away from screen for more than 1 second?
-    eyes_closed: Are the candidate's eyes shut?
-    mouth_movement: Are the candidate's lips visibly moving? (talking/whispering)
-    phone_detected: Is there a mobile phone, smartphone, or tablet visible ANYWHERE in frame?
-    book_detected: Are there books, notebooks, printed notes, or any study material visible?
-    paper_detected: Is there any paper, cheat sheet, or printed content visible?
-    multiple_people: Set true if face_count > 1 OR background_person_detected = true OR candidate_present = false
+    PERSON DETECTION:
+    - face_detected: Is the primary candidate face clearly visible?
+    - face_count: Count EVERY human face including background, reflections, photos on wall, TV screens
+    - candidate_present: Is candidate in frame? false if they left completely
+    - background_person_detected: ANY other human visible ANYWHERE — doorway, behind, reflection, shadow
 
-    FLAG RULES — apply strictly:
+    EYE & GAZE TRACKING (CRITICAL):
+    - eye_direction: Where are the eyes/irises pointing? Values: "center"(screen) / "left" / "right" / "up" / "down" / "ceiling" / "floor" / "closed" / "unknown"
+    - iris_on_screen: true ONLY if both irises are clearly directed at the screen/camera. false if looking sideways, upward at ceiling, downward at notes, or away
+    - gaze_confidence: "high" / "medium" / "low" based on how clearly you can determine gaze
+    - looking_away: true if eye_direction is NOT "center" — candidate is NOT looking at screen
+    - eyes_closed: Are eyes shut? Could indicate sleeping or avoiding camera
+    - eyes_closed_duration: "none" / "brief" / "extended"
+
+    HEAD ANALYSIS:
+    - head_tilt: "straight" / "left" / "right" / "down" / "up"
+    - head_movement: "stable" / "turning" / "nodding" / "excessive"
+    - person_leaning: true if candidate is leaning significantly to look at something off-screen
+
+    COMMUNICATION DETECTION:
+    - mouth_movement: lips visibly moving — talking or whispering
+    - whispering: subtle lip movement suggesting whispered communication with someone
+
+    DEVICE DETECTION (scan hands, desk, lap, pockets):
+    - phone_detected: ANY mobile phone, smartphone visible ANYWHERE including hand, desk, lap
+    - phone_location: "hand" / "desk" / "lap" / "pocket_visible" / ""
+    - earphone_detected: earbuds, AirPods, wired earphones in ears
+    - secondary_screen_detected: another monitor, TV, tablet visible in background
+
+    MATERIAL DETECTION:
+    - book_detected: books, notebooks, printed notes, flashcards
+    - paper_detected: any paper, cheat sheets, sticky notes visible
+
+    BEHAVIORAL:
+    - suspicious_hand_movement: hands moving under desk, reaching for something off-screen
+    - tab_switch_suspected: sudden gaze shift suggesting alt-tab or window switching
+
+    FLAG RULES — STRICTLY ENFORCED:
+
     Set flag="alert" if ANY of these:
-    - candidate_present = false (person left screen)
-    - face_detected = false (no face visible)
-    - face_count > 1 (multiple faces)
-    - background_person_detected = true (ANYONE in background)
+    - candidate_present = false
+    - face_detected = false  
+    - face_count > 1
+    - background_person_detected = true
     - multiple_people = true
     - phone_detected = true
     - book_detected = true
     - paper_detected = true
+    - earphone_detected = true
+    - secondary_screen_detected = true
 
-    Set flag="warning" if ANY of these (and no alert condition):
+    Set flag="warning" if ANY of these (no alert condition present):
+    - iris_on_screen = false (looking away based on iris)
     - looking_away = true
     - eyes_closed = true
     - mouth_movement = true
+    - whispering = true
+    - head_tilt extreme
+    - suspicious_hand_movement = true
+    - person_leaning = true
 
-    Set flag="ok" ONLY if: exactly one face, candidate present, no background persons, no suspicious objects, candidate attentive.
+    Set flag="ok" ONLY if: one face, candidate present, iris on screen, no devices, no background persons.
 
-    Set reason to a specific human-readable description of what was detected.
-    DO NOT return flag="ok" if background_person_detected=true or face_count>1."""    
-    
+    IMPORTANT: iris_on_screen=false should trigger warning even if face is detected.
+    Provide specific reason describing exactly what was detected."""
     
     analysis_ok = True
     try:
@@ -1559,16 +1628,6 @@ def analyze_snapshot(token):
                 if result.get("eyes_closed"): triggered.append("eyes closed")
                 if result.get("mouth_movement"): triggered.append("talking/whispering")
                 result["reason"] = ", ".join(triggered)
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1790,6 +1849,23 @@ def test_vision():
 
 
 
+@exam_bp.route("/question-image/<file_id>", methods=["GET"])
+def get_question_image(file_id):
+    try:
+        fs       = gridfs.GridFS(mongo.db)
+        grid_out = fs.get(ObjectId(file_id))
+        mime     = grid_out.content_type or "image/jpeg"  
+        from flask import Response
+        return Response(
+            grid_out.read(),
+            mimetype=mime,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=86400",  
+            },
+        )
+    except Exception as e:
+        return jsonify(success=False, message="Image not found"), 404
 
 
 
@@ -1809,89 +1885,3 @@ def test_vision():
 
 
 
-
-
-# @exam_bp.route("/proctor/<token>/analyze", methods=["POST"])
-# def analyze_snapshot(token):
-#     exam = mongo.db.exams.find_one({"token": token}, {"_id": 1, "status": 1})
-#     if not exam or exam.get("status") == "Completed":
-#         return jsonify(success=False), 404
-
-#     data   = request.get_json(silent=True) or {}
-#     b64    = data.get("image", "")   # jpeg base64
-#     label  = data.get("label", "periodic")
-
-#     if not b64:
-#         return jsonify(success=False, message="No image"), 400
-
-#     prompt = """You are an AI exam proctor. Analyze this webcam frame.
-# Return ONLY valid JSON:
-# {"face_detected":bool,"face_count":int,"looking_away":bool,
-#  "phone_detected":bool,"multiple_people":bool,
-#  "flag":"ok"|"warning"|"alert","reason":""}"""
-
-#     try:
-#         # Reuse your existing _call_grading_model or call Anthropic SDK directly
-#         import anthropic
-#         client = anthropic.Anthropic()
-#         msg = client.messages.create(
-#             model="claude-sonnet-4-20250514",
-#             max_tokens=300,
-#             messages=[{
-#                 "role": "user",
-#                 "content": [
-#                     {"type": "image", "source": {
-#                         "type": "base64",
-#                         "media_type": "image/jpeg",
-#                         "data": b64,
-#                     }},
-#                     {"type": "text", "text": prompt}
-#                 ]
-#             }]
-#         )
-#         raw = msg.content[0].text.replace("```json","").replace("```","").strip()
-#         result = json.loads(raw)
-#     except Exception as e:
-#         result = {"flag": "ok", "reason": f"analysis_error: {e}"}
-
-#     return jsonify(success=True, data=result), 200
-
-
-
-
-# @exam_bp.route("/proctor/verify-face", methods=["POST"])
-# def verify_face():
-#     """Used by CameraGate before exam starts — no token needed."""
-#     data = request.get_json(silent=True) or {}
-#     b64  = data.get("image", "")
-#     if not b64:
-#         return jsonify(success=False, message="No image"), 400
-
-#     prompt = """Camera verification for an online exam. Return ONLY JSON:
-# {"face_visible": bool, "single_person": bool, "good_lighting": bool,
-#  "approved": bool, "reason": ""}
-# approved=true only if exactly one face is clearly visible with decent lighting."""
-
-#     try:
-#         import anthropic
-#         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-#         msg = client.messages.create(
-#             model="claude-sonnet-4-20250514",
-#             max_tokens=200,
-#             messages=[{
-#                 "role": "user",
-#                 "content": [
-#                     {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
-#                     {"type": "text", "text": prompt}
-#                 ]
-#             }]
-#         )
-#         raw    = msg.content[0].text.replace("```json", "").replace("```", "").strip()
-#         if "{" in raw:
-#             raw = raw[raw.index("{"):raw.rindex("}") + 1]
-#         result = json.loads(raw)
-#     except Exception as e:
-#         print(f"[Proctor] Face verify failed: {e}")
-#         result = {"approved": True, "reason": ""}  # fail open
-
-#     return jsonify(success=True, data=result), 200
