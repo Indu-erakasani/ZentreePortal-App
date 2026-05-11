@@ -388,7 +388,78 @@ const [actionLoading,  setActionLoading]  = useState({});   // key: `${qType}-${
     });
 
   
-    
+    const downloadQuestions = (job, data) => {
+      if (!data) return;
+      const lines = [];
+      lines.push(`QUESTION BANK — ${job.title} (${job.job_id})`);
+      lines.push(`Client: ${job.client_name}`);
+      lines.push(`Generated: ${new Date().toLocaleString("en-IN")}`);
+      lines.push("=".repeat(70));
+  
+      const mcq  = data.mcq_questions        || [];
+      const subj = data.subjective_questions  || [];
+      const code = data.coding_questions      || [];
+  
+      if (mcq.length > 0) {
+          lines.push(`\n${"─".repeat(70)}`);
+          lines.push(`SECTION A — MCQ (${mcq.length} questions)`);
+          lines.push("─".repeat(70));
+          mcq.forEach((q, i) => {
+              lines.push(`\nQ${i + 1}. [${q.difficulty || "Medium"}] ${q.topic ? `[${q.topic}]` : ""}`);
+              lines.push(q.question);
+              (q.options || []).forEach((opt, j) => {
+                  const correct = (Array.isArray(q.correct_answer)
+                      ? q.correct_answer : [q.correct_answer]).includes(String(opt));
+                  lines.push(`   ${String.fromCharCode(65 + j)}. ${opt}${correct ? "  ✓" : ""}`);
+              });
+              const ans = Array.isArray(q.correct_answer) ? q.correct_answer.join(", ") : q.correct_answer;
+              lines.push(`   Answer: ${ans}`);
+              lines.push(`   Status: ${q.is_active !== false ? "Active" : "Inactive"}`);
+          });
+      }
+  
+      if (subj.length > 0) {
+          lines.push(`\n${"─".repeat(70)}`);
+          lines.push(`SECTION B — SUBJECTIVE (${subj.length} questions)`);
+          lines.push("─".repeat(70));
+          subj.forEach((q, i) => {
+              lines.push(`\nQ${i + 1}. [${q.difficulty || "Medium"}] ${q.skill ? `[${q.skill}]` : ""}`);
+              lines.push(q.question);
+              if (q.reference_answer) {
+                  lines.push(`\n   Reference Answer:`);
+                  lines.push(`   ${q.reference_answer}`);
+              }
+              if (q.key_points) {
+                  lines.push(`\n   Key Points:`);
+                  lines.push(`   ${q.key_points}`);
+              }
+              lines.push(`   Status: ${q.is_active !== false ? "Active" : "Inactive"}`);
+          });
+      }
+  
+      if (code.length > 0) {
+          lines.push(`\n${"─".repeat(70)}`);
+          lines.push(`SECTION C — CODING (${code.length} questions)`);
+          lines.push("─".repeat(70));
+          code.forEach((q, i) => {
+              lines.push(`\nProblem ${i + 1}. [${q.difficulty || "Medium"}] [${q.programming_language || "Python"}]`);
+              if (q.topic) lines.push(`Topic: ${q.topic}`);
+              lines.push(q.question);
+              lines.push(`Status: ${q.is_active !== false ? "Active" : "Inactive"}`);
+          });
+      }
+  
+      const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `questions_${job.job_id}_${job.title.replace(/\s+/g, "_")}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+  };
+
+
+  
     const openCreate = () => {
       setSelected(null);
       const prefillClient = clients.find(c => c._id === clientF);
@@ -1082,6 +1153,15 @@ const handleDeleteQuestion = async () => {
   >
     Generate Questions
   </Button>
+
+  <Button
+    variant="outlined"
+    startIcon={<Assignment />}
+    onClick={() => downloadQuestions(manageJob, manageData)}
+    disabled={!manageData}
+    sx={{ color: "#0277bd", borderColor: "#0277bd", "&:hover": { bgcolor: "#e3f2fd" } }}>
+    Download All
+</Button>
 
   <Box sx={{ flex: 1 }} />
   <Button variant="contained"
@@ -2182,6 +2262,14 @@ const handleDeleteQuestion = async () => {
     <Typography fontSize={11} color="text.secondary" flex={1}>
       💡 Inactive questions are hidden from exam generation but kept in the bank
     </Typography>
+    <Button
+    variant="outlined"
+    startIcon={<Assignment />}
+    onClick={() => downloadQuestions(manageJob, manageData)}
+    disabled={!manageData}
+    sx={{ color: "#0277bd", borderColor: "#0277bd", "&:hover": { bgcolor: "#e3f2fd" } }}>
+    Download All
+</Button>
     <Button variant="outlined" onClick={() => { setManageOpen(false); openManual(manageJob); }}>
       + Add Question
     </Button>
