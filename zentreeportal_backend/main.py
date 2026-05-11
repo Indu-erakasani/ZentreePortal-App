@@ -55,7 +55,7 @@ CORS(app, resources={
             "http://localhost:3001",
             "http://localhost:3002",
             "http://localhost:3003",
-            "https://c6ba-183-82-96-97.ngrok-free.app",
+           
         ],
         "methods":       ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": [

@@ -1869,19 +1869,3 @@ def get_question_image(file_id):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

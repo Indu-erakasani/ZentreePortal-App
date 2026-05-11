@@ -9,5 +9,5 @@ openpyxl
 google-api-python-client
 google-auth
 google-auth-httplib2
-flask-jwt-extended
+Flask-JWT-Extended==4.6.0
 apscheduler

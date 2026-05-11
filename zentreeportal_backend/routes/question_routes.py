@@ -164,6 +164,17 @@ def generate_questions(jid):
     job_title = job.get("title", "")
     skills    = job.get("skills")    or []
     prog_lang = job.get("programming_language") or "Python"
+
+    # Auto-detect languages from skills + JD text
+    KNOWN_LANGS = ["Python", "JavaScript", "Java", "C++", "C", "Go", "Ruby",
+                "TypeScript", "Rust", "Kotlin", "Swift", "SQL", "PHP", "Scala"]
+    skills_and_jd = " ".join(skills) + " " + jd_text
+    detected = [l for l in KNOWN_LANGS if l.lower() in skills_and_jd.lower()]
+    if not detected:
+        detected = [prog_lang]
+    langs_str = ", ".join(detected)
+    
+    
     exp_min   = int(job.get("experience_min") or 0)
     exp_max   = int(job.get("experience_max") or 5)
 
@@ -230,7 +241,7 @@ Return ONLY valid JSON. No markdown. No backticks. No extra text.
   ],
   "coding_questions": [
     {{
-      "programming_language": "{prog_lang}",
+      "programming_language": "<pick the most appropriate language from: {langs_str} based on the problem>",
       "question":   "Problem title\\n\\nProblem statement...\\n\\nInput: description\\nOutput: description\\n\\nExample:\\nInput: example\\nOutput: example\\n\\nConstraints:\\n- constraint 1",
       "difficulty": "Easy|Medium|Hard",
       "topic":      "algorithmic concept tested"
@@ -244,6 +255,9 @@ Rules:
 - MCQ topics must spread across all listed skills — do not cluster on one skill
 - Subjective: use open-ended STAR-friendly phrasing ("Describe a time…", "How would you…")
 - Coding: self-contained problem with clear examples; complexity calibrated for {exp_level}
+- Each coding question MUST specify the most relevant language from: {langs_str}
+- Vary languages across coding questions — do not use the same language for all
+- The problem statement must clearly state: "Write your solution in <language>"
 - Every question must be unique and directly relevant to the job role
 - Do NOT repeat similar concepts across questions in the same batch
 """
