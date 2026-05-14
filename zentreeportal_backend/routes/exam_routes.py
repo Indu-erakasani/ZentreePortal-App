@@ -11,7 +11,13 @@ from email.mime.multipart import MIMEMultipart
 from extensions import mongo
 import gridfs
 import base64
+import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 exam_bp = Blueprint("exams", __name__)
 
@@ -71,6 +77,7 @@ def _gemini_call(prompt: str, max_retries: int = 2) -> str:
                     time.sleep(delays[attempt])
                     continue
                 resp.raise_for_status()
+                logger.warning(f"[Gemini] Rate limit/service error (attempt {attempt+1}), retrying...")
             resp.raise_for_status()
             return _extract_gemini_text(resp.json())
         except http_requests.exceptions.Timeout:
@@ -91,7 +98,7 @@ def _store_question_image(b64_image: str, job_id: str) -> str:
         )
         return str(file_id)
     except Exception as e:
-        print(f"[Question Image] Store failed: {e}")
+        logger.error(f"[Question Image] Store failed: {e}")
         return None
 
 
@@ -171,12 +178,12 @@ def _call_grading_model(prompt: str) -> str:
     provider = GRADING_PROVIDER.lower()
     if provider == "groq" and GROQ_KEY:
         try:
-            print(f"[Grading] Using Groq ({GROQ_MODEL})")
+            logger.info(f"[Grading] Using Groq ({GROQ_MODEL})")
             return _groq_call(prompt)
         except Exception as e:
-            print(f"[Grading] Groq failed: {e} — falling back to Gemini")
+            logger.warning(f"[Grading] Groq failed: {e} — falling back to Gemini")
     if GEMINI_KEY:
-        print("[Grading] Using Gemini (fallback)")
+        logger.info("[Grading] Using Gemini (fallback)")
         return _gemini_call(prompt)
     raise ValueError(
         "No grading API key configured. "
@@ -418,7 +425,7 @@ def _send_exam_email(to_email, candidate_name, job_title,
     from_email = os.environ.get("FROM_EMAIL",    "").strip().strip('"') or smtp_user
 
     if not smtp_host or not smtp_user:
-        print(f"[EMAIL SKIPPED] {to_email}: {exam_link}")
+        logger.warning(f"[EMAIL SKIPPED] No SMTP config — {to_email}: {exam_link}")
         return False
 
     msg            = MIMEMultipart("alternative")
@@ -471,26 +478,13 @@ def _send_exam_email(to_email, candidate_name, job_title,
             server.ehlo()
             server.login(smtp_user, smtp_pass)
             server.sendmail(from_email, to_email, msg.as_string())
-        print(f"[EMAIL SENT] {to_email}")
+        logger.info(f"[EMAIL SENT] {to_email}")
         return True
     except Exception as e:
-        print(f"[EMAIL ERROR] {e}")
+
+        logger.error(f"[EMAIL ERROR] {e}")
         return False
 
-
-# def _build_proctoring_summary(events: list, snapshots: list) -> dict:
-#     """Compute integrity metrics from proctoring data."""
-#     alert_count   = sum(1 for e in events if e.get("type") == "alert")
-#     warning_count = sum(1 for e in events if e.get("type") == "warning")
-#     flagged_snaps = sum(1 for s in snapshots if s.get("flag") not in ("ok", None, ""))
-#     return {
-#         "total_events":      len(events),
-#         "alert_count":       alert_count,
-#         "warning_count":     warning_count,
-#         "total_snapshots":   len(snapshots),
-#         "flagged_snapshots": flagged_snaps,
-#         "integrity_score":   max(0, 100 - (alert_count * 15) - (warning_count * 5)),
-#     }
 def _build_proctoring_summary(events: list, snapshots: list) -> dict:
     """Compute integrity metrics from proctoring data."""
     alert_count    = sum(1 for e in events if e.get("type") == "alert")
@@ -940,7 +934,7 @@ def submit_exam(token):
         if 0 <= idx < len(subj_questions):
             q           = subj_questions[idx]
             answer_text = ans.get("answer", "").strip()
-            print(f"[Grading] Subjective Q{idx + 1}/{len(subj_answers)}")
+            logger.info(f"[Grading] Subjective Q{idx + 1}/{len(subj_answers)}")
             ai_result = _ai_grade_subjective(
                 question         = q.get("question", ""),
                 reference_answer = q.get("reference_answer", ""),
@@ -983,7 +977,7 @@ def submit_exam(token):
             q    = code_questions[idx]
             code = ans.get("code", "").strip()
             lang = q.get("programming_language", "Python")
-            print(f"[Grading] Coding Q{idx + 1}/{len(code_answers)}")
+            logger.info(f"[Grading] Coding Q{idx + 1}/{len(code_answers)}")
             ai_result = _ai_grade_coding(
                 question   = q.get("question", ""),
                 language   = lang,
@@ -1095,11 +1089,11 @@ def submit_exam(token):
     exam["proctoring_summary"] = proctor_summary
     _create_recruiter_notification(exam.get("recruiter_id", ""), exam)
 
-    print(
-        f"[Grading] Done — MCQ:{mcq_score}% Subj:{subj_score_pct}% "
-        f"Code:{code_score_pct}% Overall:{overall_score}% "
-        f"Integrity:{proctor_summary['integrity_score']}%"
-    )
+    logger.info(
+    f"[Grading] Done — MCQ:{mcq_score}% Subj:{subj_score_pct}% "
+    f"Code:{code_score_pct}% Overall:{overall_score}% "
+    f"Integrity:{proctor_summary['integrity_score']}%"
+)
 
     return jsonify(
         success=True,
@@ -1406,7 +1400,7 @@ def _gemini_vision(b64_image: str, prompt: str) -> str:
         return text
         
     except http_requests.exceptions.HTTPError as e:
-        print(f"[Gemini] HTTP error {resp.status_code}: {resp.text[:200]}")
+        logger.error(f"[Gemini] HTTP error {resp.status_code}: {resp.text[:200]}")
         raise
     except (KeyError, IndexError) as e:
         raise ValueError(f"Unexpected Gemini response: {data}") from e
@@ -1440,10 +1434,10 @@ Set approved=false and explain in reason if: no face, multiple faces, too dark, 
             result = {"approved": True, "reason": "validation_fallback"}
             
     except json.JSONDecodeError as e:
-        print(f"[Proctor] JSON parse error: {raw!r}")
+        logger.warning(f"[Proctor] JSON parse error: {raw!r}")
         result = {"approved": True, "reason": "parse_fallback"}
     except Exception as e:
-        print(f"[Proctor] verify_face error: {e}")
+        logger.error(f"[Proctor] verify_face error: {e}")
         result = {"approved": True, "reason": ""}  # fail open
 
     return jsonify(success=True, data=result), 200
@@ -1582,7 +1576,7 @@ def analyze_snapshot(token):
         result = {"face_detected": True, "flag": "ok", "reason": "parse_error"}
         analysis_ok = False
     except Exception as e:
-        print(f"[Proctor] analyze_snapshot error: {e}")
+        logger.error(f"[Proctor] analyze_snapshot error: {e}")
         # ── Don't store snapshots when vision API isn't configured ──
         # Return ok so exam isn't disrupted, but skip DB storage
         return jsonify(success=True, data={"flag": "ok", "reason": ""}), 200
@@ -1629,9 +1623,6 @@ def analyze_snapshot(token):
                 if result.get("mouth_movement"): triggered.append("talking/whispering")
                 result["reason"] = ", ".join(triggered)
 
-
-
-    
     # ── Post-process: ensure background_person_detected triggers alert ──
     if result.get("background_person_detected") or result.get("face_count", 1) > 1:
         result["flag"] = "alert"
@@ -1651,7 +1642,6 @@ def analyze_snapshot(token):
         }
         mongo.db.exams.update_one(
             {"_id": exam["_id"]},
-            # {"$push": {"proctoring.snapshots": snap_doc}}
             {"$push": {"proctoring_snapshots": snap_doc}}
         )
 
@@ -1692,11 +1682,11 @@ def upload_video(token):
                 "video_uploaded_at":            now,            # ← top-level too
             }}
         )
-        print(f"[Proctor] Video stored: {file_id}, size: {len(video_data)} bytes")
+        logger.info(f"[Proctor] Video stored: {file_id}, size: {len(video_data)} bytes")
         return jsonify(success=True, data={"file_id": str(file_id)}), 200
 
     except Exception as e:
-        print(f"[Proctor] Video upload error: {e}")
+        logger.error(f"[Proctor] Video upload error: {e}")
         return jsonify(success=False, message=str(e)), 500
 
 
@@ -1803,14 +1793,14 @@ def _vision_analyze(b64_image: str, prompt: str) -> str:
         try:
             return _gemini_vision(b64_image, prompt)
         except Exception as e:
-            print(f"[Vision] Gemini failed: {e}, trying fallback...")
+            logger.warning(f"[Vision] Gemini failed: {e}, trying fallback...")
     
     # Fallback: OpenRouter free tier
     if os.environ.get("OPENROUTER_API_KEY"):
         try:
             return _openrouter_vision(b64_image, prompt)
         except Exception as e:
-            print(f"[Vision] OpenRouter failed: {e}")
+            logger.error(f"[Vision] OpenRouter failed: {e}")
     
     raise ValueError("No vision API available — set GEMINI_API_KEY or OPENROUTER_API_KEY")
 
@@ -1845,9 +1835,6 @@ def test_vision():
         response=resp.json(),
         key_prefix=key[:8] + "..."
     )
-
-
-
 
 @exam_bp.route("/question-image/<file_id>", methods=["GET"])
 def get_question_image(file_id):

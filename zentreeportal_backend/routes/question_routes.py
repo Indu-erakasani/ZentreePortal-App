@@ -8,7 +8,13 @@ import requests as http
 from extensions import mongo
 import base64 as b64mod, gridfs
 from bson import ObjectId
+import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 question_bp = Blueprint("questions", __name__)
@@ -550,9 +556,9 @@ def add_manual_questions(jid):
             )
             image_file_id = str(file_id)
             q["image_file_id"] = image_file_id
-            print(f"[Image Store] file_id={image_file_id}, content_type={content_type}, size={len(image_data)} bytes")
+            logger.info(f"[Image Store] file_id={image_file_id}, content_type={content_type}, size={len(image_data)} bytes")
         except Exception as e:
-            print(f"[Manual Question] Image store failed: {e}")
+            logger.error(f"[Manual Question] Image store failed: {e}")
             q["image_file_id"] = None
     else:
         q["image_file_id"] = None

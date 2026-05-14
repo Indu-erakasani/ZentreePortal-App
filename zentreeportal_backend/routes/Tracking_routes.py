@@ -12,6 +12,14 @@ from models.Tracking_model import (
     tracking_schema, serialize_tracking,
     STAGES, PIPELINE_STATUSES,
 )
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 
 tracking_bp = Blueprint("tracking", __name__)
 
@@ -56,7 +64,7 @@ def _create_google_meet(
     calendar_id = os.environ.get("GOOGLE_CALENDAR_ID", "indu18002@gmail.com")
 
     if not os.path.exists(token_file):
-        print(f"[MEET] ❌ {token_file} not found — run: python3 generate_token.py")
+        logger.error(f"[MEET] ❌ {token_file} not found — run: python3 generate_token.py")
         return {"meet_link": "", "event_id": "", "calendar_link": ""}
 
     try:
@@ -82,7 +90,7 @@ def _create_google_meet(
             td["token"] = creds.token
             with open(token_file, "w") as f:
                 _json.dump(td, f, indent=2)
-            print("[MEET] Token refreshed")
+            logger.info("[MEET] Token refreshed")
 
         service = build("calendar", "v3", credentials=creds)
         end_dt  = start_dt + timedelta(minutes=duration_minutes)
@@ -122,9 +130,9 @@ def _create_google_meet(
                 break
 
         if meet_link:
-            print(f"[MEET] ✅ Google Meet created: {meet_link}")
+            logger.info(f"[MEET] ✅ Google Meet created: {meet_link}")
         else:
-            print("[MEET] ⚠️ Event created but no Meet link returned")
+            logger.warning("[MEET] ⚠️ Event created but no Meet link returned")
 
         return {
             "meet_link":     meet_link,
@@ -133,7 +141,7 @@ def _create_google_meet(
         }
 
     except Exception as e:
-        print(f"[MEET] ❌ Error: {repr(e)}")
+        logger.error(f"[MEET] ❌ Error: {repr(e)}")
         return {"meet_link": "", "event_id": "", "calendar_link": ""}
     
     
@@ -561,16 +569,16 @@ def _smtp_send(smtp_host, smtp_port, smtp_user, smtp_pass,
             server.ehlo()
             server.login(smtp_user, smtp_pass)
             server.sendmail(from_email, to_email, msg.as_string())
-        print(f"[EMAIL] ✅ Sent: '{subject}' → {to_email}")
+        logger.info(f"[EMAIL] ✅ Sent: '{subject}' → {to_email}")
         return True
     except smtplib.SMTPAuthenticationError as e:
-        print(f"[EMAIL] ❌ Auth failed: {e}"); return False
+        logger.error(f"[EMAIL] ❌ Auth failed: {e}"); return False
     except smtplib.SMTPServerDisconnected as e:
-        print(f"[EMAIL] ❌ Disconnected: {e}"); return False
+        logger.error(f"[EMAIL] ❌ Disconnected: {e}"); return False
     except smtplib.SMTPConnectError as e:
-        print(f"[EMAIL] ❌ Connect failed: {e}"); return False
+        logger.error(f"[EMAIL] ❌ Connect failed: {e}"); return False
     except Exception as e:
-        print(f"[EMAIL] ❌ {type(e).__name__}: {e}"); return False
+        logger.error(f"[EMAIL] ❌ {type(e).__name__}: {e}"); return False
 
 
 def _serialize_schedule(s: dict) -> dict:
@@ -1383,7 +1391,7 @@ def submit_feedback_form(tid, schedule_id):
             }
         )
         auto_advanced = True
-        print(f"[TRACKING] ✅ Auto-advanced {doc.get('candidate_name')} → {next_stage}")
+        logger.info(f"[TRACKING] ✅ Auto-advanced {doc.get('candidate_name')} → {next_stage}")
 
     return jsonify(
         success       = True,

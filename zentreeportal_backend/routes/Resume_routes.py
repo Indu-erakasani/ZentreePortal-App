@@ -10,7 +10,13 @@ import requests as http
 from extensions import mongo
 from models.Resume_model import resume_schema, serialize_resume, SCREENING_STATUSES, SOURCES
 import re
+import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 resume_bp = Blueprint("resumes", __name__)
 
 # ── Upload directory setup ────────────────────────────────────────────────────
@@ -22,11 +28,6 @@ os.makedirs(RESUME_DIR, exist_ok=True)
 os.makedirs(RAW_DIR,    exist_ok=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  GEMINI HELPER — handles thinking models (gemini-2.5-flash etc.)
-#  Thinking models return multiple parts: [thinking_part, ..., answer_part]
-#  We always want the LAST text part which contains the actual answer.
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def _extract_gemini_text(response_json: dict) -> str:
     """Extract the final answer text from a Gemini response (thinking-model safe)."""
@@ -597,44 +598,6 @@ def get_all():
     )
     return jsonify(success=True, data=[serialize_resume(d) for d in docs],
                    total=total, page=page, per_page=per_page), 200
-# @resume_bp.route("/", methods=["GET"])
-# @jwt_required()
-# def get_all():
-#     q        = request.args.get("q", "").strip()
-#     status   = request.args.get("status", "")
-#     source   = request.args.get("source", "")
-#     job_id   = request.args.get("job_id", "")
-#     min_exp  = request.args.get("min_exp", "")
-#     max_exp  = request.args.get("max_exp", "")
-#     page     = int(request.args.get("page", 1))
-#     per_page = int(request.args.get("per_page", 20))
-
-#     query = {}
-#     if q:
-#         query["$or"] = [
-#             {"name":         {"$regex": q, "$options": "i"}},
-#             {"skills":       {"$regex": q, "$options": "i"}},
-#             {"current_role": {"$regex": q, "$options": "i"}},
-#             {"resume_id":    {"$regex": q, "$options": "i"}},
-#         ]
-#     if status:  query["status"]        = status
-#     if source:  query["source"]        = source
-#     if job_id:  query["linked_job_id"] = job_id
-#     if min_exp: query["experience"]    = {"$gte": float(min_exp)}
-#     if max_exp:
-#         query.setdefault("experience", {})
-#         query["experience"]["$lte"] = float(max_exp)
-
-#     total = mongo.db.candidate_processing.count_documents(query)
-#     docs  = list(
-#         mongo.db.candidate_processing.find(query)
-#         .sort("created_at", -1)
-#         .skip((page - 1) * per_page)
-#         .limit(per_page)
-#     )
-#     return jsonify(success=True, data=[serialize_resume(d) for d in docs],
-#                    total=total, page=page, per_page=per_page), 200
-
 
 @resume_bp.route("/stats", methods=["GET"])
 @jwt_required()
@@ -792,9 +755,9 @@ def cleanup_expired_raw_resumes():
 
         except Exception as e:
             error_count += 1
-            print(f"[cleanup] Failed to delete {doc.get('raw_id')}: {e}")
+            logger.warning(f"[cleanup] Failed to delete {doc.get('raw_id')}: {e}")
 
-    print(f"[cleanup] Expired raw resumes — deleted: {deleted_count}, errors: {error_count}")
+    logger.error(f"[cleanup] Expired raw resumes — deleted: {deleted_count}, errors: {error_count}")
     
     
     
