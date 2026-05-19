@@ -63,7 +63,10 @@ def get_dashboard():
         {"$match": {"time_to_fill": {"$gt": 0}}},
         {"$group": {"_id": None, "avg": {"$avg": "$time_to_fill"}}},
     ]))
-    avg_days = round(ttf[0]["avg"], 1) if ttf else 0
+    # avg_days = round(ttf[0]["avg"], 1) if ttf else 0
+    
+    avg_days = round(ttf[0]["avg"], 1) if ttf and ttf[0].get("avg") is not None else 0
+
 
     # ── Candidate pipeline (candidate_processing status counts) ────────────────────────
     pipeline_raw = list(mongo.db.candidate_processing.aggregate([

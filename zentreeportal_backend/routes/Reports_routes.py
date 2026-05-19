@@ -40,7 +40,10 @@ def overview():
     total_candidates = mongo.db.candidate_processing.count_documents({})
     total_placements = mongo.db.placements.count_documents(pmatch)
 
-    fill_rate = round(total_placements / open_jobs * 100, 1) if open_jobs else 0
+    # fill_rate = round(total_placements / open_jobs * 100, 1) if open_jobs else 0
+    
+    filled_jobs = mongo.db.jobs.count_documents({"status": "Filled"})
+    fill_rate   = round(min(filled_jobs / total_jobs * 100, 1) * 100, 1) if total_jobs else 0
 
     ttf = list(mongo.db.placements.aggregate([
         {"$match": {"time_to_fill": {"$gt": 0}}},

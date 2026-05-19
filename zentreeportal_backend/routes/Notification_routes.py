@@ -28,37 +28,70 @@ ROLE_TYPE_MAP = {
 }
 
 
+# def _get_caller() -> tuple:
+#     """Return (user_id_str, role) from JWT identity."""
+#     identity = get_jwt_identity()
+#     try:
+#         data = json.loads(identity) if isinstance(identity, str) else identity
+#         return str(data.get("id", data.get("_id", ""))), data.get("role", "recruiter")
+#     except Exception:
+#         return str(identity), "recruiter"
 def _get_caller() -> tuple:
-    """Return (user_id_str, role) from JWT identity."""
     identity = get_jwt_identity()
     try:
-        data = json.loads(identity) if isinstance(identity, str) else identity
-        return str(data.get("id", data.get("_id", ""))), data.get("role", "recruiter")
+        # If identity is a dict with role
+        if isinstance(identity, dict):
+            return str(identity.get("id", identity.get("_id", ""))), identity.get("role", "recruiter")
+        # If identity is a JSON string
+        if isinstance(identity, str):
+            try:
+                data = json.loads(identity)
+                if isinstance(data, dict):
+                    return str(data.get("id", data.get("_id", ""))), data.get("role", "recruiter")
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # identity is just a plain user_id string — look up role from DB
+            user = mongo.db.users.find_one({"_id": ObjectId(identity)})
+            if user:
+                return identity, user.get("role", "recruiter")
+        return str(identity), "recruiter"
     except Exception:
         return str(identity), "recruiter"
 
-
 # ── GET /api/notifications/ ───────────────────────────────────────────────────
+
 @notification_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_notifications():
     user_id, role = _get_caller()
-    limit = int(request.args.get("limit", 50))
-    user_filter = {
-        "$or": [
-            {"target_user_id": user_id},
-            {"target_role":    role},
-            {
-                "target_user_id": {"$in": [None, ""]},
-                "target_role":    {"$in": [None, ""]},
-            },
-        ]
-    }
+    logger.info(f"\nDEBUG get_notifications: user_id={user_id!r}, role={role!r}")
 
-    # Role-based type filter
+    limit = int(request.args.get("limit", 50))
+
     allowed_types = ROLE_TYPE_MAP.get(role)
-    if allowed_types is not None:
-        user_filter["type"] = {"$in": allowed_types}
+
+    if allowed_types is None:
+        # admin — sees everything
+        user_filter = {
+            "$or": [
+                {"target_user_id": user_id},
+                {"target_role":    role},
+                {"target_user_id": {"$in": [None, ""]},
+                 "target_role":    {"$in": [None, ""]}},
+            ]
+        }
+    else:
+        user_filter = {
+            "$or": [
+                {"target_user_id": user_id},
+                {"target_role":    role},
+                {
+                    "target_user_id": {"$in": [None, ""]},
+                    "target_role":    {"$in": [None, ""]},
+                    "type":           {"$in": allowed_types},
+                },
+            ]
+        }
 
     docs = list(
         mongo.db.notifications.find(user_filter)
@@ -70,6 +103,8 @@ def get_notifications():
     unread     = sum(1 for d in serialized if not d.get("is_read"))
 
     return jsonify(success=True, data=serialized, unread=unread), 200
+
+
 
 
 # ── PUT /api/notifications/<id>/read ─────────────────────────────────────────
@@ -94,28 +129,39 @@ def mark_read(nid):
 @jwt_required()
 def mark_all_read():
     user_id, role = _get_caller()
-
-    # Mark read only notifications visible to this user
     allowed_types = ROLE_TYPE_MAP.get(role)
-    query = {
-        "$or": [
-            {"target_user_id": user_id},
-            {"target_role":    role},
-            {
-                "target_user_id": {"$in": [None, ""]},
-                "target_role":    {"$in": [None, ""]},
-            },
-        ],
-        "is_read": False,
-    }
-    if allowed_types is not None:
-        query["type"] = {"$in": allowed_types}
+
+    if allowed_types is None:
+        query = {
+            "$or": [
+                {"target_user_id": user_id},
+                {"target_role":    role},
+                {"target_user_id": {"$in": [None, ""]},
+                 "target_role":    {"$in": [None, ""]}},
+            ],
+            "is_read": False,
+        }
+    else:
+        query = {
+            "$or": [
+                {"target_user_id": user_id},
+                {"target_role":    role},
+                {
+                    "target_user_id": {"$in": [None, ""]},
+                    "target_role":    {"$in": [None, ""]},
+                    "type":           {"$in": allowed_types},
+                },
+            ],
+            "is_read": False,
+        }
 
     mongo.db.notifications.update_many(
         query,
         {"$set": {"is_read": True, "read_at": datetime.utcnow()}},
     )
     return jsonify(success=True, message="All marked as read"), 200
+
+
 
 
 # ── POST /api/notifications/ — create a notification ─────────────────────────

@@ -345,18 +345,30 @@ def convert_raw(rid):
         return jsonify(success=False, message=str(e)), 500
 
 
+# @resume_bp.route("/raw/<rid>", methods=["DELETE"])
+# @jwt_required()
+# def delete_raw(rid):
+#     doc, err = _find_raw(rid)
+#     if err:
+#         return err
+#     file_path = os.path.join(RAW_DIR, doc.get("filename", ""))
+#     if os.path.exists(file_path):
+#         os.remove(file_path)
+#     mongo.db.raw_resumes.delete_one({"_id": doc["_id"]})
+#     return jsonify(success=True, message="Raw resume deleted"), 200
 @resume_bp.route("/raw/<rid>", methods=["DELETE"])
 @jwt_required()
 def delete_raw(rid):
     doc, err = _find_raw(rid)
     if err:
         return err
-    file_path = os.path.join(RAW_DIR, doc.get("filename", ""))
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    filename = doc.get("filename", "")
+    if filename:                                    # ← only attempt if there's an actual file
+        file_path = os.path.join(RAW_DIR, filename)
+        if os.path.exists(file_path):
+            os.remove(file_path)
     mongo.db.raw_resumes.delete_one({"_id": doc["_id"]})
     return jsonify(success=True, message="Raw resume deleted"), 200
-
 
 @resume_bp.route("/raw/manual", methods=["POST"])
 @jwt_required()
@@ -624,9 +636,22 @@ def create():
         if not data.get(f):
             return jsonify(success=False, message=f"'{f}' is required"), 400
 
-    if mongo.db.candidate_processing.find_one({"email": data["email"].lower().strip()}):
-        return jsonify(success=False, message="A candidate with this email already exists"), 409
+    # if mongo.db.candidate_processing.find_one({"email": data["email"].lower().strip()}):
+    #     return jsonify(success=False, message="A candidate with this email already exists"), 409
 
+    existing = mongo.db.candidate_processing.find_one({"email": data["email"].lower().strip()})
+    if existing:
+        new_job_id = _resolve_job_id(data.get("linked_job_id", ""))
+        existing_job_id = existing.get("linked_job_id", "")
+        # Only block if same email AND same job
+        if existing_job_id == new_job_id and new_job_id:
+            return jsonify(
+                success=False,
+                message=f"This candidate is already added for job {new_job_id}."
+            ), 409
+        # Different job (or no job) — allow creation, no questions asked
+            
+        
     try:
         doc = resume_schema(
             name             = data["name"],

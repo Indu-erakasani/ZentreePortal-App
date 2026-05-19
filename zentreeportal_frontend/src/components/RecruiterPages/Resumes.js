@@ -1165,19 +1165,7 @@ export default function Resumes() {
   const [urlJobTitle,    setUrlJobTitle]    = useState(_qp.get("job_title")   || "");
   const [isJobLocked,    setIsJobLocked]    = useState(!!_qp.get("job"));
 
-  // useEffect(() => {
-  //   const p     = new URLSearchParams(location.search);
-  //   const cid   = p.get("client")      || "";
-  //   const cname = p.get("client_name") || "";
-  //   const jid   = p.get("job")         || "";
-  //   const jtitle = p.get("job_title")  || "";
-  //   setUrlClientId(cid); setUrlClientName(cname); setIsClientLocked(!!cid);
-  //   setClientF(cid);
-  //   setUrlJobId(jid); setUrlJobTitle(jtitle); setIsJobLocked(!!jid);
-  //   // pre-set job filter dropdown when coming from Jobs page
-  //   if (jid) setJobF(jid);
-  //   else if (!cid) setJobF("");
-  // }, [location.search]);
+  
   useEffect(() => {
     const p      = new URLSearchParams(location.search);
     const cid    = p.get("client")      || "";
@@ -1312,7 +1300,9 @@ export default function Resumes() {
   const [trackingStage,     setTrackingStage]     = useState("");
   const [trackingError,     setTrackingError]     = useState("");
 
-
+  const [dupConfirmOpen,    setDupConfirmOpen]    = useState(false);
+  const [dupConfirmData,    setDupConfirmData]    = useState(null);  // existing candidate info
+  const [dupPendingPayload, setDupPendingPayload] = useState(null);  // payload to retry
 
   // ── Loaders ────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -1550,22 +1540,86 @@ const handleTrackingIvSave = async (e) => {
     finally { setManualRawSaving(false); }
   };
 
+  // const handleSave = async (e) => {
+  //   e.preventDefault(); setSaving(true);
+  //   try {
+  //     const payload = { ...formData, experience: formData.experience ? Number(formData.experience) : 0, current_salary: formData.current_salary ? Number(formData.current_salary) : 0, expected_salary: formData.expected_salary ? Number(formData.expected_salary) : 0 };
+  //     if (selected) {
+  //       await updateResume(selected._id, payload);
+  //       if (addFile) { const b64 = await toBase64(addFile); await uploadFileForCandidate(selected._id, b64).catch(() => {}); }
+  //     } else {
+  //       const created = await createResume(payload);
+
+  //       if (addFile && created?.data?._id) { const b64 = await toBase64(addFile); await uploadFileForCandidate(created.data._id, b64).catch(() => {}); }
+  //     }
+  //     setAddFile(null); setFormOpen(false); load();
+  //   } catch (err) { setError(err?.message || "Save failed"); }
+  //   finally { setSaving(false); }
+  // };
+
   const handleSave = async (e) => {
     e.preventDefault(); setSaving(true);
     try {
-      const payload = { ...formData, experience: formData.experience ? Number(formData.experience) : 0, current_salary: formData.current_salary ? Number(formData.current_salary) : 0, expected_salary: formData.expected_salary ? Number(formData.expected_salary) : 0 };
+      const payload = {
+        ...formData,
+        experience:      formData.experience      ? Number(formData.experience)      : 0,
+        current_salary:  formData.current_salary  ? Number(formData.current_salary)  : 0,
+        expected_salary: formData.expected_salary ? Number(formData.expected_salary) : 0,
+      };
       if (selected) {
         await updateResume(selected._id, payload);
         if (addFile) { const b64 = await toBase64(addFile); await uploadFileForCandidate(selected._id, b64).catch(() => {}); }
+        setAddFile(null); setFormOpen(false); load();
       } else {
-        const created = await createResume(payload);
-        if (addFile && created?.data?._id) { const b64 = await toBase64(addFile); await uploadFileForCandidate(created.data._id, b64).catch(() => {}); }
+        let created;
+        try {
+          created = await createResume(payload);
+        } catch (err) {
+          // Duplicate email but different job — ask user to confirm
+          if (err?.duplicate_type === "different_job") {
+            setDupConfirmData(err.existing_candidate);
+            setDupPendingPayload(payload);
+            setDupConfirmOpen(true);
+            setSaving(false);
+            return;
+          }
+          throw err; // re-throw same_job or other errors
+        }
+        if (addFile && created?.data?._id) {
+          const b64 = await toBase64(addFile);
+          await uploadFileForCandidate(created.data._id, b64).catch(() => {});
+        }
+        setAddFile(null); setFormOpen(false); load();
       }
-      setAddFile(null); setFormOpen(false); load();
-    } catch (err) { setError(err?.message || "Save failed"); }
-    finally { setSaving(false); }
+    } catch (err) {
+      setError(err?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
   };
 
+
+  const createResumeForce = (payload) =>
+    fetch(`${RESUMES_BASE}/`, {
+      method: "POST", headers: getHeaders(),
+      body: JSON.stringify({ ...payload, force_duplicate: true }),
+    }).then(handle);
+
+    const handleDupConfirm = async () => {
+      setSaving(true);
+      try {
+        const created = await createResumeForce(dupPendingPayload);
+        if (addFile && created?.data?._id) {
+          const b64 = await toBase64(addFile);
+          await uploadFileForCandidate(created.data._id, b64).catch(() => {});
+        }
+        setDupConfirmOpen(false); setDupConfirmData(null); setDupPendingPayload(null);
+        setAddFile(null); setFormOpen(false); load();
+      } catch (err) {
+        setError(err?.message || "Save failed");
+        setDupConfirmOpen(false);
+      } finally { setSaving(false); }
+    };
   const handleDelete = async () => {
     try { await deleteResume(selected._id); setDeleteOpen(false); load(); }
     catch (err) { setError(err?.message || "Delete failed"); }
@@ -1586,10 +1640,42 @@ const handleTrackingIvSave = async (e) => {
         const result = await parsePdfViaBackend(b64, entry.file.name);
         const parsed  = result.data    || {};
         const file_id = result.file_id || "";
-        updated[idx] = { ...updated[idx], status: "done", file_id, formData: { ...EMPTY_FORM, ...parsed, experience: parsed.experience || "", current_salary: parsed.current_salary || "", expected_salary: parsed.expected_salary || "", status: "New" } };
+        // updated[idx] = { ...updated[idx], status: "done", file_id, formData: { ...EMPTY_FORM, ...parsed, experience: parsed.experience || "", current_salary: parsed.current_salary || "", expected_salary: parsed.expected_salary || "", status: "New" } };
+        const prefilledJob = jobF ? jobs.find(j => j._id === jobF) : null;
+        updated[idx] = {
+          ...updated[idx],
+          status: "done",
+          file_id,
+          formData: {
+            ...EMPTY_FORM,
+            ...parsed,
+            experience: parsed.experience || "",
+            current_salary: parsed.current_salary || "",
+            expected_salary: parsed.expected_salary || "",
+            status: "New",
+            // Prefill job if one is selected in the filter
+            linked_job_id:       prefilledJob?.job_id    || parsed.linked_job_id    || "",
+            linked_job_mongo_id: prefilledJob?._id        || parsed.linked_job_mongo_id || "",
+            linked_job_title:    prefilledJob?.title      || parsed.linked_job_title || "",
+          }
+        };
       } catch (err) {
         const file_id = err?.file_id || "";
-        updated[idx] = { ...updated[idx], status: "error", file_id, errorMsg: err?.message || "Auto-parse failed — fill manually", formData: { ...EMPTY_FORM, status: "New" } };
+        // updated[idx] = { ...updated[idx], status: "error", file_id, errorMsg: err?.message || "Auto-parse failed — fill manually", formData: { ...EMPTY_FORM, status: "New" } };
+        const prefilledJob = jobF ? jobs.find(j => j._id === jobF) : null;
+        updated[idx] = {
+          ...updated[idx],
+          status: "error",
+          file_id,
+          errorMsg: err?.message || "Auto-parse failed — fill manually",
+          formData: {
+            ...EMPTY_FORM,
+            status: "New",
+            linked_job_id:       prefilledJob?.job_id || "",
+            linked_job_mongo_id: prefilledJob?._id    || "",
+            linked_job_title:    prefilledJob?.title  || "",
+          }
+        };
       }
       setInlineFiles([...updated]);
     }));
@@ -1818,21 +1904,6 @@ const handleTrackingIvSave = async (e) => {
           <Typography variant="h4" color="primary.dark">Candidates</Typography>
           <Typography color="text.secondary" mt={0.5}>Manage candidate profiles and track applications</Typography>
         </Box>
-        {/* <Box display="flex" gap={1.5}>
-          {mainTab === 0 && (
-            <>
-              <Button variant="outlined" startIcon={<CloudUpload />} onClick={() => inlineRef.current?.click()} size="large">Upload Resume</Button>
-              <Button variant="contained" startIcon={<Add />} onClick={openCreate} size="large">Add Candidate</Button>
-            </>
-          )}
-          {mainTab === 1 && (
-            <Box display="flex" gap={1.5}>
-              <Button variant="outlined" startIcon={<EditNote />} onClick={openManualRaw} size="large">Add Manually</Button>
-              <Button variant="outlined" startIcon={<CloudUpload />} onClick={() => rawUploadRef.current?.click()} size="large">Store Resumes</Button>
-            </Box>
-          )}
-        </Box> */}
-
         <Box display="flex" gap={1.5}>
           {!isHR && mainTab === 0 && (
             <>
@@ -1882,13 +1953,6 @@ const handleTrackingIvSave = async (e) => {
       </Grid>
 
       {/* ── Main tabs ──────────────────────────────────────────────────────── */}
-      {/* <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tabs value={mainTab} onChange={(_, v) => setMainTab(v)}>
-          <Tab label={<Box display="flex" alignItems="center" gap={1}><People fontSize="small" />Candidates{isClientLocked && <Chip label={urlClientName} size="small" color="info" sx={{ fontSize: 10, height: 18 }} />}</Box>} iconPosition="start" />
-          <Tab label={<Badge badgeContent={rawResumes.filter(r => r.status === "Stored").length} color="secondary" max={99}><Box sx={{ pr: rawResumes.filter(r => r.status === "Stored").length > 0 ? 1.5 : 0 }}>Stored Resumes</Box></Badge>} icon={<Inventory2 fontSize="small" />} iconPosition="start" />
-        </Tabs>
-      </Box> */}
-
         <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
           <Tabs value={mainTab} onChange={(_, v) => setMainTab(v)}>
             <Tab
@@ -1923,10 +1987,6 @@ const handleTrackingIvSave = async (e) => {
       ══════════════════════════════════════════════════════════════════════ */}
       {mainTab === 0 && (
         <>
-          {/* {!showParsing
-            ? <InlineUploadZone onFiles={handleFileSelect} fileRef={inlineRef} />
-            : <InlineParseProgress files={inlineFiles} onReview={openBulkReview} onClear={clearInline} />
-          } */}
           {!isHR && (
               !showParsing
                 ? <InlineUploadZone onFiles={handleFileSelect} fileRef={inlineRef} />
@@ -1935,9 +1995,6 @@ const handleTrackingIvSave = async (e) => {
 
           <Box display="flex" gap={2} flexWrap="wrap">
             <TextField placeholder="Search by name, skills, or ID…" value={search} onChange={e => setSearch(e.target.value)} size="small" sx={{ flexGrow: 1, minWidth: 220 }} InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" color="action" /></InputAdornment> }} />
-            {/* <TextField select value={statusF} onChange={e => setStatusF(e.target.value)} size="small" sx={{ minWidth: 150 }} label="Status">
-              <MenuItem value="">All Statuses</MenuItem>{STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-            </TextField> */}
             <TextField
                 select value={statusF}
                 onChange={e => !isHR && setStatusF(e.target.value)}
@@ -2045,61 +2102,6 @@ const handleTrackingIvSave = async (e) => {
                           {(() => { const track = trackingMap[r.resume_id]; if (!track) return <Typography fontSize={12} color="text.disabled">—</Typography>; return <Box><Chip label={track.current_stage} size="small" color={STAGE_COLOR[track.current_stage] || "default"} sx={{ fontWeight: 700, fontSize: 10, mb: 0.3 }} /><Typography fontSize={10} color="text.secondary">{track.pipeline_status}</Typography></Box>; })()}
                         </TableCell>
                         <TableCell><Chip label={r.status} color={STATUS_COLOR[r.status] || "default"} size="small" sx={{ fontWeight: 700, fontSize: 11 }} /></TableCell>
-                        {/* <TableCell>
-                        {examMap[r._id] && (() => {
-                              const ex    = examMap[r._id];
-                              const style = EXAM_STATUS_STYLE[ex.status] || EXAM_STATUS_STYLE["Sent"];
-                              return (
-                                <Tooltip title={
-                                  ex.status === "Completed"
-                                    ? `MCQ score: ${ex.mcq_score}% · Submitted ${new Date(ex.submitted_at).toLocaleDateString("en-IN")}`
-                                    : ex.status === "In Progress"
-                                    ? `Started ${new Date(ex.started_at).toLocaleDateString("en-IN")}`
-                                    : `Sent on ${new Date(ex.sent_at).toLocaleDateString("en-IN")} · expires ${new Date(ex.expires_at).toLocaleDateString("en-IN")}`
-                                }>
-                                  <Chip
-                                    label={style.label}
-                                    size="small"
-                                    sx={{
-                                      fontSize: 9, height: 18, mb: 0.5,
-                                      bgcolor: style.bg,
-                                      color: style.color,
-                                      border: `1px solid ${style.border}`,
-                                      fontWeight: 700,
-                                      display: "flex",
-                                    }}
-                                  />
-                                </Tooltip>
-                              );
-                            })()}
-                          <Box display="flex" gap={0.5}>
-                            <Tooltip title="View Details"><IconButton size="small" onClick={() => openDetail(r)}><Visibility fontSize="small" /></IconButton></Tooltip>
-                            <Tooltip title={r.resume_file ? "View Resume PDF" : "No resume file uploaded"}>
-                              <span><IconButton size="small" onClick={() => r.resume_file && openPdf(r)} sx={{ color: r.resume_file ? "#c62828" : "#bdbdbd", cursor: r.resume_file ? "pointer" : "not-allowed" }}><PictureAsPdf fontSize="small" /></IconButton></span>
-                            </Tooltip>
-                       
-                            <Tooltip title={r.linked_job_id ? "AI Score vs Job" : "Link to a job to enable scoring"}>
-                              <span>
-                                <IconButton size="small" onClick={() => openScore(r)} disabled={!r.linked_job_id} sx={{ color: r.linked_job_id ? "#7b1fa2" : "#bdbdbd" }}>
-                                  <Analytics fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                            <Tooltip title={r.email ? "Send Screening Exam" : "No email — cannot send exam"}>
-                                <span>
-                                  <IconButton size="small"
-                                    onClick={() => r.email && openExamDialog(r)}
-                                    disabled={!r.email}
-                                    sx={{ color: r.email ? "#e65100" : "#bdbdbd" }}>
-                                    <Assignment fontSize="small" />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                            <Tooltip title="Edit"><IconButton size="small" onClick={() => openEdit(r)}><Edit fontSize="small" /></IconButton></Tooltip>
-                            <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => openDelete(r)}><Delete fontSize="small" /></IconButton></Tooltip>
-                          </Box>
-                        </TableCell> */}
-
 
                       <TableCell>
                         {/* Exam status chip — recruiters only */}
@@ -2872,7 +2874,26 @@ const handleTrackingIvSave = async (e) => {
               <Grid item xs={12} sm={4}><TextField fullWidth size="small" type="number" label="Current Salary (₹)" name="current_salary" value={convertData.current_salary} onChange={handleConvertChange} /></Grid>
               <Grid item xs={12} sm={4}><TextField fullWidth size="small" type="number" label="Expected Salary (₹)" name="expected_salary" value={convertData.expected_salary} onChange={handleConvertChange} /></Grid>
               <Grid item xs={12} sm={4}><TextField select fullWidth size="small" label="Notice Period" name="notice_period" value={convertData.notice_period} onChange={handleConvertChange}>{NOTICES.map(n => <MenuItem key={n} value={n}>{n}</MenuItem>)}</TextField></Grid>
-              <Grid item xs={12}><TextField select fullWidth size="small" label="Link to Job" name="linked_job_id" value={convertData.linked_job_mongo_id || ""} onChange={handleConvertChange}><MenuItem value="">No Job Linked</MenuItem>{jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.job_id} — {j.title}{j.client_name ? ` (${j.client_name})` : ""}</MenuItem>)}</TextField></Grid>
+              <Grid item xs={12}>
+                {/* <TextField select fullWidth size="small" label="Link to Job" name="linked_job_id" value={convertData.linked_job_mongo_id || ""} onChange={handleConvertChange} helperText={currentEntry.formData.linked_job_id && jobF? "Pre-filled from active job filter": ""}><MenuItem value="">No Job Linked</MenuItem>{jobs.map(j => <MenuItem key={j._id} value={j._id}>{j.job_id} — {j.title}{j.client_name ? ` (${j.client_name})` : ""}</MenuItem>)}</TextField>*/}
+                <TextField
+                    select fullWidth size="small"
+                    label="Link to Job"
+                    name="linked_job_id"
+                    value={convertData.linked_job_mongo_id || ""}
+                    onChange={handleConvertChange}
+                    helperText={convertData.linked_job_id && jobF
+                      ? "Pre-filled from active job filter"
+                      : ""}
+                  >
+                    <MenuItem value="">No Job Linked</MenuItem>
+                    {jobs.map(j => (
+                      <MenuItem key={j._id} value={j._id}>
+                        {j.job_id} — {j.title}{j.client_name ? ` (${j.client_name})` : ""}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Grid> 
             </Grid>
             <TextField fullWidth multiline rows={2} size="small" label="Notes" name="notes" value={convertData.notes} onChange={handleConvertChange} />
             {convertError && <Alert severity="error" sx={{ mt: 2 }}>{convertError}</Alert>}
@@ -3211,6 +3232,62 @@ const handleTrackingIvSave = async (e) => {
           </DialogActions>
         </form>
       </Dialog>
+
+
+
+
+
+      <Dialog open={dupConfirmOpen} onClose={() => setDupConfirmOpen(false)} maxWidth="xs" fullWidth>
+  <DialogTitle sx={{ fontWeight: 700, borderTop: "4px solid #e65100" }}>
+    Candidate Already Exists
+  </DialogTitle>
+  <DialogContent sx={{ pt: 2 }}>
+    <Alert severity="warning" sx={{ mb: 2 }}>
+      A candidate with this email already exists in the system.
+    </Alert>
+    {dupConfirmData && (
+      <Box p={1.5} bgcolor="#f5f7fa" borderRadius={2} mb={2}>
+        <Typography fontSize={13} fontWeight={700}>{dupConfirmData.name}</Typography>
+        <Typography fontSize={12} color="text.secondary">{dupConfirmData.resume_id}</Typography>
+        <Typography fontSize={12} color="#0277bd" mt={0.5}>
+          Currently linked to: <strong>{dupConfirmData.linked_job_id || "No job"}</strong>
+          {dupConfirmData.linked_job_title ? ` — ${dupConfirmData.linked_job_title}` : ""}
+        </Typography>
+        <Chip label={dupConfirmData.status} size="small"
+          sx={{ mt: 0.8, fontSize: 10, fontWeight: 700 }} />
+      </Box>
+    )}
+    <Typography fontSize={13} color="text.primary">
+      Do you still want to add this candidate for the new job?
+    </Typography>
+    <Typography fontSize={12} color="text.secondary" mt={0.5}>
+      A separate profile will be created for the new job assignment.
+    </Typography>
+  </DialogContent>
+  <DialogActions sx={{ px: 3, pb: 2.5 }}>
+    <Button onClick={() => { setDupConfirmOpen(false); setDupConfirmData(null); setDupPendingPayload(null); }}>
+      Cancel
+    </Button>
+    <Button variant="contained" onClick={handleDupConfirm} disabled={saving}
+      sx={{ bgcolor: "#e65100", "&:hover": { bgcolor: "#bf360c" } }}
+      startIcon={saving ? <CircularProgress size={16} color="inherit" /> : null}>
+      {saving ? "Saving…" : "Yes, Add for New Job"}
+    </Button>
+  </DialogActions>
+</Dialog>
+
+
+
+
+
+
+
+
+
+
+
+
+
       <ExamResultsDialog
   open={examResultsOpen}
   onClose={() => setExamResultsOpen(false)}
