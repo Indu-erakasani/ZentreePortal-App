@@ -32,8 +32,11 @@ BASE_PASSWORD = os.getenv("LOCUST_PASSWORD", "Test@1234")
 
 # Seed data — must exist in the target DB before the run.
 # Override via env-vars when running against staging/prod.
-SEED_RESUME_ID = os.getenv("LOCUST_RESUME_ID", "RES_TEST_001")
-SEED_JOB_ID    = os.getenv("LOCUST_JOB_ID",    "JOB_TEST_001")
+# SEED_RESUME_ID = os.getenv("LOCUST_RESUME_ID", "RES_TEST_001")
+# SEED_JOB_ID    = os.getenv("LOCUST_JOB_ID",    "JOB_TEST_001")
+
+# SEED_RESUME_ID = "LOCUST_RES_001"
+# SEED_JOB_ID    = "LOCUST_JOB_001"
 
 logger = logging.getLogger("locust.zentree")
 
@@ -96,7 +99,9 @@ class DashboardTasks(TaskSet):
     """
 
     def on_start(self):
-        self.token = self.user.token
+        # self.token = self.user.token
+        token = self.user.resident_session.get("headers", {}).get("Authorization", "")
+        self.token = token.replace("Bearer ", "") if token else ""
 
     def _hdr(self):
         return {"Authorization": f"Bearer {self.token}"}
@@ -157,16 +162,70 @@ class ScoreReadTasks(TaskSet):
     Heavier weight than write tasks — production APIs are usually read-heavy.
     """
 
-    def on_start(self):
-        self.token  = self.user.token
-        self.rid    = SEED_RESUME_ID
-        self.jid    = SEED_JOB_ID
+    # def on_start(self):
+    #     token = self.user.resident_session.get("headers", {}).get("Authorization", "")
+    #     self.token = token.replace("Bearer ", "") if token else ""
+    #     self.rid   = SEED_RESUME_ID
+    #     self.jid   = SEED_JOB_ID
+    
+    # def on_start(self):
+    #     token = self.user.resident_session.get("headers", {}).get("Authorization", "")
+    #     self.token = token.replace("Bearer ", "") if token else ""
 
+    #     # Fetch a real resume_id from the DB
+    #     r = self.client.get("/api/resumes/?page=1&per_page=1",
+    #                         headers=self._hdr(), name="[setup] fetch resume id")
+    #     self.rid = None
+    #     if r.status_code == 200:
+    #         items = r.json().get("data", [])
+    #         if items:
+    #             self.rid = items[0].get("_id") or items[0].get("resume_id")
+
+    #     # Fetch a real job_id from the DB
+    #     j = self.client.get("/api/jobs/?page=1&per_page=1",
+    #                         headers=self._hdr(), name="[setup] fetch job id")
+    #     self.jid = None
+    #     if j.status_code == 200:
+    #         items = j.json().get("data", [])
+    #         if items:
+    #             self.jid = items[0].get("_id") or items[0].get("job_id")
+    def on_start(self):
+        token = self.user.resident_session.get("headers", {}).get("Authorization", "")
+        self.token = token.replace("Bearer ", "") if token else ""
+
+        self.rid = None
+        self.jid = None
+
+        r = self.client.get("/api/resumes/?page=1&per_page=1",
+                            headers=self._hdr(), name="[setup] fetch resume id")
+        if r.status_code == 200:
+            body = r.json()
+            logging.info(f"[SCORE SETUP] resume response keys: {list(body.keys())}")
+            # Try all common response structures:
+            items = body.get("data") or body.get("resumes") or body.get("results") or []
+            if items:
+                self.rid = items[0].get("resume_id") or items[0].get("_id")
+                logging.info(f"[SCORE SETUP] Got rid: {self.rid}")
+
+        j = self.client.get("/api/jobs/?page=1&per_page=1",
+                            headers=self._hdr(), name="[setup] fetch job id")
+        if j.status_code == 200:
+            body = j.json()
+            logging.info(f"[SCORE SETUP] job response keys: {list(body.keys())}")
+            items = body.get("data") or body.get("jobs") or body.get("results") or []
+            if items:
+                self.jid = items[0].get("job_id") or items[0].get("_id")
+                logging.info(f"[SCORE SETUP] Got jid: {self.jid}")
+            
+            
+            
     def _hdr(self):
         return {"Authorization": f"Bearer {self.token}"}
 
     @task(4)
     def get_score_for_pair(self):
+        if not self.rid or not self.jid: 
+            return
         with self.client.get(
             f"/api/score/candidate?resume_id={self.rid}&job_id={self.jid}",
             headers=self._hdr(),
@@ -241,7 +300,9 @@ class ScoreWriteTasks(TaskSet):
     """
 
     def on_start(self):
-        self.token = self.user.token
+        # self.token = self.user.token
+        token = self.user.resident_session.get("headers", {}).get("Authorization", "")
+        self.token = token.replace("Bearer ", "") if token else ""
         self.rid   = SEED_RESUME_ID
         self.jid   = SEED_JOB_ID
 
@@ -358,19 +419,7 @@ class ScoreWriteTasks(TaskSet):
 # User classes
 # ─────────────────────────────────────────────────────────────────────────────
 
-# class AdminUser(HttpUser):
-#     """
-#     Simulates an admin browsing the main dashboard and scoring candidates.
-#     wait_time: think-time between tasks (1–3 s).
-#     """
-#     wait_time = between(1, 3)
-#     weight    = 1   # 1 admin for every 3 recruiters
 
-#     def on_start(self):
-#         self.token = _register_and_login(self.client, role="admin") or ""
-
-#     class tasks(DashboardTasks):
-#         pass   # re-use the dashboard task set
 
 class AdminUser(HttpUser):
     """

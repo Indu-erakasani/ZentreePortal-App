@@ -20,9 +20,11 @@ class EmployeeTasks(TaskSet):
         self.employee_id = None
 
         # Generate unique data per user session
-        unique_suffix = str(uuid.uuid4())[:8]
-        self.dummy_emp_id = f"EMP{unique_suffix.upper()}"
-        self.dummy_email = f"emp_{unique_suffix}@example.com"
+        # unique_suffix = str(uuid.uuid4())[:8]
+        # self.dummy_emp_id = f"EMP{unique_suffix.upper()}"
+        # self.dummy_email = f"emp_{unique_suffix}@example.com"
+        
+
 
     # ================= 1. CREATE =================
 
@@ -30,11 +32,13 @@ class EmployeeTasks(TaskSet):
     def create_employee(self):
         """POST /api/employees/"""
         url = "/api/employees/"
-
+        unique_suffix = str(uuid.uuid4())[:8]
+        emp_id = f"EMP{unique_suffix.upper()}"
+        email  = f"emp_{unique_suffix}@example.com"
         payload = {
             "name": f"Locust User {str(uuid.uuid4())[:5]}",
-            "email": self.dummy_email,
-            "emp_id": self.dummy_emp_id,
+            "email": email,
+            "emp_id": emp_id,
             "phone": str(random.randint(6000000000, 9999999999)),
             "designation": "Senior Developer",
             "department": "Engineering",
@@ -148,7 +152,8 @@ class EmployeeTasks(TaskSet):
         if not self.employee_id:
             return
 
-        status = random.choice(["Active", "On Bench", "Inactive"])
+        # status = random.choice(["Active", "On Bench", "Inactive"])
+        status = random.choice(["active", "on_bench", "inactive"])
         with self.client.put(
             f"/api/employees/{self.employee_id}",
             json={"status": status},

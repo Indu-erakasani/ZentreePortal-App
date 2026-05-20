@@ -182,6 +182,7 @@ class RecruitmentPortalUser(HttpUser):
         headers = login(self.client)
         self.resident_session = {"headers": headers}
         self.client.headers.update(headers)
+        self.auth_headers = headers
 
     def on_stop(self):
         logging.info("🛑 User session ended.")

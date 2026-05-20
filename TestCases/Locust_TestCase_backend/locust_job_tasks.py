@@ -12,23 +12,33 @@ class JobTasks(TaskSet):
     prefix: /api/jobs
     """
 
+    # def on_start(self):
+    #     self.headers = self.user.resident_session.get("headers") if self.user.resident_session else self.user.client.headers
+    #     self.job_id = None
+    
     def on_start(self):
-        self.headers = self.user.resident_session.get("headers") if self.user.resident_session else self.user.client.headers
+        self.headers = self.user.resident_session.get("headers", {})
         self.job_id = None
 
-        # Generate unique data per user session
-        unique_suffix = str(uuid.uuid4())[:8].upper()
-        self.dummy_job_id = f"JOB{unique_suffix}"
+        r = self.client.get("/api/jobs/?page=1&per_page=1",
+                            headers=self.headers, name="[setup] fetch question job id")
+        if r.status_code == 200:
+            items = r.json().get("data") or []
+            if items:
+                self.job_id = items[0].get("_id") or items[0].get("job_id")
+
 
     # ================= 1. CREATE =================
 
     @task
     def create_job(self):
         """POST /api/jobs/"""
-        url = "/api/jobs/"
+        # ✅ Generate a fresh unique job_id every call, not once in on_start
+        unique_suffix = str(uuid.uuid4())[:8].upper()
+        job_id = f"JOB{unique_suffix}"
 
         payload = {
-            "job_id":         self.dummy_job_id,
+            "job_id":         job_id,                              # ← fresh every call
             "title":          f"Python Developer {str(uuid.uuid4())[:4]}",
             "client_id":      "CLI001",
             "client_name":    "Test Corp",
@@ -44,13 +54,14 @@ class JobTasks(TaskSet):
             "description":    "Created by Locust load test",
         }
 
-        with self.client.post(url, json=payload, headers=self.headers, catch_response=True) as response:
+        with self.client.post("/api/jobs/", json=payload, headers=self.headers, catch_response=True) as response:
             if response.status_code == 201:
-                data = response.json()
-                self.job_id = data.get("data", {}).get("_id")
+                self.job_id = response.json().get("data", {}).get("_id")
                 logging.info(f"✅ Job Created: {self.job_id}")
-            elif response.status_code == 409 and "already exists" in response.text:
-                logging.warning("⚠️ Job conflict, fetching existing list...")
+                response.success()
+            elif response.status_code == 409:
+                # Should no longer happen with unique IDs, but handle gracefully
+                response.success()  # don't count as failure
                 self.get_jobs()
             else:
                 response.failure(f"Create Job failed: {response.text}")

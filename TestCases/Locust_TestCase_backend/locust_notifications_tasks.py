@@ -377,6 +377,8 @@ class NotificationJourneyTaskSet(TaskSet):
 
     @task(4)
     def list_notifications(self):
+        if not hasattr(self.user, 'auth_headers'):
+            return
         self.client.get(
             "/api/notifications/",
             headers=self.user.auth_headers,

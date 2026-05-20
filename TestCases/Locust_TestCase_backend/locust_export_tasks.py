@@ -40,7 +40,7 @@ SHARED_EMP_ID:  str = "EXP_EMP_LOAD_001"
 
 # Update this to match your app's MongoDB URI / DB name
 MONGO_URI = "mongodb://localhost:27017/"
-MONGO_DB  = "zentreeportal"
+MONGO_DB  = "zentreePortal"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
