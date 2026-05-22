@@ -12,7 +12,7 @@ from extensions import mongo
 import gridfs
 import base64
 import logging
-
+from ai_service import ai_call, ai_vision_call
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -174,21 +174,24 @@ def _groq_call(prompt: str, max_retries: int = 3) -> str:
 #  UNIFIED GRADING CALL
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# def _call_grading_model(prompt: str) -> str:
+#     provider = GRADING_PROVIDER.lower()
+#     if provider == "groq" and GROQ_KEY:
+#         try:
+#             logger.info(f"[Grading] Using Groq ({GROQ_MODEL})")
+#             return _groq_call(prompt)
+#         except Exception as e:
+#             logger.warning(f"[Grading] Groq failed: {e} — falling back to Gemini")
+#     if GEMINI_KEY:
+#         logger.info("[Grading] Using Gemini (fallback)")
+#         return _gemini_call(prompt)
+#     raise ValueError(
+#         "No grading API key configured. "
+#         "Set GROQ_API_KEY in your .env file and restart the server."
+#     )
 def _call_grading_model(prompt: str) -> str:
-    provider = GRADING_PROVIDER.lower()
-    if provider == "groq" and GROQ_KEY:
-        try:
-            logger.info(f"[Grading] Using Groq ({GROQ_MODEL})")
-            return _groq_call(prompt)
-        except Exception as e:
-            logger.warning(f"[Grading] Groq failed: {e} — falling back to Gemini")
-    if GEMINI_KEY:
-        logger.info("[Grading] Using Gemini (fallback)")
-        return _gemini_call(prompt)
-    raise ValueError(
-        "No grading API key configured. "
-        "Set GROQ_API_KEY in your .env file and restart the server."
-    )
+    """Single entry-point for all grading. Fallback chain inside ai_call."""
+    return ai_call(prompt, timeout=45)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1406,6 +1409,15 @@ def _gemini_vision(b64_image: str, prompt: str) -> str:
         raise ValueError(f"Unexpected Gemini response: {data}") from e
 
 
+
+
+
+
+
+
+
+
+
 @exam_bp.route("/proctor/verify-face", methods=["POST"])
 def verify_face():
     """Camera gate before exam starts."""
@@ -1422,7 +1434,8 @@ Set approved=true ONLY if: exactly one human face is clearly visible and lightin
 Set approved=false and explain in reason if: no face, multiple faces, too dark, or face obscured."""
 
     try:
-        raw = _gemini_vision(b64, prompt)
+        # raw = _gemini_vision(b64, prompt)
+        raw = ai_vision_call(b64, prompt, timeout=20)
         # Clean any markdown that slips through
         raw = raw.replace("```json", "").replace("```", "").strip()
         if "{" in raw:
@@ -1567,7 +1580,8 @@ def analyze_snapshot(token):
     
     analysis_ok = True
     try:
-        raw    = _vision_analyze(b64, prompt)
+        # raw    = _vision_analyze(b64, prompt)
+        raw = ai_vision_call(b64, prompt, timeout=20)
         raw    = raw.replace("```json", "").replace("```", "").strip()
         if "{" in raw:
             raw = raw[raw.index("{"):raw.rindex("}") + 1]
@@ -1785,6 +1799,10 @@ def _openrouter_vision(b64_image: str, prompt: str) -> str:
     resp.raise_for_status()
     data = resp.json()
     return data["choices"][0]["message"]["content"].strip()
+
+
+
+
 def _vision_analyze(b64_image: str, prompt: str) -> str:
     """Try Gemini first, fall back to OpenRouter."""
     
@@ -1856,3 +1874,583 @@ def get_question_image(file_id):
 
 
 
+
+
+
+
+
+
+
+
+
+
+@exam_bp.route("/<exam_id>/summarize-video", methods=["POST"])
+@jwt_required()
+def summarize_exam_video(exam_id):
+    """
+    Extracts frames from the recorded video, analyses each with Gemini vision,
+    then synthesises a structured proctoring summary — no paid video quota needed.
+    """
+    identity = get_jwt_identity()
+
+    try:
+        exam = mongo.db.exams.find_one({"_id": ObjectId(exam_id)})
+    except InvalidId:
+        exam = mongo.db.exams.find_one({"exam_id": exam_id})
+    if not exam:
+        return jsonify(success=False, message="Exam not found"), 404
+    if exam.get("recruiter_id") != identity:
+        return jsonify(success=False, message="Access denied"), 403
+
+    file_id_str = (
+        exam.get("proctoring", {}).get("video_file_id")
+        or exam.get("video_file_id", "")
+    )
+    if not file_id_str:
+        return jsonify(success=False, message="No recording found for this exam"), 404
+
+    # ── Pull video from GridFS ────────────────────────────────────────────────
+    try:
+        fs          = gridfs.GridFS(mongo.db)
+        grid_out    = fs.get(ObjectId(file_id_str))
+        video_bytes = grid_out.read()
+    except Exception as e:
+        logger.error(f"[VideoSummary] GridFS read failed: {e}")
+        return jsonify(success=False, message="Could not read recording from storage"), 500
+
+    if len(video_bytes) < 5000:
+        return jsonify(success=False, message="Recording is too short or empty"), 400
+
+    # ── Extract frames with OpenCV ────────────────────────────────────────────
+    # import cv2
+    # import tempfile
+    # import os as _os
+
+    # try:
+    #     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
+    #         tmp.write(video_bytes)
+    #         tmp_path = tmp.name
+
+    #     cap         = cv2.VideoCapture(tmp_path)
+    #     fps         = cap.get(cv2.CAP_PROP_FPS) or 1
+    #     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    #     duration_sec = total_frames / fps if fps > 0 else 0
+    #     duration_min = max(1, int(duration_sec / 60))
+
+    #     # Sample 1 frame every 60 seconds, max 10 frames
+    #     sample_every_sec = max(30, duration_sec / 10)
+    #     sample_interval  = int(sample_every_sec * fps)
+
+    #     frames_b64 = []
+    #     frame_timestamps = []
+    #     frame_idx = 0
+
+    #     while True:
+    #         ret, frame = cap.read()
+    #         if not ret:
+    #             break
+    #         if frame_idx % sample_interval == 0:
+    #             # Resize to keep image small (saves tokens)
+    #             h, w = frame.shape[:2]
+    #             if w > 640:
+    #                 scale  = 640 / w
+    #                 frame  = cv2.resize(frame, (640, int(h * scale)))
+
+    #             _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    #             frames_b64.append(base64.b64encode(buf).decode())
+    #             ts_sec = int(frame_idx / fps)
+    #             frame_timestamps.append(f"{ts_sec // 60:02d}:{ts_sec % 60:02d}")
+
+    #             if len(frames_b64) >= 10:
+    #                 break
+    #         frame_idx += 1
+
+    #     cap.release()
+    #     _os.unlink(tmp_path)
+
+    # except Exception as e:
+    #     logger.error(f"[VideoSummary] Frame extraction failed: {e}")
+    #     return jsonify(success=False, message=f"Frame extraction failed: {str(e)}"), 500
+
+    # if not frames_b64:
+    #     return jsonify(success=False, message="Could not extract any frames from recording"), 400
+
+    # logger.info(f"[VideoSummary] Extracted {len(frames_b64)} frames from {duration_min}min video")
+# ── Extract frames with OpenCV ────────────────────────────────────────────
+    import cv2
+    import tempfile
+    import os as _os
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
+            tmp.write(video_bytes)
+            tmp_path = tmp.name
+
+        cap          = cv2.VideoCapture(tmp_path)
+        fps          = cap.get(cv2.CAP_PROP_FPS) or 25
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration_sec = total_frames / fps if fps > 0 else 0
+        duration_min = max(1, round(duration_sec / 60, 1))
+
+        logger.info(f"[VideoSummary] Video: {duration_sec:.1f}s, {total_frames} frames @ {fps:.1f}fps")
+
+        # ── Always extract exactly TARGET_FRAMES, spread evenly ──────────────
+        TARGET_FRAMES = 10
+
+        if total_frames == 0:
+            # OpenCV can't read frame count from webm — fall back to time-based seek
+            cap.release()
+            cap = cv2.VideoCapture(tmp_path)
+            # Read every Nth second instead
+            sample_seconds = [
+                int(i * max(duration_sec, 10) / TARGET_FRAMES)
+                for i in range(TARGET_FRAMES)
+            ]
+            frames_b64       = []
+            frame_timestamps = []
+            for sec in sample_seconds:
+                cap.set(cv2.CAP_PROP_POS_MSEC, sec * 1000)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                h, w = frame.shape[:2]
+                if w > 640:
+                    frame = cv2.resize(frame, (640, int(h * (640 / w))))
+                _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                frames_b64.append(base64.b64encode(buf).decode())
+                frame_timestamps.append(f"{sec // 60:02d}:{sec % 60:02d}")
+        else:
+            # Normal path: we know total frame count
+            # Pick TARGET_FRAMES indices spread evenly across the video
+            if total_frames <= TARGET_FRAMES:
+                sample_indices = list(range(total_frames))
+            else:
+                step = total_frames / TARGET_FRAMES
+                sample_indices = [int(i * step) for i in range(TARGET_FRAMES)]
+
+            frames_b64       = []
+            frame_timestamps = []
+            frame_idx        = 0
+            sample_set       = set(sample_indices)
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                if frame_idx in sample_set:
+                    h, w = frame.shape[:2]
+                    if w > 640:
+                        frame = cv2.resize(frame, (640, int(h * (640 / w))))
+                    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    frames_b64.append(base64.b64encode(buf).decode())
+                    ts_sec = int(frame_idx / fps) if fps > 0 else 0
+                    frame_timestamps.append(f"{ts_sec // 60:02d}:{ts_sec % 60:02d}")
+                frame_idx += 1
+                if len(frames_b64) >= TARGET_FRAMES:
+                    break
+
+        cap.release()
+        _os.unlink(tmp_path)
+
+        # If OpenCV got 0 frames (common with webm), try imageio as fallback
+        if not frames_b64:
+            raise ValueError("OpenCV extracted 0 frames — webm codec may not be supported")
+
+    except Exception as e:
+        logger.error(f"[VideoSummary] Frame extraction failed: {e}")
+        # ── Fallback: use the stored proctoring snapshots instead ────────────
+        # These were captured live during the exam — use them as "frames"
+        stored_snaps = exam.get("proctoring_snapshots", [])
+        if stored_snaps:
+            logger.info(f"[VideoSummary] Falling back to {len(stored_snaps)} stored snapshots")
+            # Sample up to 10 evenly
+            step = max(1, len(stored_snaps) // 10)
+            sampled = stored_snaps[::step][:10]
+            frames_b64       = []
+            frame_timestamps = []
+            for snap in sampled:
+                data_url = snap.get("dataUrl", "")
+                if data_url.startswith("data:image"):
+                    b64 = data_url.split(",", 1)[-1]
+                    frames_b64.append(b64)
+                    ts = snap.get("ts", "")
+                    try:
+                        dt  = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        sec = int((dt - datetime.fromisoformat(
+                            exam.get("started_at", dt.isoformat()).replace("Z", "+00:00")
+                        )).total_seconds())
+                        sec = max(0, sec)
+                    except Exception:
+                        sec = 0
+                    frame_timestamps.append(f"{sec // 60:02d}:{sec % 60:02d}")
+            duration_min = max(1, int(exam.get("time_limit_minutes", 60)))
+            if not frames_b64:
+                return jsonify(success=False, message=f"Frame extraction failed and no snapshots available: {str(e)}"), 500
+        else:
+            return jsonify(success=False, message=f"Frame extraction failed: {str(e)}"), 500
+
+    logger.info(f"[VideoSummary] Analysing {len(frames_b64)} frames from ~{duration_min}min video")
+    # ── Analyse each frame with vision AI ────────────────────────────────────
+    candidate_name   = exam.get("candidate_name", "the candidate")
+    job_title        = exam.get("job_title", "")
+    frame_analyses   = []
+    frame_prompt = """
+    You are an AI online exam proctoring analyzer.
+
+    Analyze the provided webcam video/frame carefully and detect ALL visible suspicious, abnormal, or policy-violating behavior.
+
+    Return ONLY valid minified JSON.
+    Do not return markdown.
+    Do not explain reasoning.
+    Do not add extra text.
+
+    Output schema:
+
+    {
+    "candidate_present": true,
+    "face_detected": true,
+    "face_count": 1,
+    "primary_face_confidence": 0.98,
+
+    "head_pose": "center",
+    "looking_direction": "center",
+    "looking_away": false,
+    "frequent_head_movement": false,
+    "eyes_closed": false,
+    "mouth_moving": false,
+    "speaking_suspected": false,
+
+    "phone_detected": false,
+    "secondary_device_detected": false,
+    "multiple_monitors_suspected": false,
+    "earphone_detected": false,
+
+    "book_detected": false,
+    "notes_detected": false,
+    "paper_detected": false,
+
+    "background_person_detected": false,
+    "multiple_faces_detected": false,
+
+    "face_partially_hidden": false,
+    "face_fully_hidden": false,
+    "camera_blocked": false,
+    "virtual_camera_suspected": false,
+
+    "lighting_issue": false,
+    "candidate_too_far": false,
+    "candidate_out_of_frame": false,
+
+    "suspicious_objects": [],
+    "suspicious_actions": [],
+
+    "risk_score": 0,
+    "risk_level": "low",
+
+    "observation": ""
+    }
+
+    Detection rules:
+
+    - Detect only VISIBLE evidence.
+    - Never assume cheating without visual indication.
+    - Ignore natural blinking and normal movement.
+    - Treat temporary movement naturally.
+    - Mark suspicious only if behavior appears intentional, repeated, abnormal, or policy-violating.
+    - If uncertain, use lower confidence and avoid escalation.
+    - Focus on factual observations only.
+
+    Risk level mapping:
+
+    low:
+    - normal posture
+    - centered face
+    - no suspicious objects
+    - no abnormal behavior
+
+    medium:
+    - looking away repeatedly
+    - mouth movement
+    - face partially hidden
+    - candidate far from camera
+    - poor lighting
+    - suspicious posture
+    - possible second screen attention
+
+    high:
+    - no visible face
+    - multiple people
+    - phone visible
+    - notes/books visible
+    - another electronic device
+    - candidate absent
+    - intentional camera blocking
+    - repeated hidden face
+    - obvious assistance from others
+
+    Risk score:
+    - integer between 0-100
+    - 0 = no suspicion
+    - 100 = severe confirmed violation
+
+    Important:
+    - Return strictly valid JSON.
+    - Do not include comments.
+    - Do not include markdown.
+    - Do not omit fields.
+    - suspicious_actions and suspicious_objects must always be arrays.
+    - observation must be one concise factual sentence.
+    """
+ 
+
+    # frame_prompt = """
+    # Analyze this online examination webcam frame and return ONLY valid JSON (no markdown, no explanation).
+
+    # {
+    # "face_detected": true,
+    # "face_count": 1,
+    # "candidate_present": true,
+    # "head_pose": "center",
+    # "looking_direction": "center",
+    # "looking_away": false,
+    # "eyes_closed": false,
+    # "mouth_moving": false,
+    # "phone_detected": false,
+    # "laptop_secondary_detected": false,
+    # "background_person": false,
+    # "notes_visible": false,
+    # "book_visible": false,
+    # "paper_visible": false,
+    # "earphone_detected": false,
+    # "cap_or_face_cover_detected": false,
+    # "face_partially_hidden": false,
+    # "multiple_screens_suspected": false,
+    # "lighting_issue": false,
+    # "camera_blocked": false,
+    # "candidate_distance": "normal",
+    # "candidate_activity": "sitting",
+    # "suspicion_score": 0,
+    # "flag": "ok",
+    # "observation": "<one concise sentence describing visible events>"
+    # }
+
+    # Rules:
+
+    # 1. Return only JSON.
+    # 2. suspicion_score range: 0–100.
+    # 3. flag values:
+    # - "ok"
+    # - "warning"
+    # - "alert"
+
+    # Set flag rules:
+
+    # alert:
+    # - no face visible
+    # - more than one person visible
+    # - phone detected
+    # - notes/book visible
+    # - camera intentionally blocked
+    # - candidate absent
+    # - repeated hidden face
+    # - another electronic device visible
+
+    # warning:
+    # - looking away
+    # - eyes closed for extended duration
+    # - mouth moving
+    # - face partially hidden
+    # - candidate too far from camera
+    # - unusual head movement
+    # - poor lighting
+    # - possible second screen suspicion
+
+    # ok:
+    # - single visible candidate
+    # - normal posture
+    # - no suspicious objects
+
+    # Additional behavior rules:
+
+    # - Do not assume cheating from a single frame.
+    # - Report only visible observations.
+    # - Avoid speculation.
+    # - If uncertain, reduce confidence and describe uncertainty in observation.
+    # - Treat temporary movement naturally.
+    # - Focus on observable facts only.
+
+    # Examples:
+
+    # Face not visible:
+    # flag="alert"
+
+    # Candidate looking left:
+    # flag="warning"
+
+    # Phone in hand:
+    # flag="alert"
+
+    # Two people visible:
+    # flag="alert"
+
+    # Normal frame:
+    # flag="ok"
+    # """
+
+
+
+    for i, (b64, ts) in enumerate(zip(frames_b64, frame_timestamps)):
+        try:
+            raw    = ai_vision_call(b64, frame_prompt, timeout=20)
+            raw    = raw.replace("```json", "").replace("```", "").strip()
+            if "{" in raw:
+                raw = raw[raw.index("{"):raw.rindex("}") + 1]
+            analysis = json.loads(raw)
+            analysis["timestamp"] = ts
+            frame_analyses.append(analysis)
+            logger.info(f"[VideoSummary] Frame {i+1}/{len(frames_b64)} at {ts}: {analysis.get('flag','?')}")
+        except Exception as e:
+            logger.warning(f"[VideoSummary] Frame {i+1} analysis failed: {e}")
+            frame_analyses.append({
+                "timestamp": ts, "flag": "ok",
+                "observation": "Frame could not be analysed"
+            })
+        # Small delay to avoid vision API rate limits
+        if i < len(frames_b64) - 1:
+            time.sleep(2)
+
+    # ── Synthesise summary from frame analyses ────────────────────────────────
+    alert_frames   = [f for f in frame_analyses if f.get("flag") == "alert"]
+    warning_frames = [f for f in frame_analyses if f.get("flag") == "warning"]
+    ok_frames      = [f for f in frame_analyses if f.get("flag") == "ok"]
+
+    # Aggregate detected conditions across all frames
+    detected = {
+        "face_visible_throughout":    all(f.get("face_detected", True) and f.get("candidate_present", True) for f in frame_analyses),
+        "tab_switching_detected":     False,  # can't detect from frames alone
+        "phone_detected":             any(f.get("phone_detected", False) for f in frame_analyses),
+        "background_person_detected": any(f.get("background_person", False) for f in frame_analyses),
+        "notes_or_materials_detected":any(f.get("notes_visible", False) for f in frame_analyses),
+        "voice_activity_detected":    any(f.get("mouth_moving", False) for f in frame_analyses),
+        "candidate_left_frame":       any(not f.get("candidate_present", True) for f in frame_analyses),
+    }
+
+    # Build observations list from flagged frames
+    observations = []
+    for f in frame_analyses:
+        if f.get("flag") in ("alert", "warning"):
+            observations.append({
+                "timestamp":   f.get("timestamp", "??:??"),
+                "severity":    f.get("flag"),
+                "description": f.get("observation", "Suspicious activity detected"),
+            })
+        elif f.get("flag") == "ok" and len(ok_frames) > 3 and f == ok_frames[0]:
+            # Add one positive observation for clean stretches
+            observations.append({
+                "timestamp":   f.get("timestamp", "00:00"),
+                "severity":    "info",
+                "description": "Candidate present and attentive, no issues detected.",
+            })
+
+    # Calculate integrity score
+    alert_penalty   = len(alert_frames)   * 15
+    warning_penalty = len(warning_frames) * 5
+    integrity_score = max(0, min(100, 100 - alert_penalty - warning_penalty))
+
+    # Determine verdict
+    if integrity_score >= 90:
+        verdict         = "Clean"
+        recommendation  = "No action needed"
+    elif integrity_score >= 75:
+        verdict         = "Minor concerns"
+        recommendation  = "Minor review suggested"
+    elif integrity_score >= 50:
+        verdict         = "Moderate concern — review recommended"
+        recommendation  = "Review recording"
+    else:
+        verdict         = "Serious violations detected"
+        recommendation  = "Disqualify — integrity breach"
+
+    # Build narrative using Groq/Gemini text model
+    observations_text = "\n".join(
+        f"- {o['timestamp']} [{o['severity'].upper()}]: {o['description']}"
+        for o in observations
+    ) or "No issues detected in sampled frames."
+
+    conditions_text = "\n".join(
+        f"- {k.replace('_', ' ')}: {'YES' if v else 'no'}"
+        for k, v in detected.items()
+    )
+
+    narrative_prompt = f"""You are writing a proctoring report for a recruiter.
+
+Candidate: {candidate_name}
+Role: {job_title}
+Exam duration: ~{duration_min} minutes
+Frames analysed: {len(frame_analyses)} sampled frames
+Integrity score: {integrity_score}/100
+Verdict: {verdict}
+
+Detected conditions:
+{conditions_text}
+
+Events observed:
+{observations_text}
+
+Write a 10-15 sentence plain-English narrative summary for the recruiter. Be factual, specific, and professional.
+Return ONLY the narrative text, no JSON, no bullet points."""
+
+    try:
+        narrative = _call_grading_model(narrative_prompt).strip()
+        # Strip any accidental JSON or quotes
+        narrative = narrative.strip('"').strip("'")
+    except Exception as e:
+        logger.warning(f"[VideoSummary] Narrative generation failed: {e}")
+        narrative = (
+            f"Analysis based on {len(frame_analyses)} sampled frames from the {duration_min}-minute exam. "
+            f"Detected {len(alert_frames)} alert(s) and {len(warning_frames)} warning(s). "
+            f"Integrity score: {integrity_score}/100. Verdict: {verdict}."
+        )
+
+    summary = {
+        "narrative":                narrative,
+        "integrity_verdict":        verdict,
+        "integrity_score":          integrity_score,
+        "duration_analysed_minutes": duration_min,
+        "frames_analysed":          len(frame_analyses),
+        "observations":             observations,
+        "detected_conditions":      detected,
+        "recruiter_recommendation": recommendation,
+        "generated_at":             datetime.utcnow().isoformat(),
+        "method":                   "frame_sampling",
+    }
+
+    # Persist
+    mongo.db.exams.update_one(
+        {"_id": exam["_id"]},
+        {"$set": {"video_summary": summary}}
+    )
+
+    logger.info(f"[VideoSummary] Done — integrity:{integrity_score}% verdict:{verdict}")
+    return jsonify(success=True, data=summary), 200
+
+
+@exam_bp.route("/<exam_id>/video-summary", methods=["GET"])
+@jwt_required()
+def get_video_summary(exam_id):
+    """Return cached video summary without re-running Gemini."""
+    identity = get_jwt_identity()
+    try:
+        exam = mongo.db.exams.find_one({"_id": ObjectId(exam_id)})
+    except InvalidId:
+        exam = mongo.db.exams.find_one({"exam_id": exam_id})
+    if not exam:
+        return jsonify(success=False, message="Not found"), 404
+    if exam.get("recruiter_id") != identity:
+        return jsonify(success=False, message="Access denied"), 403
+
+    summary = exam.get("video_summary")
+    if not summary:
+        return jsonify(success=False, message="No summary generated yet"), 404
+
+    return jsonify(success=True, data=summary), 200

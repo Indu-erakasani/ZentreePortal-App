@@ -63,6 +63,8 @@ def tracking_schema(
 
 
 def serialize_tracking(t: dict) -> dict:
+    if t is None:     
+        return {}
     doc = dict(t)
     doc["_id"] = str(doc.get("_id", ""))
     for field in ("stage_date", "next_date", "offer_date", "joining_date", "created_at", "updated_at"):

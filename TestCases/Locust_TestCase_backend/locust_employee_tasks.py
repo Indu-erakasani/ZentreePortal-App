@@ -153,7 +153,8 @@ class EmployeeTasks(TaskSet):
             return
 
         # status = random.choice(["Active", "On Bench", "Inactive"])
-        status = random.choice(["active", "on_bench", "inactive"])
+        status = random.choice(["Active", "On Bench", "On Notice"])
+        # status = random.choice(["active", "on_bench", "inactive"])
         with self.client.put(
             f"/api/employees/{self.employee_id}",
             json={"status": status},

@@ -9,7 +9,7 @@ from extensions import mongo
 import base64 as b64mod, gridfs
 from bson import ObjectId
 import logging
-
+from ai_service import ai_call
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -22,16 +22,16 @@ question_bp = Blueprint("questions", __name__)
 
 #  HELPERS
 
-def _extract_gemini_text(response_json: dict) -> str:
-    """Extract final answer text from Gemini response (thinking-model safe)."""
-    try:
-        parts = response_json["candidates"][0]["content"]["parts"]
-        text_parts = [p["text"] for p in parts if p.get("text", "").strip()]
-        if not text_parts:
-            raise ValueError("No text content in Gemini response")
-        return text_parts[-1]
-    except (KeyError, IndexError) as e:
-        raise ValueError(f"Unexpected Gemini response structure: {e}") from e
+# def _extract_gemini_text(response_json: dict) -> str:
+#     """Extract final answer text from Gemini response (thinking-model safe)."""
+#     try:
+#         parts = response_json["candidates"][0]["content"]["parts"]
+#         text_parts = [p["text"] for p in parts if p.get("text", "").strip()]
+#         if not text_parts:
+#             raise ValueError("No text content in Gemini response")
+#         return text_parts[-1]
+#     except (KeyError, IndexError) as e:
+#         raise ValueError(f"Unexpected Gemini response structure: {e}") from e
 
 
 def _experience_level(exp_min: int, exp_max: int) -> tuple:
@@ -270,14 +270,16 @@ Rules:
 
     # ── 6. Call Gemini ────────────────────────────────────────────────────────
     try:
-        resp = http.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
-            headers={"Content-Type": "application/json"},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=90,
-        )
-        resp.raise_for_status()
-        raw_text  = _extract_gemini_text(resp.json())
+        # resp = http.post(
+        #     f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
+        #     headers={"Content-Type": "application/json"},
+        #     json={"contents": [{"parts": [{"text": prompt}]}]},
+        #     timeout=90,
+        # )
+        # resp.raise_for_status()
+        # raw_text  = _extract_gemini_text(resp.json())
+        
+        raw_text  = ai_call(prompt, timeout=90)
         generated = json.loads(raw_text.replace("```json", "").replace("```", "").strip())
 
     except json.JSONDecodeError:

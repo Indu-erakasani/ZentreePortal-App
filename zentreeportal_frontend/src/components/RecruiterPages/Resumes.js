@@ -770,6 +770,13 @@ function ExamMonitoringPanel({ candidateId, candidateName, examMap }) {
   </Box>
 )}
 
+{procData?.summary?.has_recording && (
+  <VideoSummaryPanel
+    examMongoId={selected?._id}   
+    hasRecording={true}
+  />
+)}
+
 {!procData?.summary?.has_recording && selected?.status === "Completed" && (
   <Box mb={1.5} p={1.2} bgcolor="#1a1a2e" borderRadius={2} border="1px solid #3d3d5c"
     display="flex" alignItems="center" gap={1}>
@@ -900,6 +907,242 @@ function ExamMonitoringPanel({ candidateId, candidateName, examMap }) {
     </Box>
   );
 }
+
+
+
+
+
+// ── Video Summary Panel ────────────────────────────────────────────────────
+function VideoSummaryPanel({ examId, examMongoId, hasRecording }) {
+  const BASE = process.env.REACT_APP_API_BASE_URL;
+  const getHeaders = () => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
+  });
+
+  const [summary,     setSummary]     = useState(null);
+  const [loading,     setLoading]     = useState(false);
+  const [generating,  setGenerating]  = useState(false);
+  const [error,       setError]       = useState("");
+
+  // Load cached summary on mount
+  useEffect(() => {
+    if (!examMongoId) return;
+    setLoading(true);
+    fetch(`${BASE}/exams/${examMongoId}/video-summary`, { headers: getHeaders() })
+      .then(r => r.json())
+      .then(res => { if (res.success) setSummary(res.data); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [examMongoId]);
+
+  const generateSummary = async () => {
+    setGenerating(true); setError("");
+    try {
+      const res = await fetch(
+        `${BASE}/exams/${examMongoId}/summarize-video`,
+        { method: "POST", headers: getHeaders() }
+      ).then(r => r.json());
+      if (res.success) setSummary(res.data);
+      else setError(res.message || "Analysis failed");
+    } catch {
+      setError("Network error");
+    } finally { setGenerating(false); }
+  };
+
+  const severityStyle = {
+    alert:   { bg: "#fce4ec", color: "#c62828", icon: "🚨" },
+    warning: { bg: "#fff8e1", color: "#e65100", icon: "⚠️" },
+    info:    { bg: "#f5f5f5", color: "#555",    icon: "ℹ️" },
+  };
+
+  const verdictStyle = (v = "") => {
+    if (v.includes("Clean"))    return { bg: "#e8f5e9", color: "#2e7d32" };
+    if (v.includes("Serious"))  return { bg: "#fce4ec", color: "#c62828" };
+    if (v.includes("Moderate")) return { bg: "#fff8e1", color: "#e65100" };
+    return { bg: "#e3f2fd", color: "#0277bd" };
+  };
+
+  if (!hasRecording) return null;
+
+  return (
+    <Box mb={2} p={1.5} bgcolor="#1a1a2e" borderRadius={2}
+      border="1px solid #3d3d5c">
+
+      {/* Header */}
+      <Box display="flex" alignItems="center" gap={1} mb={1.5}>
+        <Typography fontSize={11} fontWeight={700} color="#82aaff"
+          textTransform="uppercase" letterSpacing={0.5} flex={1}>
+          🤖 AI Video Summary
+        </Typography>
+        {summary && (
+          <Typography fontSize={9} color="#6272a4">
+            Generated {new Date(summary.generated_at).toLocaleString("en-IN")}
+          </Typography>
+        )}
+        <Button size="small" onClick={generateSummary} disabled={generating}
+          startIcon={generating ? <CircularProgress size={12} color="inherit" /> : null}
+          sx={{
+            fontSize: 10, textTransform: "none", ml: 1,
+            bgcolor: generating ? "#2d2d3f" : "#1565c0",
+            color: "#fff", fontWeight: 700,
+            "&:hover": { bgcolor: "#0d47a1" },
+          }}>
+          {generating ? "Analysing…" : summary ? "Regenerate" : "Generate Summary"}
+        </Button>
+      </Box>
+
+      {/* Loading state */}
+      {generating && (
+        <Box px={1} py={2} textAlign="center">
+          <CircularProgress size={28} sx={{ color: "#82aaff", mb: 1 }} />
+          <Typography fontSize={11} color="#a9b1d6">
+            Sending recording 
+          </Typography>
+          <Typography fontSize={10} color="#6272a4" mt={0.5}>
+            This takes 15–30 seconds depending on exam length.
+          </Typography>
+        </Box>
+      )}
+
+      {error && (
+        <Box p={1} bgcolor="#2c0a0a" borderRadius={1.5} mb={1}>
+          <Typography fontSize={11} color="#f48fb1">❌ {error}</Typography>
+        </Box>
+      )}
+
+      {/* No summary yet */}
+      {!generating && !summary && !error && (
+        <Typography fontSize={12} color="#6272a4" textAlign="center" py={2}>
+          Click "Generate Summary" to analyse the full recording with AI.
+        </Typography>
+      )}
+
+      {/* Summary content */}
+      {summary && !generating && (
+        <Box>
+          {/* Integrity score + verdict */}
+          <Box display="flex" gap={1} flexWrap="wrap" mb={1.5}>
+            <Box sx={{
+              px: 1.2, py: 0.8, borderRadius: 1.5, textAlign: "center",
+              bgcolor: summary.integrity_score >= 80 ? "#1b5e2040" : "#c6282840",
+              border: `1px solid ${summary.integrity_score >= 80 ? "#2e7d32" : "#c62828"}60`,
+            }}>
+              <Typography fontSize={9} color="#a9b1d6">Integrity</Typography>
+              <Typography fontSize={18} fontWeight={700}
+                color={summary.integrity_score >= 80 ? "#69f0ae"
+                     : summary.integrity_score >= 60 ? "#ffb74d" : "#ef9a9a"}>
+                {summary.integrity_score}%
+              </Typography>
+            </Box>
+
+            <Box sx={{
+              px: 1.5, py: 0.8, borderRadius: 1.5,
+              bgcolor: verdictStyle(summary.integrity_verdict).bg + "20",
+              border: `1px solid ${verdictStyle(summary.integrity_verdict).color}40`,
+              display: "flex", alignItems: "center",
+            }}>
+              <Typography fontSize={11} fontWeight={700}
+                color={verdictStyle(summary.integrity_verdict).color}>
+                {summary.integrity_verdict}
+              </Typography>
+            </Box>
+
+            {summary.recruiter_recommendation && (
+              <Box sx={{
+                px: 1.5, py: 0.8, borderRadius: 1.5, ml: "auto",
+                bgcolor: "#2d2d3f", border: "1px solid #414868",
+                display: "flex", alignItems: "center",
+              }}>
+                <Typography fontSize={10} color="#cdd6f4">
+                  📋 {summary.recruiter_recommendation}
+                </Typography>
+              </Box>
+            )}
+          </Box>
+
+          {/* Narrative */}
+          <Box p={1.2} bgcolor="#13131f" borderRadius={1.5} mb={1.5}
+            sx={{ borderLeft: "3px solid #414868" }}>
+            <Typography fontSize={11} color="#a9b1d6" lineHeight={1.7}>
+              {summary.narrative}
+            </Typography>
+          </Box>
+
+          {/* Detected conditions */}
+          {summary.detected_conditions && (
+            <Box mb={1.5}>
+              <Typography fontSize={9} color="#6272a4" fontWeight={700}
+                textTransform="uppercase" letterSpacing={0.5} mb={0.8}>
+                Detected conditions
+              </Typography>
+              <Box display="flex" flexWrap="wrap" gap={0.5}>
+                {Object.entries(summary.detected_conditions).map(([key, val]) => {
+                  const label = key.replace(/_/g, " ");
+                  const isGoodTrue = ["face_visible_throughout"].includes(key);
+                  const isBadTrue  = !isGoodTrue;
+                  const color = val
+                    ? (isGoodTrue ? "#69f0ae" : "#ef9a9a")
+                    : "#6272a4";
+                  const bg = val
+                    ? (isGoodTrue ? "#1b5e2040" : "#c6282830")
+                    : "#2d2d3f";
+                  return (
+                    <Box key={key} sx={{
+                      px: 1, py: 0.3, borderRadius: 99, fontSize: 9,
+                      bgcolor: bg, color, border: `1px solid ${color}40`,
+                      fontWeight: 600,
+                    }}>
+                      {val ? "✓" : "✗"} {label}
+                    </Box>
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
+
+          {/* Observations timeline */}
+          {summary.observations?.length > 0 && (
+            <Box>
+              <Typography fontSize={9} color="#6272a4" fontWeight={700}
+                textTransform="uppercase" letterSpacing={0.5} mb={0.8}>
+                Observations timeline
+              </Typography>
+              <Box display="flex" flexDirection="column" gap={0.6}>
+                {summary.observations.map((obs, i) => {
+                  const s = severityStyle[obs.severity] || severityStyle.info;
+                  return (
+                    <Box key={i} display="flex" gap={1} p={0.8} borderRadius={1}
+                      sx={{ bgcolor: s.bg + "15", border: `1px solid ${s.color}30` }}>
+                      <Typography fontSize={10} flexShrink={0}>{s.icon}</Typography>
+                      <Box flex={1}>
+                        <Box display="flex" gap={1} alignItems="baseline">
+                          <Typography fontSize={10} fontWeight={700}
+                            color={s.color} fontFamily="monospace">
+                            {obs.timestamp}
+                          </Typography>
+                          <Typography fontSize={10} color="#a9b1d6">
+                            {obs.description}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Box>
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+
+
+
+
+
 
 
 function ScheduleInterviewCard({ tracking, candidate, onScheduled }) {
@@ -2616,6 +2859,7 @@ const handleTrackingIvSave = async (e) => {
       candidateName={selected.name}
       examMap={examMap}
     />
+
   </DialogContent>
 )}
 
@@ -3275,13 +3519,6 @@ const handleTrackingIvSave = async (e) => {
     </Button>
   </DialogActions>
 </Dialog>
-
-
-
-
-
-
-
 
 
 

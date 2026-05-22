@@ -8,7 +8,7 @@ from datetime import datetime
 import requests as http
 from extensions import mongo
 import logging
-
+from ai_service import ai_call
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -18,11 +18,11 @@ logger = logging.getLogger(__name__)
 
 score_bp = Blueprint("score", __name__)
 
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta"
-    "/models/gemini-2.5-flash:generateContent"
-)
+# GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+# GEMINI_URL = (
+#     "https://generativelanguage.googleapis.com/v1beta"
+#     "/models/gemini-2.5-flash:generateContent"
+# )
 
 
 #  HELPERS
@@ -311,58 +311,83 @@ Scoring rules:
 """.strip()
 
 
-def _gemini_score(resume: dict, job: dict, max_retries: int = 2) -> dict | None:
-    """
-    Call Gemini and parse the result.
-    Returns parsed dict on success, None on any failure (triggers fallback).
-    """
-    if not GEMINI_KEY:
+# def _gemini_score(resume: dict, job: dict, max_retries: int = 2) -> dict | None:
+#     """
+#     Call Gemini and parse the result.
+#     Returns parsed dict on success, None on any failure (triggers fallback).
+#     """
+#     if not GEMINI_KEY:
+#         return None
+
+#     prompt = _build_prompt(resume, job)
+
+#     for attempt in range(max_retries + 1):
+#         try:
+#             resp = http.post(
+#                 f"{GEMINI_URL}?key={GEMINI_KEY}",
+#                 headers={"Content-Type": "application/json"},
+#                 json={"contents": [{"parts": [{"text": prompt}]}]},
+#                 timeout=45,
+#             )
+
+#             # Retryable errors: 503 Service Unavailable, 429 Rate Limit
+#             if resp.status_code in (503, 429, 502):
+#                 if attempt < max_retries:
+#                     wait = (attempt + 1) * 3   # 3s, 6s
+#                     logger.info(f"[SCORE] Gemini {resp.status_code} — retry {attempt+1}/{max_retries} in {wait}s")
+#                     time.sleep(wait)
+#                     continue
+#                 else:
+#                     logger.info(f"[SCORE] Gemini {resp.status_code} after {max_retries} retries — using fallback")
+#                     return None
+
+#             if not resp.ok:
+#                 logger.error(f"[SCORE] Gemini error {resp.status_code}: {resp.text[:200]}")
+#                 return None
+
+#             raw_text = _extract_gemini_text(resp.json())
+#             result   = json.loads(
+#                 raw_text.replace("```json", "").replace("```", "").strip()
+#             )
+#             result["scored_by"] = "gemini"
+#             return result
+
+#         except json.JSONDecodeError as e:
+#             logger.warning(f"[SCORE] Gemini returned non-JSON: {e}")
+#             return None
+#         except Exception as e:
+#             logger.error(f"[SCORE] Gemini attempt {attempt+1} failed: {e}")
+#             if attempt < max_retries:
+#                 time.sleep((attempt + 1) * 2)
+#                 continue
+#             return None
+
+#     return None
+
+
+def _gemini_score(resume: dict, job: dict) -> dict | None:
+    prompt = _build_prompt(resume, job)          # your existing _build_prompt stays
+    try:
+        raw_text = ai_call(prompt, timeout=45)   # fallback chain handles 429
+        result   = json.loads(
+            raw_text.replace("```json", "").replace("```", "").strip()
+        )
+        result["scored_by"] = "gemini"
+        return result
+    except json.JSONDecodeError as e:
+        logger.warning("[SCORE] AI returned non-JSON: %s", e)
+        return None
+    except Exception as e:
+        logger.error("[SCORE] AI scoring failed: %s", e)
         return None
 
-    prompt = _build_prompt(resume, job)
 
-    for attempt in range(max_retries + 1):
-        try:
-            resp = http.post(
-                f"{GEMINI_URL}?key={GEMINI_KEY}",
-                headers={"Content-Type": "application/json"},
-                json={"contents": [{"parts": [{"text": prompt}]}]},
-                timeout=45,
-            )
 
-            # Retryable errors: 503 Service Unavailable, 429 Rate Limit
-            if resp.status_code in (503, 429, 502):
-                if attempt < max_retries:
-                    wait = (attempt + 1) * 3   # 3s, 6s
-                    logger.info(f"[SCORE] Gemini {resp.status_code} — retry {attempt+1}/{max_retries} in {wait}s")
-                    time.sleep(wait)
-                    continue
-                else:
-                    logger.info(f"[SCORE] Gemini {resp.status_code} after {max_retries} retries — using fallback")
-                    return None
 
-            if not resp.ok:
-                logger.error(f"[SCORE] Gemini error {resp.status_code}: {resp.text[:200]}")
-                return None
 
-            raw_text = _extract_gemini_text(resp.json())
-            result   = json.loads(
-                raw_text.replace("```json", "").replace("```", "").strip()
-            )
-            result["scored_by"] = "gemini"
-            return result
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"[SCORE] Gemini returned non-JSON: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"[SCORE] Gemini attempt {attempt+1} failed: {e}")
-            if attempt < max_retries:
-                time.sleep((attempt + 1) * 2)
-                continue
-            return None
 
-    return None
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

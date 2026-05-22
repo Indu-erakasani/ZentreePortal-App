@@ -98,10 +98,19 @@ class DashboardTasks(TaskSet):
       - admin/manager dashboard loaded more often than recruiter view.
     """
 
+    # def on_start(self):
+    #     # self.token = self.user.token
+    #     token = self.user.resident_session.get("headers", {}).get("Authorization", "")
+    #     self.token = token.replace("Bearer ", "") if token else ""\
     def on_start(self):
-        # self.token = self.user.token
-        token = self.user.resident_session.get("headers", {}).get("Authorization", "")
-        self.token = token.replace("Bearer ", "") if token else ""
+        # Works for both RecruitmentPortalUser and standalone users
+        if hasattr(self.user, 'resident_session') and self.user.resident_session:
+            token = self.user.resident_session.get("headers", {}).get("Authorization", "")
+            self.token = token.replace("Bearer ", "") if token else ""
+        elif hasattr(self.user, 'token'):
+            self.token = self.user.token or ""
+        else:
+            self.token = ""
 
     def _hdr(self):
         return {"Authorization": f"Bearer {self.token}"}
@@ -189,42 +198,59 @@ class ScoreReadTasks(TaskSet):
     #         items = j.json().get("data", [])
     #         if items:
     #             self.jid = items[0].get("_id") or items[0].get("job_id")
+    
+    
+    
     def on_start(self):
         token = self.user.resident_session.get("headers", {}).get("Authorization", "")
         self.token = token.replace("Bearer ", "") if token else ""
-
         self.rid = None
         self.jid = None
 
         r = self.client.get("/api/resumes/?page=1&per_page=1",
                             headers=self._hdr(), name="[setup] fetch resume id")
         if r.status_code == 200:
-            body = r.json()
-            logging.info(f"[SCORE SETUP] resume response keys: {list(body.keys())}")
-            # Try all common response structures:
-            items = body.get("data") or body.get("resumes") or body.get("results") or []
+            items = r.json().get("data") or []
             if items:
                 self.rid = items[0].get("resume_id") or items[0].get("_id")
-                logging.info(f"[SCORE SETUP] Got rid: {self.rid}")
 
         j = self.client.get("/api/jobs/?page=1&per_page=1",
                             headers=self._hdr(), name="[setup] fetch job id")
         if j.status_code == 200:
-            body = j.json()
-            logging.info(f"[SCORE SETUP] job response keys: {list(body.keys())}")
-            items = body.get("data") or body.get("jobs") or body.get("results") or []
+            items = j.json().get("data") or []
             if items:
                 self.jid = items[0].get("job_id") or items[0].get("_id")
-                logging.info(f"[SCORE SETUP] Got jid: {self.jid}")
-            
+
+        # ── Seed a score so GET has something to find ──────────────────────────
+        if self.rid and self.jid:
+            self.client.post(
+                "/api/score/candidate",
+                json={"resume_id": self.rid, "job_id": self.jid},
+                headers=self._hdr(),
+                name="[setup] seed score",
+            )
+                
             
             
     def _hdr(self):
         return {"Authorization": f"Bearer {self.token}"}
 
+    # @task(4)
+    # def get_score_for_pair(self):
+    #     if not self.rid or not self.jid: 
+    #         return
+    #     with self.client.get(
+    #         f"/api/score/candidate?resume_id={self.rid}&job_id={self.jid}",
+    #         headers=self._hdr(),
+    #         name="/api/score/candidate [GET]",
+    #         catch_response=True,
+    #     ) as resp:
+    #         # 200 (score exists) and 404 (not yet scored) are both valid
+    #         if resp.status_code not in (200, 404):
+    #             resp.failure(f"Unexpected {resp.status_code}")
     @task(4)
     def get_score_for_pair(self):
-        if not self.rid or not self.jid: 
+        if not self.rid or not self.jid:
             return
         with self.client.get(
             f"/api/score/candidate?resume_id={self.rid}&job_id={self.jid}",
@@ -232,8 +258,12 @@ class ScoreReadTasks(TaskSet):
             name="/api/score/candidate [GET]",
             catch_response=True,
         ) as resp:
-            # 200 (score exists) and 404 (not yet scored) are both valid
-            if resp.status_code not in (200, 404):
+            if resp.status_code == 200:
+                if not resp.json().get("success"):
+                    resp.failure("success=False")
+            elif resp.status_code == 404:
+                resp.success()   # score not yet computed — valid state
+            else:
                 resp.failure(f"Unexpected {resp.status_code}")
 
     @task(3)
@@ -300,11 +330,29 @@ class ScoreWriteTasks(TaskSet):
     """
 
     def on_start(self):
-        # self.token = self.user.token
-        token = self.user.resident_session.get("headers", {}).get("Authorization", "")
+        token = self.user.resident_session.get("headers", {}).get("Authorization", "") \
+                if hasattr(self.user, 'resident_session') and self.user.resident_session \
+                else getattr(self.user, 'token', '')
         self.token = token.replace("Bearer ", "") if token else ""
-        self.rid   = SEED_RESUME_ID
-        self.jid   = SEED_JOB_ID
+
+        self.rid = None
+        self.jid = None
+
+        r = self.client.get("/api/resumes/?page=1&per_page=1",
+                            headers=self._hdr(), name="[setup] fetch resume id")
+        if r.status_code == 200:
+            body = r.json()
+            items = body.get("data") or body.get("resumes") or body.get("results") or []
+            if items:
+                self.rid = items[0].get("resume_id") or items[0].get("_id")
+
+        j = self.client.get("/api/jobs/?page=1&per_page=1",
+                            headers=self._hdr(), name="[setup] fetch job id")
+        if j.status_code == 200:
+            body = j.json()
+            items = body.get("data") or body.get("jobs") or body.get("results") or []
+            if items:
+                self.jid = items[0].get("job_id") or items[0].get("_id")
 
     def _hdr(self):
         return {"Authorization": f"Bearer {self.token}"}

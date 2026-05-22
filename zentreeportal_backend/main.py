@@ -44,6 +44,21 @@ app.config.from_object(Config)
 mongo.init_app(app)
 jwt.init_app(app)
 
+@jwt.unauthorized_loader
+def missing_token(err):
+    return {"success": False, "message": "Missing or invalid token"}, 401
+
+@jwt.invalid_token_loader  
+def invalid_token(err):
+    return {"success": False, "message": "Token is invalid"}, 401
+
+@jwt.expired_token_loader
+def expired_token(header, data):
+    return {"success": False, "message": "Token has expired"}, 401
+
+
+
+
 # ── CORS — allow all common React dev ports ───────────────────────────────────
 CORS(app, resources={
     r"/api/*": {

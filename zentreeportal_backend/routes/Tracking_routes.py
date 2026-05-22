@@ -1009,7 +1009,20 @@ def schedule_interview(tid):
             schedule_id      = schedule_id,
         )
 
+    # updated = mongo.db.candidate_tracking.find_one({"_id": doc["_id"]})
+    # return jsonify(
+    #     success                = True,
+    #     message                = "Interview scheduled successfully",
+    #     schedule_id            = schedule_id,
+    #     meeting_link           = meeting_link,
+    #     calendar_link          = calendar_link,
+    #     candidate_email_sent   = candidate_email_sent,
+    #     interviewer_email_sent = interviewer_email_sent,
+    #     data                   = serialize_tracking(updated),
+    # ), 201
     updated = mongo.db.candidate_tracking.find_one({"_id": doc["_id"]})
+    if not updated:
+        return jsonify(success=False, message="Tracking record not found after update"), 404
     return jsonify(
         success                = True,
         message                = "Interview scheduled successfully",

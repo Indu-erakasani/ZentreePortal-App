@@ -11,6 +11,8 @@ from extensions import mongo
 from models.Resume_model import resume_schema, serialize_resume, SCREENING_STATUSES, SOURCES
 import re
 import logging
+from ai_service import  ai_parse_pdf
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -150,22 +152,25 @@ def raw_upload():
             'return "" for missing text, 0 for missing numbers.'
         )
         try:
-            resp = http.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
-                headers={"Content-Type": "application/json"},
-                json={"contents": [{"parts": [
-                    {"inline_data": {"mime_type": "application/pdf", "data": file_b64}},
-                    {"text": prompt},
-                ]}]},
-                timeout=60,
-            )
-            resp.raise_for_status()
-            # ── Use helper to handle thinking model multi-part response ────────
-            raw_text     = _extract_gemini_text(resp.json())
+            # resp = http.post(
+            #     f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
+            #     headers={"Content-Type": "application/json"},
+            #     json={"contents": [{"parts": [
+            #         {"inline_data": {"mime_type": "application/pdf", "data": file_b64}},
+            #         {"text": prompt},
+            #     ]}]},
+            #     timeout=60,
+            # )
+            # resp.raise_for_status()
+            # # ── Use helper to handle thinking model multi-part response ────────
+            # raw_text     = _extract_gemini_text(resp.json())
+            
+            raw_text     = ai_parse_pdf(file_b64, prompt, timeout=60)
             parsed_data  = json.loads(raw_text.replace("```json", "").replace("```", "").strip())
             parse_status = "parsed"
         except Exception:
             parse_status = "failed"
+            parsed_data  = {}
 
     doc = {
         "raw_id":          raw_id,
@@ -488,18 +493,20 @@ def parse_pdf():
     )
 
     try:
-        resp = http.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
-            headers={"Content-Type": "application/json"},
-            json={"contents": [{"parts": [
-                {"inline_data": {"mime_type": "application/pdf", "data": file_b64}},
-                {"text": prompt},
-            ]}]},
-            timeout=60,
-        )
-        resp.raise_for_status()
-        # ── Use helper to handle thinking model multi-part response ────────────
-        raw    = _extract_gemini_text(resp.json())
+        # resp = http.post(
+        #     f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
+        #     headers={"Content-Type": "application/json"},
+        #     json={"contents": [{"parts": [
+        #         {"inline_data": {"mime_type": "application/pdf", "data": file_b64}},
+        #         {"text": prompt},
+        #     ]}]},
+        #     timeout=60,
+        # )
+        # resp.raise_for_status()
+        # # ── Use helper to handle thinking model multi-part response ────────────
+        # raw    = _extract_gemini_text(resp.json())
+        
+        raw    = ai_parse_pdf(file_b64, prompt, timeout=60)
         parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
         return jsonify(success=True, data=parsed, file_id=file_id), 200
 

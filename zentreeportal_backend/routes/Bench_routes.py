@@ -11,7 +11,7 @@ from models.Benchpeople_model import (
     bench_schema, serialize_bench, BENCH_STATUSES, EMPLOYMENT_TYPES,
 )
 from routes.Resume_routes import _extract_gemini_text
-
+from ai_service import ai_parse_pdf
 
 bench_bp = Blueprint("bench", __name__)
 
@@ -70,18 +70,19 @@ def parse_pdf():
         'notice_period: one of "Immediate","15 days","30 days","60 days","90 days"'
     )
     try:
-        resp = http.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
-            headers={"Content-Type": "application/json"},
-            json={"contents": [{"parts": [
-                {"inline_data": {"mime_type": "application/pdf", "data": file_b64}},
-                {"text": prompt},
-            ]}]},
-            timeout=60,
-        )
-        resp.raise_for_status()
-        # raw    = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-        raw    = _extract_gemini_text(resp.json())
+        # resp = http.post(
+        #     f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
+        #     headers={"Content-Type": "application/json"},
+        #     json={"contents": [{"parts": [
+        #         {"inline_data": {"mime_type": "application/pdf", "data": file_b64}},
+        #         {"text": prompt},
+        #     ]}]},
+        #     timeout=60,
+        # )
+        # resp.raise_for_status()
+        # # raw    = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        # raw    = _extract_gemini_text(resp.json())
+        raw    = ai_parse_pdf(file_b64, prompt, timeout=60)
         parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
         return jsonify(success=True, data=parsed, file_id=file_id), 200
     except json.JSONDecodeError:
