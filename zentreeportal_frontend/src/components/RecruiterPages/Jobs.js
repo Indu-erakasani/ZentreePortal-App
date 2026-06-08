@@ -242,61 +242,804 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
 // ─────────────────────────────────────────────────────────────────────────────
 //  TAB 1 — JD Details (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
-function JDDetailsTab() {
-    const [jds, setJDs] = useState([]); const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(""); const [search, setSearch] = useState("");
-    const [activeF, setActiveF] = useState(""); const [detailOpen, setDetailOpen] = useState(false); const [selected, setSelected] = useState(null);
-    const load = useCallback(async () => { try { setLoading(true); setError(""); const res = await getAllJDs(); setJDs(res.data || []); } catch (err) { setError(err?.message || "Failed to load JD details."); setJDs([]); } finally { setLoading(false); } }, []);
-    useEffect(() => { load(); }, [load]);
-    const filtered = jds.filter(j => { const q = search.toLowerCase(); const mQ = !q || j.jdID?.toLowerCase().includes(q) || j.companyName?.toLowerCase().includes(q) || j.jobRole?.toLowerCase().includes(q); const mA = activeF === "" ? true : activeF === "active" ? j.is_active === true : j.is_active === false; return mQ && mA; });
-    const stats = { total: jds.length, active: jds.filter(j => j.is_active).length, exp: jds.filter(j => j.expiration_time && new Date(j.expiration_time) < new Date()).length };
-    if (loading) return <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>;
-    return (
-        <Box display="flex" flexDirection="column" gap={3}>
-            {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
-            <Grid container spacing={2.5}>
-                <Grid item xs={6} md={4}><StatCard title="Total JDs"   value={stats.total}  icon={<Assignment />} color="#1a237e" sub="All time" /></Grid>
-                <Grid item xs={6} md={4}><StatCard title="Active JDs"  value={stats.active} icon={<AccessTime />} color="#2e7d32" sub="Currently active" /></Grid>
-                <Grid item xs={6} md={4}><StatCard title="Expired JDs" value={stats.exp}    icon={<ReportProblem />} color="#c62828" sub="Past expiry" /></Grid>
+
+  function JDDetailsTab({ initialClientName = "", onClearClientFilter }) {
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [jds,         setJDs]         = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState("");
+  const [search,      setSearch]      = useState("");
+  const [activeF,     setActiveF]     = useState("");
+  const [companyF,    setCompanyF]    = useState("");
+  const [skillF,      setSkillF]      = useState("");
+  const [detailOpen,  setDetailOpen]  = useState(false);
+  const [selected,    setSelected]    = useState(null);
+  const [detailTab,   setDetailTab]   = useState(0);   // 0=Info 1=Questions
+  const [qTab,        setQTab]        = useState(0);   // 0=MCQ 1=Subj 2=Code
+  const [isLocked, setIsLocked] = useState(!!initialClientName);
+
+  useEffect(() => {
+    if (initialClientName) {
+      setCompanyF(initialClientName);
+      setIsLocked(true);
+    }
+  }, [initialClientName]);
+  
+  const clearClientFilter = () => {
+    setCompanyF("");
+    setIsLocked(false);
+    onClearClientFilter?.();
+  };
+  // ── Load ───────────────────────────────────────────────────────────────────
+  const load = useCallback(async () => {
+    try {
+      setLoading(true); setError("");
+      const res = await getAllJDs({ per_page: 200 });
+      setJDs(res.data || []);
+    } catch (err) {
+      setError(err?.message || "Failed to load JD details.");
+      setJDs([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const companies = [...new Set(jds.map(j => j.companyName).filter(Boolean))].sort();
+  const allSkills = [...new Set(jds.flatMap(j => j.skills || []).filter(Boolean))].sort();
+
+  const filtered = jds.filter(j => {
+    const q   = search.toLowerCase();
+    const mQ  = !q
+      || j.jdID?.toLowerCase().includes(q)
+      || j.companyName?.toLowerCase().includes(q)
+      || j.jobRole?.toLowerCase().includes(q)
+      || j.skills?.some(s => s.toLowerCase().includes(q));
+    const mA  = activeF === "" ? true : activeF === "active" ? j.is_active : !j.is_active;
+    const mCo = !companyF || j.companyName === companyF;
+    const mSk = !skillF   || (j.skills || []).includes(skillF);
+    return mQ && mA && mCo && mSk;
+  });
+
+  const now   = new Date();
+  const stats = {
+    total:     jds.length,
+    active:    jds.filter(j => j.is_active).length,
+    expired:   jds.filter(j => j.expiration_time && new Date(j.expiration_time) < now).length,
+    withQs:    jds.filter(j =>
+      (j.mcq_questions?.length || 0) +
+      (j.subjective_questions?.length || 0) +
+      (j.coding_questions?.length || 0) > 0
+    ).length,
+  };
+
+  const openDetail = (j) => {
+    setSelected(j);
+    setDetailTab(0);
+    setQTab(0);
+    setDetailOpen(true);
+  };
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const totalQs = (j) =>
+    (j?.mcq_questions?.length || 0) +
+    (j?.subjective_questions?.length || 0) +
+    (j?.coding_questions?.length || 0);
+
+  const expStatus = (expTime) => {
+    if (!expTime) return null;
+    const d     = new Date(expTime);
+    const diff  = Math.floor((d - now) / 86400000);
+    if (diff < 0)  return { label: `${Math.abs(diff)}d ago`, color: "error.main" };
+    if (diff <= 7) return { label: `${diff}d left`, color: "warning.main" };
+    return { label: fmtDate(expTime), color: "text.secondary" };
+  };
+
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (loading) return (
+    <Box display="flex" justifyContent="center" py={10}>
+      <CircularProgress size={48} />
+    </Box>
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  return (
+    <Box display="flex" flexDirection="column" gap={3}>
+      {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
+{/* After the error Alert: */}
+{isLocked && (
+  <Alert
+    severity="info"
+    icon={<FilterList fontSize="small" />}
+    action={
+      <Chip
+        label="Show all clients"
+        size="small"
+        variant="outlined"
+        onDelete={clearClientFilter}
+        onClick={clearClientFilter}
+        deleteIcon={<CloseIcon />}
+        sx={{ fontSize: 11, cursor: "pointer" }}
+      />
+    }
+    sx={{ py: 0.5 }}
+  >
+    Showing JDs for <strong>{initialClientName}</strong>
+  </Alert>
+)}
+      {/* ── Stat cards ── */}
+      <Grid container spacing={2.5}>
+        <Grid item xs={6} md={3}>
+          <StatCard title="Total JDs"      value={stats.total}   icon={<Assignment />}    color="#1a237e" sub="All time" />
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <StatCard title="Active JDs"     value={stats.active}  icon={<AccessTime />}    color="#2e7d32" sub="Currently active" />
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <StatCard title="Expired JDs"    value={stats.expired} icon={<ReportProblem />} color="#c62828" sub="Past expiry date" />
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <StatCard title="With Questions" value={stats.withQs}  icon={<Quiz />}          color="#7b1fa2" sub="Have question banks" />
+        </Grid>
+      </Grid>
+
+      {/* ── Progress bars by company (top 5) ── */}
+      {companies.length > 0 && (
+        <Card>
+          <CardContent sx={{ p: 3 }}>
+            <Typography variant="h6" mb={2} fontWeight={700}>JDs by Company</Typography>
+            <Grid container spacing={3}>
+              {companies.slice(0, 6).map(co => {
+                const count = jds.filter(j => j.companyName === co).length;
+                const pct   = jds.length ? (count / jds.length) * 100 : 0;
+                return (
+                  <Grid item xs={12} sm={6} md={4} key={co}>
+                    <Box display="flex" justifyContent="space-between" mb={0.5}>
+                      <Typography fontSize={13} fontWeight={600}>{co}</Typography>
+                      <Typography fontSize={13} color="text.secondary">{count}</Typography>
+                    </Box>
+                    <LinearProgress variant="determinate" value={pct}
+                      sx={{ height: 8, borderRadius: 4, bgcolor: "#e8eaf6",
+                            "& .MuiLinearProgress-bar": { bgcolor: "#1a237e" } }} />
+                  </Grid>
+                );
+              })}
             </Grid>
-            <Box display="flex" gap={2} flexWrap="wrap">
-                <TextField placeholder="Search by JD ID, company" value={search} onChange={e => setSearch(e.target.value)} size="small" sx={{ flexGrow: 1, minWidth: 240 }} InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" color="action" /></InputAdornment> }} />
-                <TextField select value={activeF} onChange={e => setActiveF(e.target.value)} size="small" sx={{ minWidth: 150 }} label="Status"><MenuItem value="">All</MenuItem><MenuItem value="active">Active</MenuItem><MenuItem value="inactive">Inactive</MenuItem></TextField>
-            </Box>
-            <Card><Paper variant="outlined" sx={{ borderRadius: 2, overflow: "hidden" }}>
-                <Table><TableHead><TableRow sx={{ bgcolor: "#f5f7fa" }}>{["JD ID","Company","Job Role","Experience","Skills","Screening","Created","Expires","Status","Actions"].map(h => <TableCell key={h} sx={{ fontWeight: 700, fontSize: 12, color: "#546e7a" }}>{h}</TableCell>)}</TableRow></TableHead>
-                    <TableBody>{filtered.length === 0 ? <TableRow><TableCell colSpan={10} align="center" sx={{ py: 6, color: "text.secondary" }}>No JD details match your filters</TableCell></TableRow>
-                        : filtered.map(j => (
-                            <TableRow key={j._id} hover>
-                                <TableCell sx={{ fontWeight: 700, color: "#0277bd", fontSize: 12 }}>{j.jdID}</TableCell>
-                                <TableCell><Box display="flex" alignItems="center" gap={0.6}><Business sx={{ fontSize: 13, color: "#0277bd" }} /><Typography fontSize={13} fontWeight={600}>{j.companyName}</Typography></Box></TableCell>
-                                <TableCell sx={{ fontSize: 13 }}>{j.jobRole?.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase())||"—"}</TableCell>
-                                <TableCell sx={{ fontSize: 12 }}>{j.experience ? `${j.experience} yrs` : "—"}</TableCell>
-                                <TableCell><Box display="flex" flexWrap="wrap" gap={0.5} maxWidth={160}>{j.skills?.slice(0,3).map((s,i)=><Chip key={i} label={s} size="small" variant="outlined" sx={{ fontSize:10,borderColor:"#0277bd",color:"#0277bd" }}/>)}{j.skills?.length>3&&<Chip label={`+${j.skills.length-3}`} size="small" sx={{fontSize:10}}/>}</Box></TableCell>
-                                <TableCell><Box display="flex" flexDirection="column" gap={0.3}>{j.mcq_questions_count>0&&<Box display="flex" alignItems="center" gap={0.5}><Quiz sx={{fontSize:12,color:"#7b1fa2"}}/><Typography fontSize={11}>{j.mcq_questions_count} MCQ</Typography></Box>}{j.coding_questions_count>0&&<Box display="flex" alignItems="center" gap={0.5}><Code sx={{fontSize:12,color:"#2e7d32"}}/><Typography fontSize={11}>{j.coding_questions_count} Code</Typography></Box>}{j.screening_time_minutes>0&&<Typography fontSize={10} color="text.secondary">{j.screening_time_minutes} mins</Typography>}</Box></TableCell>
-                                <TableCell sx={{ fontSize: 11, color: "text.secondary" }}>{fmtDate(j.creation_time)}</TableCell>
-                                <TableCell>{j.expiration_time?<Typography fontSize={11} color={new Date(j.expiration_time)<new Date()?"error.main":"text.secondary"}>{fmtDate(j.expiration_time)}</Typography>:"—"}</TableCell>
-                                <TableCell><Chip label={j.is_active?"Active":"Inactive"} color={j.is_active?"success":"default"} size="small" sx={{ fontWeight:700,fontSize:11 }}/></TableCell>
-                                <TableCell><Tooltip title="View Details"><IconButton size="small" onClick={()=>{setSelected(j);setDetailOpen(true);}}><Visibility fontSize="small"/></IconButton></Tooltip></TableCell>
-                            </TableRow>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Filters ── */}
+      <Box display="flex" gap={2} flexWrap="wrap">
+        <TextField
+          placeholder="Search by JD ID, company, role, skill…"
+          value={search} onChange={e => setSearch(e.target.value)}
+          size="small" sx={{ flexGrow: 1, minWidth: 260 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" color="action" /></InputAdornment> }}
+        />
+        {/* <TextField select value={companyF} onChange={e => setCompanyF(e.target.value)}
+          size="small" sx={{ minWidth: 180 }} label="Company">
+          <MenuItem value="">All Companies</MenuItem>
+          {companies.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+        </TextField> */}
+        {!isLocked && (
+  <TextField select value={companyF} onChange={e => setCompanyF(e.target.value)}
+    size="small" sx={{ minWidth: 180 }} label="Company">
+    <MenuItem value="">All Companies</MenuItem>
+    {companies.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+  </TextField>
+)}
+        <TextField select value={skillF} onChange={e => setSkillF(e.target.value)}
+          size="small" sx={{ minWidth: 160 }} label="Skill">
+          <MenuItem value="">All Skills</MenuItem>
+          {allSkills.slice(0, 30).map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+        </TextField>
+        <TextField select value={activeF} onChange={e => setActiveF(e.target.value)}
+          size="small" sx={{ minWidth: 140 }} label="Status">
+          <MenuItem value="">All</MenuItem>
+          <MenuItem value="active">Active</MenuItem>
+          <MenuItem value="inactive">Inactive</MenuItem>
+        </TextField>
+      </Box>
+
+      {/* ── Table ── */}
+      <Card>
+        <Paper variant="outlined" sx={{ borderRadius: 2, overflow: "hidden" }}>
+          <Table>
+            <TableHead>
+              <TableRow sx={{ bgcolor: "#f5f7fa" }}>
+                {["JD ID", "Company", "Job Role", "Skills", "Experience",
+                  "Salary", "Screening Config", "Questions", "Created",
+                  "Expires", "Status", "Actions"].map(h => (
+                  <TableCell key={h} sx={{ fontWeight: 700, fontSize: 12, color: "#546e7a" }}>{h}</TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={12} align="center" sx={{ py: 8, color: "text.secondary" }}>
+                    No JD records match your filters
+                  </TableCell>
+                </TableRow>
+              ) : filtered.map(j => {
+                const exp    = expStatus(j.expiration_time);
+                const qCount = totalQs(j);
+                return (
+                  <TableRow key={j._id} hover>
+                    {/* JD ID */}
+                    <TableCell sx={{ fontWeight: 700, color: "#0277bd", fontSize: 12, whiteSpace: "nowrap" }}>
+                      {j.jdID}
+                    </TableCell>
+
+                    {/* Company */}
+                    <TableCell>
+                      <Box display="flex" alignItems="center" gap={0.6}>
+                        <Business sx={{ fontSize: 13, color: "#0277bd" }} />
+                        <Typography fontSize={13} fontWeight={600}>{j.companyName || "—"}</Typography>
+                      </Box>
+                    </TableCell>
+
+                    {/* Role */}
+                    <TableCell>
+                      <Typography fontSize={13} fontWeight={500}>
+                        {j.jobRole?.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || "—"}
+                      </Typography>
+                    </TableCell>
+
+                    {/* Skills */}
+                    <TableCell>
+                      <Box display="flex" flexWrap="wrap" gap={0.4} maxWidth={200}>
+                        {(j.skills || []).slice(0, 3).map((s, i) => (
+                          <Chip key={i} label={s} size="small" variant="outlined"
+                            sx={{ fontSize: 10, height: 18, borderColor: "#0277bd", color: "#0277bd" }} />
                         ))}
-                    </TableBody>
-                </Table>
-            </Paper></Card>
-            <Dialog open={detailOpen} onClose={()=>setDetailOpen(false)} maxWidth="lg" fullWidth PaperProps={{sx:{maxHeight:"92vh"}}}>
-                <DialogTitle sx={{fontWeight:700,borderBottom:"1px solid #e0e0e0",pb:2}}>JD Details — {selected?.jdID}</DialogTitle>
-                {selected&&<DialogContent sx={{pt:3,pb:1}}>
-                    {selected.skills?.length>0&&<Box mt={2}><SectionLabel>Required Skills</SectionLabel><Box display="flex" flexWrap="wrap" gap={0.8}>{selected.skills.map((s,i)=><Chip key={i} label={s} size="small" variant="outlined" sx={{fontSize:11,borderColor:"#0277bd",color:"#0277bd"}}/>)}</Box></Box>}
-                    {selected.jobDescription&&<Box mt={2.5} p={2} bgcolor="#f5f7fa" borderRadius={2} border="1px solid #e0e0e0"><SectionLabel>Job Description</SectionLabel><Typography fontSize={13} lineHeight={1.8} sx={{whiteSpace:"pre-wrap"}}>{selected.jobDescription}</Typography></Box>}
-                    <Divider sx={{my:3}}/>
-                    {selected.mcq_questions?.length>0&&<QuestionSection icon={<Quiz sx={{fontSize:18}}/>} title="MCQ Questions" color="#7b1fa2" count={selected.mcq_questions_count||0} bankCount={selected.mcq_questions.length}>{selected.mcq_questions.map((q,i)=><MCQQuestionCard key={i} question={q} index={i}/>)}</QuestionSection>}
-                    {selected.subjective_questions?.length>0&&<QuestionSection icon={<QuestionAnswer sx={{fontSize:18}}/>} title="Subjective Questions" color="#0277bd" count={0} bankCount={selected.subjective_questions.length}>{selected.subjective_questions.map((q,i)=><SubjectiveQuestionCard key={i} question={q} index={i}/>)}</QuestionSection>}
-                    {selected.coding_questions?.length>0&&<QuestionSection icon={<Code sx={{fontSize:18}}/>} title="Coding Questions" color="#2e7d32" count={selected.coding_questions_count||0} bankCount={selected.coding_questions.length}>{selected.coding_questions.map((q,i)=><CodingQuestionCard key={i} question={q} index={i}/>)}</QuestionSection>}
-                </DialogContent>}
-                <DialogActions sx={{px:3,py:2,borderTop:"1px solid #e0e0e0"}}><Button onClick={()=>setDetailOpen(false)} variant="outlined">Close</Button></DialogActions>
-            </Dialog>
-        </Box>
-    );
+                        {(j.skills || []).length > 3 && (
+                          <Chip label={`+${j.skills.length - 3}`} size="small"
+                            sx={{ fontSize: 10, height: 18 }} />
+                        )}
+                      </Box>
+                    </TableCell>
+
+                    {/* Experience */}
+                    <TableCell sx={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                      {j.experience ? `${j.experience} yrs` : "—"}
+                    </TableCell>
+
+                    {/* Salary */}
+                    <TableCell sx={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                      {j.salaryRange || "—"}
+                    </TableCell>
+
+                    {/* Screening config */}
+                    <TableCell>
+                      <Box display="flex" flexDirection="column" gap={0.3}>
+                        {(j.mcq_questions_count > 0) && (
+                          <Box display="flex" alignItems="center" gap={0.5}>
+                            <Quiz sx={{ fontSize: 12, color: "#7b1fa2" }} />
+                            <Typography fontSize={11}>{j.mcq_questions_count} MCQ</Typography>
+                          </Box>
+                        )}
+                        {(j.coding_questions_count > 0) && (
+                          <Box display="flex" alignItems="center" gap={0.5}>
+                            <Code sx={{ fontSize: 12, color: "#2e7d32" }} />
+                            <Typography fontSize={11}>{j.coding_questions_count} Code</Typography>
+                          </Box>
+                        )}
+                        {(j.screening_time_minutes > 0) && (
+                          <Typography fontSize={10} color="text.secondary">
+                            {j.screening_time_minutes} mins
+                          </Typography>
+                        )}
+                        {(!j.mcq_questions_count && !j.coding_questions_count && !j.screening_time_minutes) && (
+                          <Typography fontSize={11} color="text.disabled">—</Typography>
+                        )}
+                      </Box>
+                    </TableCell>
+
+                    {/* Question bank totals */}
+                    <TableCell>
+                      {qCount > 0 ? (
+                        <Box display="flex" flexDirection="column" gap={0.3}>
+                          {(j.mcq_questions?.length > 0) && (
+                            <Box display="flex" alignItems="center" gap={0.5}>
+                              <Quiz sx={{ fontSize: 12, color: "#7b1fa2" }} />
+                              <Typography fontSize={11}>{j.mcq_questions.length} MCQ bank</Typography>
+                            </Box>
+                          )}
+                          {(j.subjective_questions?.length > 0) && (
+                            <Box display="flex" alignItems="center" gap={0.5}>
+                              <QuestionAnswer sx={{ fontSize: 12, color: "#0277bd" }} />
+                              <Typography fontSize={11}>{j.subjective_questions.length} Subj bank</Typography>
+                            </Box>
+                          )}
+                          {(j.coding_questions?.length > 0) && (
+                            <Box display="flex" alignItems="center" gap={0.5}>
+                              <Code sx={{ fontSize: 12, color: "#2e7d32" }} />
+                              <Typography fontSize={11}>{j.coding_questions.length} Code bank</Typography>
+                            </Box>
+                          )}
+                        </Box>
+                      ) : (
+                        <Typography fontSize={11} color="text.disabled">—</Typography>
+                      )}
+                    </TableCell>
+
+                    {/* Created */}
+                    <TableCell sx={{ fontSize: 11, color: "text.secondary", whiteSpace: "nowrap" }}>
+                      {fmtDate(j.creation_time)}
+                    </TableCell>
+
+                    {/* Expires */}
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      {exp ? (
+                        <Typography fontSize={11} color={exp.color} fontWeight={600}>{exp.label}</Typography>
+                      ) : "—"}
+                    </TableCell>
+
+                    {/* Status */}
+                    <TableCell>
+                      <Chip
+                        label={j.is_active ? "Active" : "Inactive"}
+                        color={j.is_active ? "success" : "default"}
+                        size="small" sx={{ fontWeight: 700, fontSize: 11 }}
+                      />
+                    </TableCell>
+
+                    {/* Actions */}
+                    <TableCell>
+                      <Tooltip title="View Full Details">
+                        <IconButton size="small" onClick={() => openDetail(j)}>
+                          <Visibility fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Paper>
+      </Card>
+
+      {/* ════════════════════════════════════════════════════════════════════
+           DETAIL DIALOG
+          ════════════════════════════════════════════════════════════════════ */}
+      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)}
+        maxWidth="lg" fullWidth PaperProps={{ sx: { maxHeight: "93vh" } }}>
+
+        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0", pb: 1.5 }}>
+          <Box display="flex" alignItems="center" justifyContent="space-between">
+            <Box display="flex" alignItems="center" gap={2}>
+              <Avatar sx={{ width: 46, height: 46, borderRadius: 2,
+                background: "linear-gradient(135deg,#00acc1,#0277bd)", flexShrink: 0 }}>
+                <Assignment sx={{ fontSize: 24, color: "#fff" }} />
+              </Avatar>
+              <Box>
+                <Typography fontWeight={800} fontSize={16} lineHeight={1.2}>
+                  {selected?.jobRole?.replace(/_/g, " ") || "JD Details"}
+                </Typography>
+                <Box display="flex" alignItems="center" gap={0.8} mt={0.3}>
+                  <Business sx={{ fontSize: 13, color: "#0277bd" }} />
+                  <Typography fontSize={12} fontWeight={600} color="#0277bd">
+                    {selected?.companyName}
+                  </Typography>
+                  <Typography fontSize={12} color="text.secondary">· {selected?.jdID}</Typography>
+                </Box>
+              </Box>
+            </Box>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Chip
+                label={selected?.is_active ? "Active" : "Inactive"}
+                color={selected?.is_active ? "success" : "default"}
+                size="small" sx={{ fontWeight: 700 }}
+              />
+              <IconButton size="small" onClick={() => setDetailOpen(false)}>
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Box>
+          </Box>
+
+          {/* Sub-tabs: Info | Questions */}
+          <Box sx={{ borderBottom: "1px solid #e0e0e0", mt: 2, mb: -1.5 }}>
+            <Tabs value={detailTab} onChange={(_, v) => setDetailTab(v)}
+              sx={{ "& .MuiTab-root": { fontWeight: 600, textTransform: "none", minHeight: 38, fontSize: 13 } }}>
+              <Tab label="Job Information" />
+              <Tab label={
+                <Box display="flex" alignItems="center" gap={0.8}>
+                  <span>Question Banks</span>
+                  {selected && totalQs(selected) > 0 && (
+                    <Chip label={totalQs(selected)} size="small"
+                      sx={{ fontSize: 10, height: 18, bgcolor: "#7b1fa2", color: "#fff", fontWeight: 700 }} />
+                  )}
+                </Box>
+              } />
+            </Tabs>
+          </Box>
+        </DialogTitle>
+
+        {selected && (
+          <DialogContent sx={{ pt: 3, pb: 1 }}>
+
+            {/* ── TAB 0: JOB INFORMATION ── */}
+            {detailTab === 0 && (
+              <Box>
+                {/* Top info grid */}
+                <Grid container spacing={3} mb={3}>
+                  {/* Col 1: Core */}
+                  <Grid item xs={12} sm={4}>
+                    <SectionLabel>Job Information</SectionLabel>
+                    <DetailRow label="JD ID"       value={selected.jdID} />
+                    <DetailRow label="Company"     value={selected.companyName} />
+                    <DetailRow label="Role"        value={selected.jobRole} />
+                    <DetailRow label="Experience"  value={selected.experience ? `${selected.experience} years` : "—"} />
+                    <DetailRow label="Location"    value={selected.preferredLocation || "—"} />
+                    <DetailRow label="Language"    value={selected.programmingLanguage || "—"} />
+                    <DetailRow label="Level"       value={selected.programmingLevel || "—"} />
+                    <DetailRow label="Openings"    value={selected.openPositions ?? "—"} />
+                  </Grid>
+
+                  {/* Col 2: Compensation & Dates */}
+                  <Grid item xs={12} sm={4}>
+                    <SectionLabel>Compensation & Timeline</SectionLabel>
+                    <DetailRow label="Salary Range" value={selected.salaryRange || "—"} />
+                    <DetailRow label="Pass %"
+                      value={selected.screeningTestPassPercentage ? `${selected.screeningTestPassPercentage}%` : "—"} />
+                    <DetailRow label="Created"      value={fmtDate(selected.creation_time)} />
+                    <DetailRow label="Expires"      value={fmtDate(selected.expiration_time)} />
+                    <DetailRow label="Edit Status"  value={selected.JDEditstatus || selected.jd_edit_status || "—"} />
+                    <DetailRow label="Remarks"      value={selected.remarks || "—"} />
+                    <DetailRow label="Processed"    value={selected.processed ? "Yes" : "No"} />
+                  </Grid>
+
+                  {/* Col 3: Screening Config */}
+                  <Grid item xs={12} sm={4}>
+                    <SectionLabel>Screening Configuration</SectionLabel>
+                    <DetailRow label="MCQ per test"      value={selected.mcq_questions_count ?? 0} />
+                    <DetailRow label="Coding per test"   value={selected.coding_questions_count ?? 0} />
+                    <DetailRow label="Screening time"
+                      value={selected.screening_time_minutes ? `${selected.screening_time_minutes} mins` : "—"} />
+                    <DetailRow label="MCQ bank size"
+                      value={selected.mcq_questions?.length ?? 0} />
+                    <DetailRow label="Subjective bank"
+                      value={selected.subjective_questions?.length ?? 0} />
+                    <DetailRow label="Coding bank"
+                      value={selected.coding_questions?.length ?? 0} />
+                  </Grid>
+                </Grid>
+
+                {/* Primary skills */}
+                {selected.skills?.length > 0 && (
+                  <Box mb={2.5}>
+                    <SectionLabel>Required Skills</SectionLabel>
+                    <Box display="flex" flexWrap="wrap" gap={0.8}>
+                      {selected.skills.map((s, i) => (
+                        <Chip key={i} label={s} size="small" variant="outlined"
+                          sx={{ fontSize: 11, borderColor: "#0277bd", color: "#0277bd" }} />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Secondary skills */}
+                {selected.secondarySkills?.length > 0 && (
+                  <Box mb={2.5}>
+                    <SectionLabel>Secondary Skills</SectionLabel>
+                    <Box display="flex" flexWrap="wrap" gap={0.8}>
+                      {selected.secondarySkills.map((s, i) => (
+                        <Chip key={i} label={s} size="small" variant="outlined"
+                          sx={{ fontSize: 11, borderColor: "#78909c", color: "#78909c" }} />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* JD Summary */}
+                {selected.jd_summary && (
+                  <Box mb={2.5}>
+                    <SectionLabel>AI-Generated Summary</SectionLabel>
+                    <Box p={2} bgcolor="#e8f5e9" borderRadius={2} border="1px solid #a5d6a7">
+                      <Typography fontSize={13} lineHeight={1.8} color="#1b5e20"
+                        sx={{ whiteSpace: "pre-wrap" }}>
+                        {selected.jd_summary}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Vocab list */}
+                {selected.jd_vocab_list?.length > 0 && (
+                  <Box mb={2.5}>
+                    <SectionLabel>
+                      AI Vocab / Keywords ({selected.jd_vocab_list.length})
+                    </SectionLabel>
+                    <Box display="flex" flexWrap="wrap" gap={0.5} maxHeight={120} overflow="auto"
+                      sx={{ p: 1.5, bgcolor: "#f5f7fa", borderRadius: 2, border: "1px solid #e0e0e0" }}>
+                      {selected.jd_vocab_list.map((v, i) => (
+                        <Chip key={i} label={v} size="small"
+                          sx={{ fontSize: 10, height: 18, bgcolor: "#e8eaf6", color: "#1a237e" }} />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Job Description */}
+                {selected.jobDescription && (
+                  <Box mb={2.5} p={2} bgcolor="#f5f7fa" borderRadius={2} border="1px solid #e0e0e0">
+                    <SectionLabel>Job Description</SectionLabel>
+                    <Typography fontSize={13} lineHeight={1.8} sx={{ whiteSpace: "pre-wrap" }}>
+                      {selected.jobDescription}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            )}
+
+            {/* ── TAB 1: QUESTION BANKS ── */}
+            {detailTab === 1 && (
+              <Box>
+                {totalQs(selected) === 0 ? (
+                  <Box display="flex" flexDirection="column" alignItems="center" py={8} gap={2}>
+                    <Avatar sx={{ width: 64, height: 64, bgcolor: "#e8eaf6" }}>
+                      <Quiz sx={{ fontSize: 30, color: "#9fa8da" }} />
+                    </Avatar>
+                    <Typography color="text.secondary" fontSize={14} fontWeight={600}>
+                      No question banks attached to this JD
+                    </Typography>
+                  </Box>
+                ) : (
+                  <>
+                    {/* Bank summary chips */}
+                    <Box display="flex" gap={1} mb={2.5} flexWrap="wrap">
+                      {(selected.mcq_questions?.length > 0) && (
+                        <Chip
+                          icon={<Quiz sx={{ fontSize: 13 }} />}
+                          label={`${selected.mcq_questions.length} MCQ`}
+                          size="small" onClick={() => setQTab(0)}
+                          sx={{
+                            cursor: "pointer", fontWeight: 700, fontSize: 12,
+                            bgcolor: qTab === 0 ? "#7b1fa2" : "#f3e5f5",
+                            color:   qTab === 0 ? "#fff"    : "#7b1fa2",
+                            border:  qTab === 0 ? "none" : "1px solid #ce93d8",
+                          }}
+                        />
+                      )}
+                      {(selected.subjective_questions?.length > 0) && (
+                        <Chip
+                          icon={<QuestionAnswer sx={{ fontSize: 13 }} />}
+                          label={`${selected.subjective_questions.length} Subjective`}
+                          size="small" onClick={() => setQTab(1)}
+                          sx={{
+                            cursor: "pointer", fontWeight: 700, fontSize: 12,
+                            bgcolor: qTab === 1 ? "#0277bd" : "#e3f2fd",
+                            color:   qTab === 1 ? "#fff"    : "#0277bd",
+                            border:  qTab === 1 ? "none" : "1px solid #90caf9",
+                          }}
+                        />
+                      )}
+                      {(selected.coding_questions?.length > 0) && (
+                        <Chip
+                          icon={<Code sx={{ fontSize: 13 }} />}
+                          label={`${selected.coding_questions.length} Coding`}
+                          size="small" onClick={() => setQTab(2)}
+                          sx={{
+                            cursor: "pointer", fontWeight: 700, fontSize: 12,
+                            bgcolor: qTab === 2 ? "#2e7d32" : "#e8f5e9",
+                            color:   qTab === 2 ? "#fff"    : "#2e7d32",
+                            border:  qTab === 2 ? "none" : "1px solid #a5d6a7",
+                          }}
+                        />
+                      )}
+                    </Box>
+
+                    {/* ── MCQ questions ── */}
+                    {qTab === 0 && (
+                      <Box display="flex" flexDirection="column" gap={1.5}>
+                        {(selected.mcq_questions || []).map((q, i) => {
+                          const correctAnswers = Array.isArray(q.correct_answer)
+                            ? q.correct_answer.map(String)
+                            : [String(q.correct_answer || "")];
+                          const isMulti = correctAnswers.length > 1;
+                          return (
+                            <Box key={i} sx={{ border: "1px solid #e0e0e0", borderRadius: 2, overflow: "hidden", bgcolor: "#fff" }}>
+                              <Box sx={{ bgcolor: "#f5f7fa", px: 2, py: 1.5, borderBottom: "1px solid #e0e0e0",
+                                display: "flex", alignItems: "flex-start", gap: 1.5, flexWrap: "wrap" }}>
+                                <Chip label={`Q${i + 1}`} size="small"
+                                  sx={{ bgcolor: "#7b1fa2", color: "#fff", fontWeight: 700, fontSize: 11, height: 20, flexShrink: 0, mt: 0.2 }} />
+                                {isMulti && (
+                                  <Chip label="Multi-select" size="small"
+                                    sx={{ bgcolor: "#e8eaf6", color: "#1a237e", fontWeight: 600, fontSize: 10, height: 20, flexShrink: 0, mt: 0.2 }} />
+                                )}
+                                <Typography fontSize={13} fontWeight={600} color="text.primary" lineHeight={1.5}>
+                                  {q.question}
+                                </Typography>
+                              </Box>
+                              <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", gap: 0.8 }}>
+                                {(q.options || []).map((opt, j) => {
+                                  const isCorrect = correctAnswers.includes(String(opt));
+                                  return (
+                                    <Box key={j} display="flex" alignItems="center" gap={1.2}
+                                      sx={{ px: 1.5, py: 0.8, borderRadius: 1.5,
+                                        bgcolor: isCorrect ? "#e8f5e9" : "#fafafa",
+                                        border:  isCorrect ? "1.5px solid #a5d6a7" : "1px solid #eeeeee" }}>
+                                      {isCorrect
+                                        ? <CheckCircle sx={{ fontSize: 16, color: "#2e7d32", flexShrink: 0 }} />
+                                        : <RadioButtonUnchecked sx={{ fontSize: 16, color: "#bdbdbd", flexShrink: 0 }} />}
+                                      <Typography fontSize={12} fontWeight={isCorrect ? 600 : 400}
+                                        color={isCorrect ? "#1b5e20" : "text.secondary"} sx={{ flex: 1 }}>
+                                        {opt}
+                                      </Typography>
+                                      {isCorrect && (
+                                        <Chip label="✓ Correct" size="small"
+                                          sx={{ fontSize: 10, height: 18, bgcolor: "#2e7d32", color: "#fff", fontWeight: 700, ml: "auto" }} />
+                                      )}
+                                    </Box>
+                                  );
+                                })}
+                              </Box>
+                            </Box>
+                          );
+                        })}
+                      </Box>
+                    )}
+
+                    {/* ── Subjective questions ── */}
+                    {qTab === 1 && (
+                      <Box display="flex" flexDirection="column" gap={1.5}>
+                        {(selected.subjective_questions || []).map((q, i) => {
+                          const diffStyle = DIFFICULTY_COLOR[q.difficulty] || DIFFICULTY_COLOR["Medium"];
+                          const keyPoints = Array.isArray(q.key_points)
+                            ? q.key_points.join("\n• ")
+                            : q.key_points;
+                          return (
+                            <Box key={i} sx={{ border: "1px solid #e0e0e0", borderRadius: 2, overflow: "hidden", bgcolor: "#fff" }}>
+                              <Box sx={{ bgcolor: "#f5f7fa", px: 2, py: 1.5, borderBottom: "1px solid #e0e0e0",
+                                display: "flex", alignItems: "flex-start", gap: 1.5, flexWrap: "wrap" }}>
+                                <Chip label={`Q${i + 1}`} size="small"
+                                  sx={{ bgcolor: "#0277bd", color: "#fff", fontWeight: 700, fontSize: 11, height: 20, flexShrink: 0, mt: 0.2 }} />
+                                {q.skill && (
+                                  <Chip label={q.skill} size="small" variant="outlined"
+                                    sx={{ fontSize: 10, height: 20, borderColor: "#0277bd", color: "#0277bd", fontWeight: 600, flexShrink: 0, mt: 0.2 }} />
+                                )}
+                                {q.difficulty && (
+                                  <Chip label={q.difficulty} size="small"
+                                    sx={{ fontSize: 10, height: 20, fontWeight: 700, flexShrink: 0, mt: 0.2,
+                                      bgcolor: diffStyle.bg, color: diffStyle.text, border: `1px solid ${diffStyle.border}` }} />
+                                )}
+                                <Typography fontSize={13} fontWeight={600} color="text.primary" lineHeight={1.5} sx={{ flex: 1 }}>
+                                  {q.question}
+                                </Typography>
+                              </Box>
+                              <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 1.5 }}>
+                                {q.reference_answer && (
+                                  <Box>
+                                    <Typography fontSize={11} fontWeight={700} color="#2e7d32"
+                                      textTransform="uppercase" letterSpacing={0.5} mb={0.5}>
+                                      Reference Answer
+                                    </Typography>
+                                    <Box sx={{ bgcolor: "#e8f5e9", border: "1px solid #a5d6a7", borderRadius: 1.5, px: 1.5, py: 1 }}>
+                                      <Typography fontSize={12} color="#1b5e20" lineHeight={1.7} sx={{ whiteSpace: "pre-wrap" }}>
+                                        {q.reference_answer}
+                                      </Typography>
+                                    </Box>
+                                  </Box>
+                                )}
+                                {keyPoints && (
+                                  <Box>
+                                    <Typography fontSize={11} fontWeight={700} color="#e65100"
+                                      textTransform="uppercase" letterSpacing={0.5} mb={0.5}>
+                                      Key Points
+                                    </Typography>
+                                    <Box sx={{ bgcolor: "#fff8e1", border: "1px solid #ffe082", borderRadius: 1.5, px: 1.5, py: 1 }}>
+                                      <Typography fontSize={12} color="#bf360c" lineHeight={1.7} sx={{ whiteSpace: "pre-wrap" }}>
+                                        {Array.isArray(q.key_points) ? `• ${q.key_points.join("\n• ")}` : q.key_points}
+                                      </Typography>
+                                    </Box>
+                                  </Box>
+                                )}
+                              </Box>
+                            </Box>
+                          );
+                        })}
+                      </Box>
+                    )}
+
+                    {/* ── Coding questions ── */}
+                    {qTab === 2 && (
+                      <Box display="flex" flexDirection="column" gap={1.5}>
+                        {(selected.coding_questions || []).map((q, i) => {
+                          // Build the question text from all parts (mirrors serialize_jd_for_exam)
+                          const parts = [];
+                          if (q.problem_statement) parts.push(q.problem_statement);
+                          if (q.question)          parts.push(q.question);
+                          if (q.code_scenario)     parts.push(`Code:\n${q.code_scenario}`);
+                          if (q.observed_behavior) parts.push(`Observed: ${q.observed_behavior}`);
+                          if (q.constraints)       parts.push(`Constraints: ${q.constraints}`);
+                          if (q.example_input)     parts.push(`Example Input: ${q.example_input}`);
+                          if (q.expected_output)   parts.push(`Expected Output: ${q.expected_output}`);
+                          const fullText = parts.join("\n\n") || JSON.stringify(q);
+
+                          return (
+                            <Box key={i} sx={{ border: "1px solid #3d3d5c", borderRadius: 2, overflow: "hidden" }}>
+                              {/* Terminal header */}
+                              <Box sx={{ bgcolor: "#2d2d3f", px: 2, py: 1,
+                                display: "flex", alignItems: "center", gap: 1.5,
+                                borderBottom: "1px solid #3d3d5c" }}>
+                                <Box display="flex" gap={0.6}>
+                                  {["#ff5f57", "#febc2e", "#28c840"].map(c => (
+                                    <Box key={c} sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: c }} />
+                                  ))}
+                                </Box>
+                                <Code sx={{ fontSize: 14, color: "#82aaff" }} />
+                                <Typography fontSize={12} fontWeight={700} color="#82aaff" flex={1}>
+                                  Problem {i + 1}
+                                  {q.skill && <span style={{ color: "#a9b1d6", fontWeight: 400 }}> · {q.skill}</span>}
+                                </Typography>
+                                {q.difficulty && (
+                                  <Chip label={q.difficulty} size="small"
+                                    sx={{ fontSize: 9, height: 18, fontWeight: 700,
+                                      bgcolor: (DIFFICULTY_COLOR[q.difficulty] || {}).bg || "#2d2d3f",
+                                      color:   (DIFFICULTY_COLOR[q.difficulty] || {}).text || "#cdd6f4",
+                                      border:  `1px solid ${(DIFFICULTY_COLOR[q.difficulty] || {}).border || "#3d3d5c"}` }} />
+                                )}
+                                {(q.language || q.programming_language) && (
+                                  <Chip label={q.language || q.programming_language} size="small"
+                                    sx={{ fontSize: 9, height: 18, bgcolor: "#1a1a2e", color: "#82aaff",
+                                      border: "1px solid #414868" }} />
+                                )}
+                                {q.category && (
+                                  <Chip label={q.category} size="small" variant="outlined"
+                                    sx={{ fontSize: 9, height: 18, borderColor: "#414868", color: "#a9b1d6" }} />
+                                )}
+                              </Box>
+                              {/* Problem body */}
+                              <Box sx={{ bgcolor: "#1e1e2e", px: 2.5, py: 2 }}>
+                                <Typography fontSize={12} color="#cdd6f4" lineHeight={1.9}
+                                  sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word",
+                                    fontFamily: "'Fira Code','Consolas',monospace" }}>
+                                  {fullText}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          );
+                        })}
+                      </Box>
+                    )}
+                  </>
+                )}
+              </Box>
+            )}
+          </DialogContent>
+        )}
+
+        <DialogActions sx={{ px: 3, py: 2.5, borderTop: "1px solid #e0e0e0", gap: 1 }}>
+          {/* Quick stats in footer */}
+          {selected && (
+            <Box display="flex" gap={1} flex={1} flexWrap="wrap">
+              {selected.mcq_questions?.length > 0 && (
+                <Chip label={`${selected.mcq_questions.length} MCQ`} size="small"
+                  sx={{ fontSize: 10, bgcolor: "#f3e5f5", color: "#7b1fa2", fontWeight: 600 }} />
+              )}
+              {selected.subjective_questions?.length > 0 && (
+                <Chip label={`${selected.subjective_questions.length} Subjective`} size="small"
+                  sx={{ fontSize: 10, bgcolor: "#e3f2fd", color: "#0277bd", fontWeight: 600 }} />
+              )}
+              {selected.coding_questions?.length > 0 && (
+                <Chip label={`${selected.coding_questions.length} Coding`} size="small"
+                  sx={{ fontSize: 10, bgcolor: "#e8f5e9", color: "#2e7d32", fontWeight: 600 }} />
+              )}
+            </Box>
+          )}
+          <Button variant="outlined" onClick={() => setDetailTab(detailTab === 0 ? 1 : 0)}>
+            {detailTab === 0 ? "View Questions" : "View Info"}
+          </Button>
+          <Button variant="contained" onClick={() => setDetailOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2332,7 +3075,8 @@ export default function Jobs() {
                 </Tabs>
             </Box>
             {tab === 0 && <JobsTab initialClientId={clientId} initialClientName={clientName} onClearClientFilter={handleClearClientFilter} />}
-            {tab === 1 && <JDDetailsTab />}
+            {/* {tab === 1 && <JDDetailsTab />} */}
+            {tab === 1 && <JDDetailsTab initialClientName={clientName} onClearClientFilter={handleClearClientFilter} />}
         </Box>
     );
 }

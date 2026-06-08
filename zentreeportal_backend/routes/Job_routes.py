@@ -5,7 +5,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 from bson.errors import InvalidId
 from datetime import datetime
-from extensions import mongo
+from extensions import mongo, resourcing_db
 from models.Job_model import serialize_job, PRIORITIES, STATUSES, JOB_TYPES, WORK_MODES
 
 job_bp = Blueprint("jobs", __name__)
@@ -34,7 +34,8 @@ def _find_job(job_id_str: str):
         oid = ObjectId(job_id_str)
     except InvalidId:
         return None, (jsonify(success=False, message="Invalid job ID"), 400)
-    job = mongo.db.jobs.find_one({"_id": oid})
+    # job = mongo.db.jobs.find_one({"_id": oid})
+    job = resourcing_db["jobs"].find_one({"_id": oid})
     if not job:
         return None, (jsonify(success=False, message="Job not found"), 404)
     return job, None
@@ -303,41 +304,35 @@ def debug_mongo():
     attrs = [a for a in dir(mongo) if not a.startswith("_")]
     return jsonify(attrs=attrs)
 # ✅ CORRECT
-def _jd_col():
-    try:
-        client = mongo.cx                          # Flask-PyMongo 2.x
-    except AttributeError:
-        client = mongo.connection                  # Flask-PyMongo 0.x / 1.x fallback
+# def _jd_col():
+#     try:
+#         client = mongo.cx                          # Flask-PyMongo 2.x
+#     except AttributeError:
+#         client = mongo.connection                  # Flask-PyMongo 0.x / 1.x fallback
 
-    return client["resourcing_bot_db"]["jd_details"]   # ← no double underscores
+#     return client["resourcing_bot_db"]["jd_details"]   # ← no double underscores
+def _jd_col():
+    return resourcing_db["jd_details"]
+
 
 
 def _serialize_jd(doc: dict) -> dict:
     """
-    Convert a raw jd_details document to a JSON-safe dict.
-    Handles camelCase Mongoose field names as-is — no renaming.
+    Recursively convert ALL ObjectIds to strings.
+    Handles nested dicts, lists, and direct ObjectId values.
     """
-    j = dict(doc)
-    j["_id"] = str(j.get("_id", ""))
+    def _convert(obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, dict):
+            return {k: _convert(v) for k, v in obj.items() if k != "__v"}
+        if isinstance(obj, list):
+            return [_convert(v) for v in obj]
+        return obj
 
-    # ObjectId single refs → strings
-    if isinstance(j.get("hiringManager"), ObjectId):
-        j["hiringManager"] = str(j["hiringManager"])
-
-    # ObjectId array refs → string arrays
-    for arr in ("recruiterContacts", "interviewerContacts"):
-        if isinstance(j.get(arr), list):
-            j[arr] = [str(v) if isinstance(v, ObjectId) else v for v in j[arr]]
-
-    # datetime fields → ISO strings
-    for dt in ("creation_time", "expiration_time"):
-        if isinstance(j.get(dt), datetime):
-            j[dt] = j[dt].isoformat()
-
-    # Remove internal Mongoose version key
-    j.pop("__v", None)
-
-    return j
+    return _convert(doc)
 
 
 def _find_jd(jd_id_str: str):

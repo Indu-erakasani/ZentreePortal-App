@@ -11,7 +11,7 @@ import {
   Add, Search, Edit, Delete, People, CheckCircle, Work,
   Storefront, WorkOutline, PersonSearch, Close, TrendingUp,
   Business, Phone, Email, Language, LocationOn, FilterList,
-  ArrowUpward, FiberManualRecord, EmojiEvents,
+  ArrowUpward, FiberManualRecord, EmojiEvents,Assignment
 } from "@mui/icons-material";
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ const KPICard = ({ label, value, sub, icon, accent, trend }) => (
 );
 
 // ── Client Card ───────────────────────────────────────────────────────────────
-const ClientCard = ({ client, jobCnt, candidateCnt, placedCnt, isSelected, onSelect, onEdit, onDelete, onViewJobs, onViewCandidates }) => {
+const ClientCard = ({ client, jobCnt, candidateCnt, placedCnt, isSelected, onSelect, onEdit, onDelete, onViewJobs,onViewJDs, onViewCandidates }) => {
   const [bg, accent] = clientPalette(client.company_name);
   const sm = STATUS_META[client.relationship_status] || STATUS_META["Inactive"];
 
@@ -180,6 +180,12 @@ const ClientCard = ({ client, jobCnt, candidateCnt, placedCnt, isSelected, onSel
             borderRadius: 1.5, "&:hover": { bgcolor: "#dbeafe", borderColor: "#1e40af" } }}>
           View Jobs
         </Button>
+        <Button size="small" onClick={(e) => { e.stopPropagation(); onViewJDs(client); }}
+          sx={{ flex: 1, fontSize: 11, py: 0.4, textTransform: "none", fontWeight: 600,
+            color: "#7b1fa2", borderColor: "rgba(123,31,162,0.25)", border: "0.5px solid",
+            borderRadius: 1.5, "&:hover": { bgcolor: "#f3e5f5", borderColor: "#7b1fa2" } }}>
+          JD Details
+        </Button>
         <Button size="small" onClick={(e) => { e.stopPropagation(); onViewCandidates(client); }}
           sx={{ flex: 1, fontSize: 11, py: 0.4, textTransform: "none", fontWeight: 600,
             color: "#059669", borderColor: "rgba(5,150,105,0.25)", border: "0.5px solid",
@@ -204,7 +210,7 @@ const ClientCard = ({ client, jobCnt, candidateCnt, placedCnt, isSelected, onSel
 };
 
 // ── Detail Panel ──────────────────────────────────────────────────────────────
-const DetailPanel = ({ client, jobCnt, candidateCnt, placedCnt, onClose, onEdit, onViewJobs, onViewCandidates }) => {
+const DetailPanel = ({ client, jobCnt, candidateCnt, placedCnt, onClose, onEdit, onViewJobs, onViewJDs,onViewCandidates }) => {
   const [bg, accent] = clientPalette(client.company_name);
 
   const InfoRow = ({ icon, label, value }) => value ? (
@@ -287,6 +293,13 @@ const DetailPanel = ({ client, jobCnt, candidateCnt, placedCnt, onClose, onEdit,
             sx={{ flex: 1, textTransform: "none", fontWeight: 600, fontSize: 12, borderColor: "#e8edf3", color: "#1e40af", borderRadius: 1.5, "&:hover": { borderColor: "#1e40af", bgcolor: "#dbeafe" } }}>
             Jobs
           </Button>
+          <Button variant="outlined" size="small" startIcon={<Assignment sx={{ fontSize: 14 }} />}
+           onClick={() => onViewJDs(client)}
+            sx={{ flex: 1, textTransform: "none", fontWeight: 600, fontSize: 12,
+              borderColor: "#e8edf3", color: "#7b1fa2", borderRadius: 1.5,
+              "&:hover": { borderColor: "#7b1fa2", bgcolor: "#f3e5f5" } }}>
+            JD Details
+          </Button>
           <Button variant="outlined" size="small" startIcon={<PersonSearch sx={{ fontSize: 14 }} />} onClick={() => onViewCandidates(client)}
             sx={{ flex: 1, textTransform: "none", fontWeight: 600, fontSize: 12, borderColor: "#e8edf3", color: "#059669", borderRadius: 1.5, "&:hover": { borderColor: "#059669", bgcolor: "#d1fae5" } }}>
             Candidates
@@ -320,6 +333,9 @@ export default function Clients() {
   const [formTarget, setFormTarget]= useState(null);
   const [formData,   setFormData]  = useState(EMPTY_FORM);
   const [saving,     setSaving]    = useState(false);
+
+
+
 
   const load = useCallback(async () => {
     try { setLoading(true); setError(""); const r = await getAllClients(); setClients(r.data || []); }
@@ -373,6 +389,7 @@ export default function Clients() {
 
   const handleSelect  = (c) => setSelected(prev => prev?._id === c._id ? null : c);
   const goJobs        = (c) => navigate(`/jobs?client=${c._id}&client_name=${encodeURIComponent(c.company_name)}`);
+  const goJDs = (c) => navigate(`/jobs?client=${c._id}&client_name=${encodeURIComponent(c.company_name)}&tab=1`);
   const goCandidates  = (c) => navigate(`/resumes?client=${c._id}&client_name=${encodeURIComponent(c.company_name)}`);
   const openCreate    = () => { setFormTarget(null); setFormData(EMPTY_FORM); setFormOpen(true); };
   const openEdit      = (c) => { setFormTarget(c); setFormData({ ...EMPTY_FORM, ...c }); setFormOpen(true); };
@@ -504,6 +521,7 @@ export default function Clients() {
                     onEdit={openEdit}
                     onDelete={openDelete}
                     onViewJobs={goJobs}
+                    onViewJDs={goJDs} 
                     onViewCandidates={goCandidates}
                   />
                 </Grid>
@@ -528,6 +546,7 @@ export default function Clients() {
                 onClose={() => setSelected(null)}
                 onEdit={(c) => { openEdit(c); setSelected(null); }}
                 onViewJobs={goJobs}
+                onViewJDs={goJDs} 
                 onViewCandidates={goCandidates}
               />
             </Grid>
