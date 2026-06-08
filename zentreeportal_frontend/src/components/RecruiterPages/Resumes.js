@@ -93,6 +93,13 @@ const createRawManual = (payload) =>
     body: JSON.stringify(payload),
   }).then(handle);
 
+const getResourcingCandidates = (p = {}) => {
+    const qs = new URLSearchParams(p).toString();
+    return fetch(`${RESUMES_BASE}/resourcing-candidates${qs ? "?" + qs : ""}`, {
+      headers: getHeaders()
+    }).then(handle);
+  };
+
 // ── Exam Apis ────────────────────────────────────────────────────────────
 
   const sendExam = (payload) =>
@@ -1534,12 +1541,25 @@ export default function Resumes() {
   const [rawUploading,   setRawUploading]   = useState(false);
   const [rawUploadBatch, setRawUploadBatch] = useState([]);
 
+
+  // ── Resourcing Bot candidates state ───────────────────────────────────────
+const [rbCandidates,   setRbCandidates]   = useState([]);
+const [rbLoading,      setRbLoading]      = useState(false);
+const [rbSearch,       setRbSearch]       = useState("");
+const [rbStatusF,      setRbStatusF]      = useState("");
+const [rbSelected,     setRbSelected]     = useState(null);
+const [rbDetailOpen,   setRbDetailOpen]   = useState(false);
+const [rbPage,     setRbPage]     = useState(1);
+const [rbTotal,    setRbTotal]    = useState(0);
+const [rbPerPage]                 = useState(50);
   // ── Dialogs state ──────────────────────────────────────────────────────────
   const [assignOpen,   setAssignOpen]   = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
   const [assignJobId,  setAssignJobId]  = useState("");
   const [assignSaving, setAssignSaving] = useState(false);
-
+  const [allJobsCombined, setAllJobsCombined] = useState([]);
+  const [jobSourceFilter, setJobSourceFilter] = useState("all"); // "all" | "zentree" | "resourcing_bot"
+  const [assignJobSearch, setAssignJobSearch] = useState("");
   const [convertOpen,   setConvertOpen]   = useState(false);
   const [convertTarget, setConvertTarget] = useState(null);
   const [convertData,   setConvertData]   = useState(EMPTY_CONVERT);
@@ -1619,6 +1639,8 @@ export default function Resumes() {
   const loadClients = useCallback(async () => {
     try { const res = await getAllClients(); setClients(res.data || []); } catch { setClients([]); }
   }, []);
+  const getAllJobsCombined = () =>
+    fetch(`${RESUMES_BASE}/raw/all-jobs`, { headers: getHeaders() }).then(handle);
   const loadRecruiters = useCallback(async () => {
     try {
       const res  = await fetch(`${BASE}/user/`, { headers: getHeaders() });
@@ -1634,9 +1656,46 @@ export default function Resumes() {
     } catch { setAllTracking([]); }
   }, []);
 
+  // const loadRB = useCallback(async () => {
+  //   try {
+  //     setRbLoading(true);
+  //     const res = await getResourcingCandidates({ per_page: 200 });
+  //     setRbCandidates(res.data || []);
+  //   } catch { setRbCandidates([]); }
+  //   finally { setRbLoading(false); }
+  // }, []);
+
+
+
+  const loadRB = useCallback(async (page = 1) => {
+    try {
+      setRbLoading(true);
+      const res = await getResourcingCandidates({
+        page,
+        per_page: rbPerPage,
+        ...(rbSearch  ? { q: rbSearch }           : {}),
+        ...(rbStatusF ? { status: rbStatusF }      : {}),
+      });
+      setRbCandidates(res.data || []);
+      setRbTotal(res.total || 0);
+      setRbPage(page);
+    } catch { setRbCandidates([]); }
+    finally { setRbLoading(false); }
+  }, [rbSearch, rbStatusF, rbPerPage]);
+  const loadAllJobsCombined = useCallback(async () => {
+    try {
+      const res = await getAllJobsCombined();
+      setAllJobsCombined(res.data || []);
+    } catch { setAllJobsCombined([]); }
+  }, []);
+
+
   useEffect(() => {
-    load(); loadRaw(); loadJobs(); loadClients(); loadRecruiters(); loadAllTracking();
-  }, [load, loadRaw, loadJobs, loadClients, loadRecruiters, loadAllTracking]);
+    if (mainTab === 2) loadRB(1);
+  }, [rbSearch, rbStatusF]);
+  useEffect(() => {
+    load(); loadRaw(); loadJobs(); loadClients(); loadRecruiters(); loadAllTracking(); loadRB(); loadAllJobsCombined();
+  }, [load, loadRaw, loadJobs, loadClients, loadRecruiters, loadAllTracking, loadRB ,loadAllJobsCombined]);
 
 
   // Load all cached scores whenever resumes or jobs change
@@ -2030,17 +2089,56 @@ const handleTrackingIvSave = async (e) => {
     setTimeout(() => setRawUploadBatch([]), 3000);
   };
 
-  const openAssign = (raw) => { setAssignTarget(raw); setAssignJobId(""); setAssignOpen(true); };
+  const openAssign = (raw) => {
+    setAssignTarget(raw);
+    setAssignJobId("");
+    setAssignJobSearch("");   
+    setJobSourceFilter("all"); 
+    setAssignOpen(true);
+  };
+
+
+  // const handleAssign = async () => {
+  //   if (!assignJobId) return;
+  //   const job = jobs.find(j => j._id === assignJobId);
+  //   setAssignSaving(true);
+  //   try {
+  //     await assignRawToJob(assignTarget._id, { job_id: assignJobId, job_title: job?.title || "", client_name: job?.client_name || "" });
+  //     setAssignOpen(false); loadRaw();
+  //   } catch (err) { setError(err?.message || "Failed to assign job"); }
+  //   finally { setAssignSaving(false); }
+  // };
+
   const handleAssign = async () => {
     if (!assignJobId) return;
-    const job = jobs.find(j => j._id === assignJobId);
+  
+    // assignJobId format: "source::mongoId::job_id_string"
+    const [source, mongoId, jobIdStr] = assignJobId.split("::");
+    const job = allJobsCombined.find(j => j.id === mongoId);
+  
     setAssignSaving(true);
     try {
-      await assignRawToJob(assignTarget._id, { job_id: assignJobId, job_title: job?.title || "", client_name: job?.client_name || "" });
-      setAssignOpen(false); loadRaw();
-    } catch (err) { setError(err?.message || "Failed to assign job"); }
-    finally { setAssignSaving(false); }
+      await fetch(`${RESUMES_BASE}/raw/${assignTarget._id}/assign-job`, {
+        method: "PUT",
+        headers: getHeaders(),
+        body: JSON.stringify({
+          job_id:      jobIdStr,
+          job_title:   job?.title       || "",
+          client_name: job?.client_name || "",
+          source:      source,
+          mongo_id:    mongoId,
+        }),
+      }).then(handle);
+      setAssignOpen(false);
+      loadRaw();
+    } catch (err) {
+      setError(err?.message || "Failed to assign job");
+    } finally {
+      setAssignSaving(false);
+    }
   };
+
+
 
   const openConvert = (raw) => {
     setConvertTarget(raw); setConvertError("");
@@ -2242,31 +2340,65 @@ const handleTrackingIvSave = async (e) => {
 )}
 
       {/* ── Stat cards ─────────────────────────────────────────────────────── */}
-      <Grid container spacing={2.5}>
+      {/* <Grid container spacing={2.5}>
         <Grid item xs={6} md={3}><StatCard title={isClientLocked ? "Client Candidates" : "Total"} value={isClientLocked ? filtered.length : stats.total} icon={<Description />} color="#1a237e" /></Grid>
         <Grid item xs={6} md={3}><StatCard title="New"         value={isClientLocked ? filtered.filter(r=>r.status==="New").length        : stats.newCount}    icon={<NewReleases />} color="#0277bd" /></Grid>
         <Grid item xs={6} md={3}><StatCard title="Shortlisted" value={isClientLocked ? filtered.filter(r=>r.status==="Shortlisted").length : stats.shortlisted} icon={<Star />}        color="#e65100" /></Grid>
         <Grid item xs={6} md={3}><StatCard title="Stored PDFs" value={rawResumes.length} icon={<Inventory2 />} color="#6a1b9a" /></Grid>
-      </Grid>
+      </Grid> */}
+
+<Grid container spacing={2.5}>
+  {mainTab === 0 && (
+    <>
+      <Grid item xs={6} md={3}><StatCard title={isClientLocked ? "Client Candidates" : "Total"} value={isClientLocked ? filtered.length : stats.total} icon={<Description />} color="#1a237e" /></Grid>
+      <Grid item xs={6} md={3}><StatCard title="New" value={isClientLocked ? filtered.filter(r=>r.status==="New").length : stats.newCount} icon={<NewReleases />} color="#0277bd" /></Grid>
+      <Grid item xs={6} md={3}><StatCard title="Shortlisted" value={isClientLocked ? filtered.filter(r=>r.status==="Shortlisted").length : stats.shortlisted} icon={<Star />} color="#e65100" /></Grid>
+      <Grid item xs={6} md={3}><StatCard title="Stored PDFs" value={rawResumes.length} icon={<Inventory2 />} color="#6a1b9a" /></Grid>
+    </>
+  )}
+  {mainTab === 1 && (
+    <>
+      <Grid item xs={6} md={3}><StatCard title="Total Stored" value={rawResumes.length} icon={<Inventory2 />} color="#6a1b9a" /></Grid>
+      <Grid item xs={6} md={3}><StatCard title="Pending" value={rawResumes.filter(r=>r.status==="Stored").length} icon={<NewReleases />} color="#0277bd" /></Grid>
+      <Grid item xs={6} md={3}><StatCard title="Assigned" value={rawResumes.filter(r=>r.status==="Assigned").length} icon={<Work />} color="#e65100" /></Grid>
+      <Grid item xs={6} md={3}><StatCard title="Converted" value={rawResumes.filter(r=>r.status==="Converted").length} icon={<CheckCircle />} color="#2e7d32" /></Grid>
+    </>
+  )}
+  {mainTab === 2 && (
+    <>
+      <Grid item xs={6} md={3}><StatCard title="Total (All Pages)" value={rbTotal} icon={<People />} color="#1a237e" /></Grid>
+      <Grid item xs={6} md={3}><StatCard title="New Candidates" value={rbCandidates.filter(c=>c.overallStatus==="New"||c.overallStatus==="NewCandidate").length} icon={<NewReleases />} color="#0277bd" /></Grid>
+      <Grid item xs={6} md={3}><StatCard title="Shortlisted" value={rbCandidates.filter(c=>c.overallStatus==="Shortlisted").length} icon={<Star />} color="#e65100" /></Grid>
+      <Grid item xs={6} md={3}><StatCard title="Hired" value={rbCandidates.filter(c=>c.overallStatus==="Hired").length} icon={<CheckCircle />} color="#2e7d32" /></Grid>
+    </>
+  )}
+</Grid>
 
       {/* ── Main tabs ──────────────────────────────────────────────────────── */}
         <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
           <Tabs value={mainTab} onChange={(_, v) => setMainTab(v)}>
             <Tab
               label={
+                <Badge
+                badgeContent={filtered.length}
+                color="secondary"
+              >
                 <Box display="flex" alignItems="center" gap={1}>
                   <People fontSize="small" />
                   {isHR ? "Hired Candidates" : "Candidates"}
                   {isClientLocked && <Chip label={urlClientName} size="small" color="info" sx={{ fontSize: 10, height: 18 }} />}
                 </Box>
+                </Badge>
               }
               iconPosition="start"
             />
+
             {/* Stored Resumes tab — recruiters/managers/admins only */}
             {!isHR && (
               <Tab
                 label={
-                  <Badge badgeContent={rawResumes.filter(r => r.status === "Stored").length} color="secondary" max={99}>
+                  // <Badge badgeContent={rawResumes.filter(r => r.status === "Stored").length} color="secondary" max={99}>
+                  <Badge badgeContent={rawResumes.length} color="secondary">
                     <Box sx={{ pr: rawResumes.filter(r => r.status === "Stored").length > 0 ? 1.5 : 0 }}>
                       Stored Resumes
                     </Box>
@@ -2276,6 +2408,20 @@ const handleTrackingIvSave = async (e) => {
                 iconPosition="start"
               />
             )}
+
+
+          <Tab
+            label={
+              // <Badge badgeContent={rbCandidates.length} color="primary" max={999}>
+              <Badge badgeContent={rbTotal} color="primary" max={999}>
+                <Box sx={{ pr: rbCandidates.length > 0 ? 1.5 : 0 }}>
+                  Resourcing Bot Candidates
+                </Box>
+              </Badge>
+            }
+            icon={<People fontSize="small" />}
+            iconPosition="start"
+          />
           </Tabs>
         </Box>
 
@@ -2735,6 +2881,608 @@ const handleTrackingIvSave = async (e) => {
           )}
         </>
       )}
+
+
+
+
+
+
+
+{/* ══════════════════════════════════════════════════════════════════════
+    TAB 2 — Resourcing Bot Candidates
+══════════════════════════════════════════════════════════════════════ */}
+{mainTab === 2 && (
+  <>
+    <Box px={2} py={1.5} bgcolor="#e8eaf6" borderRadius={2}
+      border="1px solid #9fa8da" display="flex" alignItems="center" gap={1.5}>
+      <People fontSize="small" sx={{ color: "#1a237e" }} />
+      <Typography fontSize={13} color="#1a237e">
+        Candidates from the <strong>Resourcing Bot</strong> system
+        (resourcing_bot_db · candidate_profiles). These include candidates
+        sourced via the old screening flow and candidates converted from
+        stored resumes.
+      </Typography>
+    </Box>
+
+    <Box display="flex" gap={2} flexWrap="wrap">
+      <TextField
+        placeholder="Search by name, email, role, JD ID…"
+        value={rbSearch} 
+        // onChange={e => setRbSearch(e.target.value)}
+        onChange={e => { setRbSearch(e.target.value); }}
+        size="small" sx={{ flexGrow: 1, minWidth: 220 }}
+        InputProps={{ startAdornment:
+          <InputAdornment position="start">
+            <Search fontSize="small" color="action" />
+          </InputAdornment>
+        }}
+      />
+      <TextField select value={rbStatusF}
+        onChange={e => setRbStatusF(e.target.value)}
+        size="small" sx={{ minWidth: 180 }} label="Overall Status">
+        <MenuItem value="">All Statuses</MenuItem>
+        {[
+          "New","ScreeningTest_Sent","ScreeningTest_Resent",
+          "ScreeningTest_Completed","Shortlisted","Interviewed",
+          "Offered","Hired","Rejected","Interested","Not Interested"
+        ].map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+      </TextField>
+      {/* <Button variant="outlined" size="small"
+        startIcon={<FilterList />} onClick={loadRB}>
+        Refresh
+      </Button> */}
+      <Button variant="outlined" size="small" startIcon={<FilterList />} onClick={() => loadRB(1)}>
+  Refresh
+</Button>
+    </Box>
+
+    {rbLoading ? (
+      <Box display="flex" justifyContent="center" py={8}>
+        <CircularProgress />
+      </Box>
+    ) : (
+      <Card>
+        <Paper variant="outlined" sx={{ borderRadius: 2, overflow: "hidden" }}>
+          <Table>
+            <TableHead>
+              <TableRow sx={{ bgcolor: "#e8eaf6" }}>
+                {["Candidate","Email","Role","JD ID","Match %",
+                  "Screening Score","Status","Source","Submitted","Actions"]
+                  .map(h => (
+                  <TableCell key={h}
+                    sx={{ fontWeight: 700, fontSize: 12, color: "#546e7a" }}>
+                    {h}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {(() => {
+                const filtered = rbCandidates.filter(c => {
+                  const q = rbSearch.toLowerCase();
+                  const mQ = !q
+                    || c.candidatename?.toLowerCase().includes(q)
+                    || c.candidateEmail?.toLowerCase().includes(q)
+                    || c.jobRole?.toLowerCase().includes(q)
+                    || c.jdID?.toLowerCase().includes(q);
+                  const mS = !rbStatusF || c.overallStatus === rbStatusF;
+                  return mQ && mS;
+                });
+
+                if (filtered.length === 0) return (
+                  <TableRow>
+                    <TableCell colSpan={10} align="center"
+                      sx={{ py: 8, color: "text.secondary" }}>
+                      No resourcing bot candidates found
+                    </TableCell>
+                  </TableRow>
+                );
+
+                return filtered.map(c => {
+                  const scoreColor = c.match_score >= 70 ? "#2e7d32"
+                    : c.match_score >= 40 ? "#e65100" : "#c62828";
+                  const scoreBg = c.match_score >= 70 ? "#e8f5e9"
+                    : c.match_score >= 40 ? "#fff8e1" : "#fce4ec";
+                  const testPct = c.score_breakdown?.overall?.percentage
+                    ?? c.ScreeningTestScore ?? null;
+
+                  return (
+                    <TableRow key={c._id} hover>
+                      <TableCell>
+                        <Box display="flex" alignItems="center" gap={1.5}>
+                          <Avatar sx={{ width: 34, height: 34, fontSize: 12,
+                            fontWeight: 700, bgcolor: "#1a237e" }}>
+                            {(c.candidatename || "?")[0].toUpperCase()}
+                          </Avatar>
+                          <Typography fontWeight={600} fontSize={13}>
+                            {c.candidatename || "—"}
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 12 }}>
+                        {c.candidateEmail || "—"}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 12 }}>
+                        {c.jobRole || "—"}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 12, color: "#0277bd",
+                        fontWeight: 600 }}>
+                        {c.jdID || "—"}
+                      </TableCell>
+                      <TableCell>
+                        {c.match_score != null ? (
+                          <Box sx={{ display: "inline-flex", alignItems: "center",
+                            px: 1, py: 0.3, borderRadius: 20,
+                            bgcolor: scoreBg }}>
+                            <Typography fontSize={12} fontWeight={700}
+                              color={scoreColor}>
+                              {Number(c.match_score).toFixed(1)}%
+                            </Typography>
+                          </Box>
+                        ) : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {testPct != null ? (
+                          <Box sx={{ display: "inline-flex", alignItems: "center",
+                            px: 1, py: 0.3, borderRadius: 20,
+                            bgcolor: testPct >= 60 ? "#e8f5e9" : "#fce4ec" }}>
+                            <Typography fontSize={12} fontWeight={700}
+                              color={testPct >= 60 ? "#2e7d32" : "#c62828"}>
+                              {testPct}%
+                            </Typography>
+                          </Box>
+                        ) : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={c.overallStatus || "Unknown"}
+                          size="small"
+                          color={
+                            c.overallStatus === "Hired"       ? "success"
+                          : c.overallStatus === "Rejected"    ? "error"
+                          : c.overallStatus === "Shortlisted" ? "primary"
+                          : c.overallStatus === "Interested"  ? "success"
+                          : c.overallStatus === "Not Interested" ? "error"
+                          : "default"
+                          }
+                          sx={{ fontWeight: 700, fontSize: 10 }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 11, color: "text.secondary" }}>
+                        {c.source || "Resourcing Bot"}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 11, color: "text.secondary",
+                        whiteSpace: "nowrap" }}>
+                        {c.test_submitted_at
+                          ? new Date(c.test_submitted_at)
+                              .toLocaleDateString("en-IN")
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip title="View Details">
+                          <IconButton size="small"
+                            onClick={() => {
+                              setRbSelected(c);
+                              setRbDetailOpen(true);
+                            }}>
+                            <Visibility fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  );
+                });
+              })()}
+            </TableBody>
+          </Table>
+
+
+
+
+{/* Pagination bar */}
+{rbTotal > rbPerPage && (
+  <Box display="flex" alignItems="center" justifyContent="space-between"
+    px={2} py={1.5} borderTop="1px solid #e0e0e0" bgcolor="#fafafa">
+    
+    <Typography fontSize={12} color="text.secondary">
+      Showing{" "}
+      <strong>{(rbPage - 1) * rbPerPage + 1}–{Math.min(rbPage * rbPerPage, rbTotal)}</strong>
+      {" "}of <strong>{rbTotal}</strong> candidates
+    </Typography>
+
+    <Box display="flex" alignItems="center" gap={1}>
+      <Button
+        size="small" variant="outlined"
+        disabled={rbPage === 1 || rbLoading}
+        onClick={() => loadRB(rbPage - 1)}
+        sx={{ minWidth: 32, px: 1 }}
+      >
+        ‹ Prev
+      </Button>
+
+      {/* Page number pills */}
+      {Array.from({ length: Math.ceil(rbTotal / rbPerPage) }, (_, i) => i + 1)
+        .filter(p => p === 1
+          || p === Math.ceil(rbTotal / rbPerPage)
+          || Math.abs(p - rbPage) <= 1)
+        .reduce((acc, p, i, arr) => {
+          if (i > 0 && p - arr[i - 1] > 1) acc.push("...");
+          acc.push(p);
+          return acc;
+        }, [])
+        .map((p, i) =>
+          p === "..." ? (
+            <Typography key={`ellipsis-${i}`} fontSize={12} color="text.disabled" px={0.5}>
+              …
+            </Typography>
+          ) : (
+            <Button
+              key={p}
+              size="small"
+              variant={p === rbPage ? "contained" : "outlined"}
+              onClick={() => loadRB(p)}
+              disabled={rbLoading}
+              sx={{ minWidth: 32, px: 1, fontWeight: p === rbPage ? 700 : 400 }}
+            >
+              {p}
+            </Button>
+          )
+        )
+      }
+
+      <Button
+        size="small" variant="outlined"
+        disabled={rbPage * rbPerPage >= rbTotal || rbLoading}
+        onClick={() => loadRB(rbPage + 1)}
+        sx={{ minWidth: 32, px: 1 }}
+      >
+        Next ›
+      </Button>
+    </Box>
+  </Box>
+)}
+
+
+
+
+
+
+
+
+
+
+
+        </Paper>
+      </Card>
+    )}
+
+    {/* ── Resourcing Bot Candidate Detail Dialog ── */}
+    <Dialog open={rbDetailOpen}
+      onClose={() => setRbDetailOpen(false)}
+      maxWidth="md" fullWidth
+      PaperProps={{ sx: { maxHeight: "92vh" } }}>
+      <DialogTitle sx={{ fontWeight: 700,
+        borderBottom: "1px solid #e0e0e0", pb: 1.5 }}>
+        <Box display="flex" alignItems="center"
+          justifyContent="space-between">
+          <Box display="flex" alignItems="center" gap={1.5}>
+            <Avatar sx={{ bgcolor: "#1a237e", width: 40, height: 40 }}>
+              {(rbSelected?.candidatename || "?")[0].toUpperCase()}
+            </Avatar>
+            <Box>
+              <Typography fontWeight={700} fontSize={15}>
+                {rbSelected?.candidatename}
+              </Typography>
+              <Typography fontSize={11} color="text.secondary">
+                {rbSelected?.candidateEmail} · {rbSelected?.jdID}
+              </Typography>
+            </Box>
+          </Box>
+          <Box display="flex" alignItems="center" gap={1}>
+            <Chip label={rbSelected?.overallStatus || "Unknown"}
+              size="small"
+              color={rbSelected?.overallStatus === "Hired" ? "success"
+                : rbSelected?.overallStatus === "Rejected" ? "error"
+                : "default"}
+              sx={{ fontWeight: 700 }}
+            />
+            <IconButton size="small"
+              onClick={() => setRbDetailOpen(false)}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Box>
+        </Box>
+      </DialogTitle>
+
+      {rbSelected && (
+        <DialogContent sx={{ pt: 3 }}>
+          <Grid container spacing={3} mb={2}>
+            <Grid item xs={12} sm={4}>
+              <Typography fontSize={11} fontWeight={700}
+                color="text.secondary" textTransform="uppercase"
+                letterSpacing={0.5} mb={1}>
+                Candidate Info
+              </Typography>
+              {[
+                ["Name",    rbSelected.candidatename],
+                ["Email",   rbSelected.candidateEmail],
+                ["Phone",   rbSelected.phone || "—"],
+                ["Role",    rbSelected.jobRole || "—"],
+                ["Address", rbSelected.address || "—"],
+              ].map(([l, v]) => (
+                <Box key={l} display="flex" justifyContent="space-between"
+                  py={0.8} sx={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <Typography fontSize={12} color="text.secondary">{l}</Typography>
+                  <Typography fontSize={12} fontWeight={600}
+                    textAlign="right" sx={{ maxWidth: 160, wordBreak: "break-word" }}>
+                    {v}
+                  </Typography>
+                </Box>
+              ))}
+            </Grid>
+
+            <Grid item xs={12} sm={4}>
+              <Typography fontSize={11} fontWeight={700}
+                color="text.secondary" textTransform="uppercase"
+                letterSpacing={0.5} mb={1}>
+                Screening Results
+              </Typography>
+              {[
+                ["JD ID",        rbSelected.jdID || "—"],
+                ["Match Score",  rbSelected.match_score != null
+                  ? `${Number(rbSelected.match_score).toFixed(1)}%` : "—"],
+                ["Test Score",   rbSelected.score_breakdown?.overall?.percentage != null
+                  ? `${rbSelected.score_breakdown.overall.percentage}%`
+                  : rbSelected.ScreeningTestScore != null
+                  ? `${rbSelected.ScreeningTestScore}%` : "—"],
+                ["MCQ",          rbSelected.score_breakdown?.mcq
+                  ? `${rbSelected.score_breakdown.mcq.obtained}/${rbSelected.score_breakdown.mcq.total}`
+                  : "—"],
+                ["Subjective",   rbSelected.score_breakdown?.subjective
+                  ? `${rbSelected.score_breakdown.subjective.obtained}/${rbSelected.score_breakdown.subjective.total}`
+                  : "—"],
+                ["Coding",       rbSelected.score_breakdown?.coding
+                  ? `${rbSelected.score_breakdown.coding.obtained}/${rbSelected.score_breakdown.coding.total}`
+                  : "—"],
+                ["Submitted",    rbSelected.test_submitted_at
+                  ? new Date(rbSelected.test_submitted_at).toLocaleString("en-IN")
+                  : "—"],
+              ].map(([l, v]) => (
+                <Box key={l} display="flex" justifyContent="space-between"
+                  py={0.8} sx={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <Typography fontSize={12} color="text.secondary">{l}</Typography>
+                  <Typography fontSize={12} fontWeight={600}>{v}</Typography>
+                </Box>
+              ))}
+            </Grid>
+
+            <Grid item xs={12} sm={4}>
+              <Typography fontSize={11} fontWeight={700}
+                color="text.secondary" textTransform="uppercase"
+                letterSpacing={0.5} mb={1}>
+                Feedback
+              </Typography>
+              {rbSelected.recruiterFeedback && (
+                <Box mb={1.5} p={1.2} bgcolor="#e3f2fd"
+                  borderRadius={1.5} border="1px solid #90caf9">
+                  <Typography fontSize={10} fontWeight={700}
+                    color="#0277bd" mb={0.3}>Recruiter</Typography>
+                  <Typography fontSize={12}>
+                    {rbSelected.recruiterFeedback}
+                  </Typography>
+                </Box>
+              )}
+              {rbSelected.hiringManagerFeedback && (
+                <Box mb={1.5} p={1.2} bgcolor="#e8f5e9"
+                  borderRadius={1.5} border="1px solid #a5d6a7">
+                  <Typography fontSize={10} fontWeight={700}
+                    color="#2e7d32" mb={0.3}>Hiring Manager</Typography>
+                  <Typography fontSize={12}>
+                    {rbSelected.hiringManagerFeedback}
+                  </Typography>
+                </Box>
+              )}
+              {!rbSelected.recruiterFeedback
+                && !rbSelected.hiringManagerFeedback && (
+                <Typography fontSize={12} color="text.disabled">
+                  No feedback yet.
+                </Typography>
+              )}
+            </Grid>
+          </Grid>
+
+          {/* AI Summary */}
+          {rbSelected.summaries && (
+            <Box mb={2} p={2} bgcolor="#f5f7fa" borderRadius={2}
+              border="1px solid #e0e0e0">
+              <Typography fontSize={11} fontWeight={700}
+                color="text.secondary" textTransform="uppercase"
+                letterSpacing={0.5} mb={0.8}>
+                AI Resume Summary
+              </Typography>
+              <Typography fontSize={13} lineHeight={1.8}
+                sx={{ whiteSpace: "pre-wrap" }}>
+                {rbSelected.summaries}
+              </Typography>
+            </Box>
+          )}
+
+          {/* MCQ Questions */}
+          {rbSelected.mcq_questions?.length > 0 && (
+            <Box mb={2}>
+              <Typography fontSize={11} fontWeight={700}
+                color="#7b1fa2" textTransform="uppercase"
+                letterSpacing={0.5} mb={1}>
+                MCQ Questions ({rbSelected.mcq_questions.length})
+              </Typography>
+              {rbSelected.mcq_questions.map((q, i) => {
+                const correct = Array.isArray(q.correct_answer)
+                  ? q.correct_answer : [q.correct_answer];
+                return (
+                  <Box key={i} mb={1} p={1.5}
+                    sx={{ border: "1px solid #e0e0e0", borderRadius: 2 }}>
+                    <Typography fontSize={12} fontWeight={600} mb={1}>
+                      Q{i + 1}. {q.question}
+                    </Typography>
+                    <Box display="flex" flexWrap="wrap" gap={0.5}>
+                      {(q.options || []).map((opt, j) => {
+                        const isCorrect = correct.includes(opt);
+                        return (
+                          <Chip key={j} label={opt} size="small"
+                            sx={{
+                              fontSize: 10,
+                              bgcolor: isCorrect ? "#e8f5e9" : "#fafafa",
+                              color:   isCorrect ? "#1b5e20" : "#555",
+                              border:  isCorrect
+                                ? "1.5px solid #a5d6a7"
+                                : "1px solid #e0e0e0",
+                              fontWeight: isCorrect ? 700 : 400,
+                            }}
+                          />
+                        );
+                      })}
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
+
+          {/* Subjective Questions with answers */}
+          {rbSelected.subjective_questions?.length > 0 && (
+            <Box mb={2}>
+              <Typography fontSize={11} fontWeight={700}
+                color="#0277bd" textTransform="uppercase"
+                letterSpacing={0.5} mb={1}>
+                Subjective Questions
+                ({rbSelected.subjective_questions.length})
+              </Typography>
+              {rbSelected.subjective_questions.map((q, i) => (
+                <Box key={i} mb={1.5}
+                  sx={{ border: "1px solid #90caf9",
+                    borderRadius: 2, overflow: "hidden" }}>
+                  <Box sx={{ bgcolor: "#e3f2fd", px: 2, py: 1 }}>
+                    <Typography fontSize={12} fontWeight={600}>
+                      Q{i + 1}. {q.question}
+                    </Typography>
+                    <Box display="flex" gap={1} mt={0.5}>
+                      {q.difficulty && (
+                        <Chip label={q.difficulty} size="small"
+                          sx={{ fontSize: 9, height: 18 }} />
+                      )}
+                      {q.score != null && (
+                        <Chip
+                          label={`Score: ${q.score}/${q.max_score}`}
+                          size="small"
+                          color={q.score >= (q.max_score * 0.6)
+                            ? "success" : "warning"}
+                          sx={{ fontSize: 9, height: 18,
+                            fontWeight: 700 }} />
+                      )}
+                    </Box>
+                  </Box>
+                  <Box sx={{ p: 1.5, bgcolor: "#fff" }}>
+                    <Typography fontSize={11} fontWeight={700}
+                      color="text.secondary" mb={0.3}>
+                      Candidate Answer:
+                    </Typography>
+                    <Typography fontSize={12}
+                      color={q.user_answer
+                        ? "text.primary" : "text.disabled"}
+                      fontStyle={q.user_answer ? "normal" : "italic"}>
+                      {q.user_answer || "No answer provided"}
+                    </Typography>
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          {/* Coding Questions */}
+          {rbSelected.programming_questions?.length > 0 && (
+            <Box mb={2}>
+              <Typography fontSize={11} fontWeight={700}
+                color="#2e7d32" textTransform="uppercase"
+                letterSpacing={0.5} mb={1}>
+                Coding Questions
+                ({rbSelected.programming_questions.length})
+              </Typography>
+              {rbSelected.programming_questions.map((q, i) => (
+                <Box key={i} mb={1.5}
+                  sx={{ border: "1px solid #3d3d5c",
+                    borderRadius: 2, overflow: "hidden" }}>
+                  <Box sx={{ bgcolor: "#2d2d3f", px: 2, py: 1,
+                    display: "flex", alignItems: "center", gap: 1 }}>
+                    <Box display="flex" gap={0.5}>
+                      {["#ff5f57","#febc2e","#28c840"].map(c => (
+                        <Box key={c} sx={{ width: 8, height: 8,
+                          borderRadius: "50%", bgcolor: c }} />
+                      ))}
+                    </Box>
+                    <Typography fontSize={11} fontWeight={700}
+                      color="#82aaff">
+                      Problem {i + 1}
+                      {q.programming_language && (
+                        <span style={{ color: "#a9b1d6",
+                          fontWeight: 400 }}>
+                          {" "}· {q.programming_language}
+                        </span>
+                      )}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ bgcolor: "#1e1e2e", px: 2.5, py: 2 }}>
+                    <Typography fontSize={12} color="#cdd6f4"
+                      lineHeight={1.9}
+                      sx={{ whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        fontFamily:
+                          "'Fira Code','Consolas',monospace" }}>
+                      {q.question}
+                    </Typography>
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          {/* Source indicator */}
+          {rbSelected.zentree_resume_id && (
+            <Box p={1.5} bgcolor="#f3e5f5" borderRadius={2}
+              border="1px solid #ce93d8"
+              display="flex" alignItems="center" gap={1}>
+              <People sx={{ fontSize: 16, color: "#7b1fa2" }} />
+              <Typography fontSize={12} color="#4a148c">
+                Also exists in Resume Bank as{" "}
+                <strong>{rbSelected.zentree_resume_id}</strong>
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+      )}
+
+      <DialogActions sx={{ px: 3, py: 2,
+        borderTop: "1px solid #e0e0e0" }}>
+        <Button onClick={() => setRbDetailOpen(false)}
+          variant="contained">
+          Close
+        </Button>
+      </DialogActions>
+    </Dialog>
+  </>
+)}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
       {/* ── PDF viewers ──────────────────────────────────────────────────────── */}
       <PdfViewerDialog    open={pdfOpen}    onClose={() => setPdfOpen(false)}    candidate={selected} />
@@ -3232,44 +3980,220 @@ const handleTrackingIvSave = async (e) => {
         </DialogActions>
       </Dialog>
 
-      {/* ── Assign to Job ─────────────────────────────────────────────────────── */}
-      <Dialog open={assignOpen} onClose={() => setAssignOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0" }}>
-          <Box display="flex" alignItems="center" gap={1}>
-            <Work color="primary" />
-            {assignTarget?.status === "Converted" ? "Re-assign to Another Job" : "Assign to Job"}
-          </Box>
-        </DialogTitle>
-        <DialogContent sx={{ pt: 3 }}>
-          {assignTarget && (
-            <Box mb={2.5} p={1.5} bgcolor="#f3e5f5" borderRadius={2}>
-              <Typography fontSize={12} color="text.secondary">
-                {assignTarget.status === "Converted" ? "Re-assigning converted resume:" : "Assigning resume:"}
-              </Typography>
-              <Typography fontWeight={700}>{assignTarget.name || assignTarget.original_name}</Typography>
-              <Typography fontSize={12} color="text.secondary">{assignTarget.raw_id}</Typography>
-              {assignTarget.status === "Converted" && assignTarget.converted_resume_id && (
-                <Typography fontSize={11} color="success.main" mt={0.5}>
-                  Already converted → {assignTarget.converted_resume_id}
-                </Typography>
-              )}
-              {assignTarget.linked_job_id && (
-                <Typography fontSize={11} color="#0277bd" mt={0.5}>
-                  Currently linked to: {assignTarget.linked_job_id} — {assignTarget.linked_job_title}
-                </Typography>
-              )}
-            </Box>
-          )}
-          <TextField select fullWidth size="small" label="Select Job *" value={assignJobId} onChange={e => setAssignJobId(e.target.value)}>
-            <MenuItem value="">— Choose a job posting —</MenuItem>
-            {jobs.map(j => <MenuItem key={j._id} value={j._id}><Box><Typography fontSize={13} fontWeight={600}>{j.job_id} — {j.title}</Typography>{j.client_name && <Typography fontSize={11} color="text.secondary">{j.client_name}</Typography>}</Box></MenuItem>)}
-          </TextField>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
-          <Button onClick={() => setAssignOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleAssign} disabled={!assignJobId || assignSaving} startIcon={assignSaving ? <CircularProgress size={16} color="inherit" /> : <Work />}>{assignSaving ? "Assigning…" : "Assign"}</Button>
-        </DialogActions>
-      </Dialog>
+
+{/* ── Assign to Job ─────────────────────────────────────────────────────── */}
+<Dialog open={assignOpen} onClose={() => { setAssignOpen(false); setAssignJobSearch(""); }} maxWidth="sm" fullWidth>
+  <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0" }}>
+    <Box display="flex" alignItems="center" gap={1}>
+      <Work color="primary" />
+      {assignTarget?.status === "Converted" ? "Re-assign to Another Job" : "Assign to Job"}
+    </Box>
+  </DialogTitle>
+
+  <DialogContent sx={{ pt: 2.5 }}>
+    {/* Current assignment info */}
+    {assignTarget && (
+      <Box mb={2} p={1.5} bgcolor="#f3e5f5" borderRadius={2}>
+        <Typography fontSize={12} color="text.secondary">Assigning resume:</Typography>
+        <Typography fontWeight={700}>{assignTarget.name || assignTarget.original_name}</Typography>
+        <Typography fontSize={12} color="text.secondary">{assignTarget.raw_id}</Typography>
+        {assignTarget.linked_job_id && (
+          <Typography fontSize={11} color="#0277bd" mt={0.5}>
+            Currently: {assignTarget.linked_job_id} — {assignTarget.linked_job_title}
+            {assignTarget.linked_job_source === "resourcing_bot" && (
+              <Chip label="Resourcing Bot" size="small"
+                sx={{ ml: 1, fontSize: 9, height: 16, bgcolor: "#e8eaf6", color: "#1a237e" }} />
+            )}
+          </Typography>
+        )}
+      </Box>
+    )}
+
+    {/* Source filter tabs */}
+    <Box display="flex" gap={1} mb={2} flexWrap="wrap">
+      {[
+        { val: "all",            label: `All (${allJobsCombined.length})` },
+        { val: "zentree",        label: `Zentree (${allJobsCombined.filter(j => j.source === "zentree").length})` },
+        { val: "resourcing_bot", label: `Resourcing Bot (${allJobsCombined.filter(j => j.source === "resourcing_bot").length})` },
+      ].map(t => (
+        <Chip
+          key={t.val}
+          label={t.label}
+          size="small"
+          onClick={() => { setJobSourceFilter(t.val); setAssignJobSearch(""); }}
+          color={jobSourceFilter === t.val ? "primary" : "default"}
+          variant={jobSourceFilter === t.val ? "filled" : "outlined"}
+          sx={{ cursor: "pointer", fontWeight: jobSourceFilter === t.val ? 700 : 400 }}
+        />
+      ))}
+    </Box>
+
+    {/* Search box */}
+    <TextField
+      fullWidth
+      size="small"
+      placeholder="Search by job ID, title, or client…"
+      value={assignJobSearch}
+      onChange={e => setAssignJobSearch(e.target.value)}
+      autoFocus
+      sx={{ mb: 1.5 }}
+      InputProps={{
+        startAdornment: (
+          <InputAdornment position="start">
+            <Search fontSize="small" color="action" />
+          </InputAdornment>
+        ),
+        endAdornment: assignJobSearch ? (
+          <InputAdornment position="end">
+            <IconButton size="small" onClick={() => setAssignJobSearch("")}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </InputAdornment>
+        ) : null,
+      }}
+    />
+
+    {/* Job list */}
+    {(() => {
+      const q = assignJobSearch.toLowerCase().trim();
+      const filtered = allJobsCombined.filter(j => {
+        const matchSource = jobSourceFilter === "all" || j.source === jobSourceFilter;
+        const matchSearch = !q
+          || j.job_id?.toLowerCase().includes(q)
+          || j.title?.toLowerCase().includes(q)
+          || j.client_name?.toLowerCase().includes(q)
+          || j.location?.toLowerCase().includes(q);
+        return matchSource && matchSearch;
+      });
+
+      if (filtered.length === 0) return (
+        <Box py={4} textAlign="center">
+          <Typography fontSize={13} color="text.disabled">
+            {assignJobSearch ? `No jobs match "${assignJobSearch}"` : "No jobs available"}
+          </Typography>
+        </Box>
+      );
+
+      return (
+        <Box
+          sx={{
+            maxHeight: 340,
+            overflowY: "auto",
+            border: "1px solid #e0e0e0",
+            borderRadius: 2,
+            bgcolor: "#fafafa",
+          }}
+        >
+          {filtered.map((j, idx) => {
+            const compositeVal = `${j.source}::${j.id}::${j.job_id}`;
+            const isSelected   = assignJobId === compositeVal;
+            return (
+              <Box
+                key={`${j.source}_${j.id}`}
+                onClick={() => setAssignJobId(isSelected ? "" : compositeVal)}
+                sx={{
+                  px: 2, py: 1.5,
+                  cursor: "pointer",
+                  borderBottom: idx < filtered.length - 1 ? "1px solid #f0f0f0" : "none",
+                  bgcolor: isSelected ? "#e3f2fd" : "transparent",
+                  borderLeft: isSelected ? "3px solid #1565c0" : "3px solid transparent",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1.5,
+                  transition: "background 0.15s",
+                  "&:hover": { bgcolor: isSelected ? "#e3f2fd" : "#f5f7fa" },
+                }}
+              >
+                {/* Selection indicator */}
+                <Box
+                  sx={{
+                    width: 18, height: 18, borderRadius: "50%", flexShrink: 0,
+                    border: isSelected ? "5px solid #1565c0" : "2px solid #bdbdbd",
+                    bgcolor: isSelected ? "#1565c0" : "transparent",
+                    transition: "all 0.15s",
+                  }}
+                />
+
+                {/* Job info */}
+                <Box flex={1} minWidth={0}>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Typography
+                      fontSize={13} fontWeight={700}
+                      color={isSelected ? "#0d47a1" : "text.primary"}
+                      noWrap
+                    >
+                      {j.job_id}
+                    </Typography>
+                    <Typography fontSize={13} color="text.primary" noWrap>
+                    — {j.title || j.jobRole}
+                    </Typography>
+                  </Box>
+                  <Box display="flex" gap={1} alignItems="center" mt={0.3} flexWrap="wrap">
+                    {j.client_name && (
+                      <Typography fontSize={11} color="text.secondary">
+                        🏢 {j.client_name}
+                      </Typography>
+                    )}
+                    {j.location && (
+                      <Typography fontSize={11} color="text.disabled">
+                        📍 {j.location}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+
+                {/* Source badge */}
+                <Chip
+                  label={j.source === "zentree" ? "Zentree" : "Bot"}
+                  size="small"
+                  sx={{
+                    fontSize: 9, height: 18, flexShrink: 0,
+                    bgcolor: j.source === "zentree" ? "#e3f2fd" : "#e8eaf6",
+                    color:   j.source === "zentree" ? "#0277bd" : "#1a237e",
+                    fontWeight: 700,
+                  }}
+                />
+              </Box>
+            );
+          })}
+        </Box>
+      );
+    })()}
+
+    {/* Selected job preview */}
+    {assignJobId && (() => {
+      const [, mongoId] = assignJobId.split("::");
+      const job = allJobsCombined.find(j => j.id === mongoId);
+      if (!job) return null;
+      return (
+        <Box mt={1.5} p={1.2} bgcolor="#e8f5e9" borderRadius={2}
+          border="1px solid #a5d6a7" display="flex" alignItems="center" gap={1}>
+          <CheckCircle sx={{ fontSize: 16, color: "#2e7d32", flexShrink: 0 }} />
+          <Typography fontSize={12} color="#1b5e20">
+            Selected: <strong>{job.job_id} — {job.title}</strong>
+            {job.client_name ? ` · ${job.client_name}` : ""}
+          </Typography>
+        </Box>
+      );
+    })()}
+  </DialogContent>
+
+  <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
+    <Button onClick={() => { setAssignOpen(false); setAssignJobSearch(""); setAssignJobId(""); }}>
+      Cancel
+    </Button>
+    <Button
+      variant="contained"
+      onClick={handleAssign}
+      disabled={!assignJobId || assignSaving}
+      startIcon={assignSaving ? <CircularProgress size={16} color="inherit" /> : <Work />}
+    >
+      {assignSaving ? "Assigning…" : "Assign"}
+    </Button>
+  </DialogActions>
+</Dialog>
+
+
 
       {/* ── Convert to Candidate ─────────────────────────────────────────────── */}
       <Dialog open={convertOpen} onClose={() => setConvertOpen(false)} maxWidth="md" fullWidth>

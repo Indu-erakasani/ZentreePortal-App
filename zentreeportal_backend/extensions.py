@@ -20,3 +20,8 @@ jwt   = JWTManager()
 # ── Direct client for 10.10.1.46 ─────────────────────────────────────────────
 resourcing_client = MongoClient("mongodb://10.10.1.46:27017/")
 resourcing_db     = resourcing_client["resourcing_bot_db"]
+
+
+def get_candidate_profiles_col():
+    """candidate_profiles collection on 10.10.1.46"""
+    return resourcing_db["candidate_profiles"]

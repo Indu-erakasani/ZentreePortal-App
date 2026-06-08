@@ -248,7 +248,58 @@ def get_raw_file(rid):
     return send_file(file_path, mimetype="application/pdf", as_attachment=False,
                      download_name=doc.get("original_name", "resume.pdf"))
 
+@resume_bp.route("/raw/all-jobs", methods=["GET"])
+@jwt_required()
+def get_all_jobs_combined():
+    """Return jobs from both zentreeportal (mongo.db.jobs) and resourcing_bot_db (jd_details)."""
+    from extensions import resourcing_db
 
+    zentree_jobs = []
+    try:
+        docs = list(mongo.db.jobs.find({"is_active": True}, {
+            "_id": 1, "job_id": 1, "title": 1,
+            "client_name": 1, "location": 1, "status": 1
+        }))
+        for d in docs:
+            zentree_jobs.append({
+                "id":          str(d["_id"]),
+                "job_id":      d.get("job_id", ""),
+                "title":       d.get("title", ""),
+                "client_name": d.get("client_name", ""),
+                "location":    d.get("location", ""),
+                "source":      "zentree",       # ← tag the source
+            })
+    except Exception as e:
+        logger.warning(f"[all-jobs] zentree fetch failed: {e}")
+
+    rb_jobs = []
+    try:
+
+        rb_docs = list(resourcing_db["jd_details"].find({"is_active": True}, {
+            "_id": 1, "jdID": 1, "jobTitle": 1,"jobRole":1,
+            "companyName": 1, "location": 1
+        }))
+        for d in rb_docs:
+            jd_id = d.get("jdID", "")  
+            rb_jobs.append({
+                "id":          str(d["_id"]),
+                "job_id":      jd_id, 
+                "title":       d.get("jobTitle", ""),
+                "jobRole":     d.get("jobRole", ""),
+                "client_name": d.get("companyName", ""),
+                "location":    d.get("location", ""),
+                "source":      "resourcing_bot",
+            })
+    except Exception as e:
+        logger.warning(f"[all-jobs] resourcing_bot fetch failed: {e}")
+
+    return jsonify(
+        success=True,
+        data=zentree_jobs + rb_jobs,
+        zentree_count=len(zentree_jobs),
+        rb_count=len(rb_jobs),
+    ), 200
+    
 @resume_bp.route("/raw/<rid>/assign-job", methods=["PUT"])
 @jwt_required()
 def assign_raw_to_job(rid):
@@ -257,31 +308,83 @@ def assign_raw_to_job(rid):
         return err
 
     data      = request.get_json(silent=True) or {}
-    job_id    = data.get("job_id", "").strip()
+    job_id    = data.get("job_id", "").strip()       # the job_id string (e.g. JOB001 or jdId)
     job_title = data.get("job_title", "")
     client    = data.get("client_name", "")
+    source    = data.get("source", "zentree")        # "zentree" or "resourcing_bot"
+    mongo_id  = data.get("mongo_id", "")             # raw _id from whichever DB
 
     if not job_id:
         return jsonify(success=False, message="'job_id' is required"), 400
 
-    resolved_id = _resolve_job_id(job_id)
-    if resolved_id == job_id and re.match(r'^[a-f0-9]{24}$', job_id):
-        job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
-        if job_doc:
-            resolved_id = job_doc.get("job_id", job_id)
-            job_title   = job_doc.get("title", job_title)
-            client      = job_doc.get("client_name", client)
+    # ── Resolve from zentree jobs ─────────────────────────────────────────────
+    if source == "zentree" and mongo_id:
+        try:
+            job_doc = mongo.db.jobs.find_one({"_id": ObjectId(mongo_id)})
+            if job_doc:
+                job_id    = job_doc.get("job_id", job_id)
+                job_title = job_doc.get("title", job_title)
+                client    = job_doc.get("client_name", client)
+        except Exception:
+            pass
+
+    # ── Resolve from resourcing_bot jd_details ────────────────────────────────
+    elif source == "resourcing_bot" and mongo_id:
+        from extensions import resourcing_db
+        try:
+            rb_doc = resourcing_db["jd_details"].find_one({"_id": ObjectId(mongo_id)})
+            if rb_doc:
+                job_id    = rb_doc.get("jdId", job_id)
+                job_title = rb_doc.get("jobTitle", job_title)
+                client    = rb_doc.get("companyName", client)
+        except Exception:
+            pass
 
     upd = {
-        "linked_job_id":    resolved_id,
-        "linked_job_title": job_title,
-        "client_name":      client,
-        "status":           "Assigned",
-        "updated_at":       datetime.utcnow(),
+        "linked_job_id":     job_id,
+        "linked_job_title":  job_title,
+        "client_name":       client,
+        "linked_job_source": source,           # ← store which system it came from
+        "status":            "Assigned",
+        "updated_at":        datetime.utcnow(),
     }
     mongo.db.raw_resumes.update_one({"_id": doc["_id"]}, {"$set": upd})
     updated = mongo.db.raw_resumes.find_one({"_id": doc["_id"]})
-    return jsonify(success=True, message="Job assigned", data=_serialize_raw(updated)), 200
+    return jsonify(success=True, message="Job assigned", data=_serialize_raw(updated)), 200    
+    
+# @resume_bp.route("/raw/<rid>/assign-job", methods=["PUT"])
+# @jwt_required()
+# def assign_raw_to_job(rid):
+#     doc, err = _find_raw(rid)
+#     if err:
+#         return err
+
+#     data      = request.get_json(silent=True) or {}
+#     job_id    = data.get("job_id", "").strip()
+#     job_title = data.get("job_title", "")
+#     client    = data.get("client_name", "")
+
+#     if not job_id:
+#         return jsonify(success=False, message="'job_id' is required"), 400
+
+#     resolved_id = _resolve_job_id(job_id)
+#     if resolved_id == job_id and re.match(r'^[a-f0-9]{24}$', job_id):
+#         job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
+#         if job_doc:
+#             resolved_id = job_doc.get("job_id", job_id)
+#             job_title   = job_doc.get("title", job_title)
+#             client      = job_doc.get("client_name", client)
+
+#     upd = {
+#         "linked_job_id":    resolved_id,
+#         "linked_job_title": job_title,
+#         "client_name":      client,
+#         "status":           "Assigned",
+#         "updated_at":       datetime.utcnow(),
+#     }
+#     mongo.db.raw_resumes.update_one({"_id": doc["_id"]}, {"$set": upd})
+#     updated = mongo.db.raw_resumes.find_one({"_id": doc["_id"]})
+#     return jsonify(success=True, message="Job assigned", data=_serialize_raw(updated)), 200
 
 
 @resume_bp.route("/raw/<rid>/convert", methods=["POST"])
@@ -329,6 +432,37 @@ def convert_raw(rid):
         candidate["resume_file"] = ""
 
         result = mongo.db.candidate_processing.insert_one(candidate)
+        
+        try:
+            from extensions import get_candidate_profiles_col
+            profile_doc = {
+                "candidatename":   name,
+                "candidateEmail":  email.lower().strip(),
+                "phone":           data.get("phone", doc.get("phone", "")),
+                "address":         data.get("location", doc.get("location", "")),
+                "jobRole":         data.get("current_role", doc.get("current_role", "")),
+                "summaries":       "",
+                "overallStatus":   "New",
+                "jdID":            data.get("linked_job_id", doc.get("linked_job_id", "")),
+                "resumeUrl":       doc.get("filename", ""),
+                "match_score":     0,
+                "ScreeningTestScore": 0,
+                "mcq_questions":   [],
+                "subjective_questions": [],
+                "programming_questions": [],
+                "interviewFeedback": [],
+                "recruiterFeedback": "",
+                "hiringManagerFeedback": "",
+                "source":          "Converted from Stored Resume",
+                "zentree_resume_id": resume_id,
+                "raw_resume_id":   doc.get("raw_id", ""),
+                "created_at":      datetime.utcnow(),
+                "updated_at":      datetime.utcnow(),
+            }
+            get_candidate_profiles_col().insert_one(profile_doc)
+        except Exception as dual_write_err:
+            logger.warning(f"[convert_raw] Dual-write to candidate_profiles failed: {dual_write_err}")
+
 
         raw_path  = os.path.join(RAW_DIR, doc.get("filename", ""))
         perm_name = f"{resume_id}.pdf"
@@ -862,154 +996,6 @@ def talent_search():
 # candidate intrest to add the resume to the jd for the stored resumes 
 # ── POST /api/resumes/raw/<rid>/send-screening ────────────────────────────────
 
-
-
-# @resume_bp.route("/raw/<rid>/send-screening", methods=["POST"])
-# @jwt_required()
-# def send_screening(rid):
-#     doc, err = _find_raw(rid)
-#     if err:
-#         return err
-
-#     data            = request.get_json(silent=True) or {}
-#     candidate_email = data.get("email") or doc.get("email", "")
-#     job_id          = data.get("job_id", doc.get("linked_job_id", ""))
-#     job_title       = data.get("job_title", doc.get("linked_job_title", ""))
-#     client_name     = data.get("client_name", doc.get("client_name", ""))
-#     candidate_name  = data.get("name") or doc.get("name", "Candidate")
-
-#     if not candidate_email:
-#         return jsonify(success=False, message="Candidate email is required"), 400
-#     if not job_title:
-#         return jsonify(success=False, message="Please assign this resume to a job first"), 400
-
-#     token      = str(uuid.uuid4())
-#     expires_at = datetime.utcnow() + timedelta(days=3)
-
-#     mongo.db.screening_confirmations.insert_one({
-#         "token":           token,
-#         "raw_resume_id":   str(doc["_id"]),
-#         "raw_id":          doc.get("raw_id", ""),
-#         "candidate_email": candidate_email.lower().strip(),
-#         "candidate_name":  candidate_name,
-#         "job_id":          job_id,
-#         "job_title":       job_title,
-#         "client_name":     client_name,
-#         "status":          "Pending",
-#         "created_at":      datetime.utcnow(),
-#         "expires_at":      expires_at,
-#     })
-
-
-
-
-#     smtp_host = os.environ.get("SMTP_SERVER", "")        # was SMTP_HOST
-#     smtp_user = os.environ.get("SMTP_USERNAME", "")      # was SMTP_USER  
-#     smtp_pass = os.environ.get("SMTP_PASSWORD", "")      # was SMTP_PASS
-#     smtp_port = int(os.environ.get("SMTP_PORT", 587))
-#     from_email = os.environ.get("FROM_EMAIL", smtp_user) # SendGrid needs exact from_email
-#     from_name = os.environ.get("FROM_NAME", "Recruitment Team")
-#     frontend_base = os.environ.get("FRONTEND_URL", "http://localhost:3000")  # was FRONTEND_URL
-#     api_base = os.environ.get("API_BASE_URL", "http://10.10.2.240:5000")
-#     yes_link = f"{api_base}/api/resumes/screening/{token}/yes"
-#     no_link  = f"{api_base}/api/resumes/screening/{token}/no"
-#     # yes_link = f"{frontend_base}/screening-response/{token}/yes"
-#     # no_link  = f"{frontend_base}/screening-response/{token}/no"
-
-
-#     # ── Guard: skip email if SMTP not configured ──────────────────────────────
-#     if not smtp_host or not smtp_user or not smtp_pass:
-#         # Still mark as sent in DB so frontend chip updates
-#         mongo.db.raw_resumes.update_one(
-#             {"_id": doc["_id"]},
-#             {"$set": {
-#                 "screening_status": "Sent",
-#                 "screening_token":  token,
-#                 "updated_at":       datetime.utcnow(),
-#             }}
-#         )
-#         return jsonify(
-#             success=True,
-#             message="Token created (SMTP not configured — email not sent)",
-#             token=token,
-#             yes_link=yes_link,
-#             no_link=no_link,
-#         ), 200
-
-#     try:
-#         import smtplib
-#         from email.mime.multipart import MIMEMultipart
-#         from email.mime.text import MIMEText
-
-#         msg            = MIMEMultipart("alternative")
-#         msg["Subject"] = f"Job Opportunity: {job_title}{f' at {client_name}' if client_name else ''}"
-#         msg["From"]    = f"{from_name} <{from_email}>" 
-#         msg["To"]      = candidate_email
-
-#         html = f"""
-#         <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;
-#                     padding:32px 24px;background:#f8fafc;border-radius:12px;">
-#           <div style="background:#fff;border-radius:10px;padding:32px;border:1px solid #e2e8f0;">
-#             <h2 style="color:#1e3a5f;margin:0 0 8px;">Hi {candidate_name},</h2>
-#             <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 20px;">
-#               We came across your profile and feel you could be a great fit:
-#             </p>
-#             <div style="background:#f0f9ff;border-left:4px solid #0369a1;
-#                         border-radius:6px;padding:16px 20px;margin-bottom:24px;">
-#               <div style="font-size:18px;font-weight:700;color:#0369a1;">{job_title}</div>
-#               {f'<div style="font-size:14px;color:#64748b;margin-top:4px;">{client_name}</div>'
-#                if client_name else ''}
-#             </div>
-#             <div style="text-align:center;margin-bottom:28px;">
-#               <a href="{yes_link}"
-#                  style="display:inline-block;background:#15803d;color:#fff;
-#                         text-decoration:none;padding:14px 32px;border-radius:8px;
-#                         font-weight:700;font-size:15px;margin-right:12px;">
-#                 ✅ Yes, I'm Interested
-#               </a>
-#               <a href="{no_link}"
-#                  style="display:inline-block;background:#f1f5f9;color:#64748b;
-#                         text-decoration:none;padding:14px 32px;border-radius:8px;
-#                         font-weight:700;font-size:15px;border:1px solid #e2e8f0;">
-#                 No, Not Right Now
-#               </a>
-#             </div>
-#             <p style="color:#94a3b8;font-size:12px;text-align:center;margin:0;">
-#               This link expires in 3 days.
-#             </p>
-#           </div>
-#         </div>
-#         """
-#         msg.attach(MIMEText(html, "html"))
-
-#         with smtplib.SMTP(smtp_host, smtp_port) as server:
-#             server.starttls()
-#             server.login(smtp_user, smtp_pass)
-#             server.sendmail(from_email, candidate_email, msg.as_string())
-
-#         mongo.db.raw_resumes.update_one(
-#             {"_id": doc["_id"]},
-#             {"$set": {
-#                 "screening_status": "Sent",
-#                 "screening_token":  token,
-#                 "updated_at":       datetime.utcnow(),
-#             }}
-#         )
-#         return jsonify(
-#             success=True,
-#             message=f"Screening email sent to {candidate_email}",
-#             token=token,
-#         ), 200
-
-#     except Exception as e:
-#         import traceback
-#         traceback.print_exc()
-#         return jsonify(success=False, message=f"Failed to send email: {str(e)}"), 500
-
-
-
-
-
 @resume_bp.route("/raw/<rid>/send-screening", methods=["POST"])
 @jwt_required()
 def send_screening(rid):
@@ -1030,121 +1016,6 @@ def send_screening(rid):
         return jsonify(success=False, message="Please assign this resume to a job first"), 400
 
     # ── Fetch full JD details from jobs collection ────────────────────────────
-    # job_doc = None
-    # try:
-    #     if job_id:
-    #         # Try by job_id string first, then by mongo _id
-    #         job_doc = mongo.db.jobs.find_one({"job_id": job_id})
-    #         if not job_doc and re.match(r'^[a-f0-9]{24}$', job_id.strip()):
-    #             job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
-    # except Exception:
-    #     job_doc = None
-
-    # # Extract JD fields safely
-    # jd_location      = job_doc.get("location", "")           if job_doc else ""
-    # jd_experience    = job_doc.get("experience_required", "") if job_doc else ""
-    # jd_employment    = job_doc.get("employment_type", "")     if job_doc else ""
-    # jd_salary_min    = job_doc.get("salary_min", "")          if job_doc else ""
-    # jd_salary_max    = job_doc.get("salary_max", "")          if job_doc else ""
-    # jd_skills        = job_doc.get("required_skills", "")     if job_doc else ""
-    # jd_description   = job_doc.get("description", "")         if job_doc else ""
-    # jd_responsibilities = job_doc.get("responsibilities", "") if job_doc else ""
-
-    # # Format salary range
-    # salary_str = ""
-    # if jd_salary_min and jd_salary_max:
-    #     salary_str = f"₹{jd_salary_min} – ₹{jd_salary_max} LPA"
-    # elif jd_salary_min:
-    #     salary_str = f"₹{jd_salary_min}+ LPA"
-    # elif jd_salary_max:
-    #     salary_str = f"Up to ₹{jd_salary_max} LPA"
-
-    # # Format skills as badges
-    # skills_html = ""
-    # if jd_skills:
-    #     skill_list = [s.strip() for s in str(jd_skills).split(",") if s.strip()]
-    #     badges = "".join([
-    #         f'<span style="display:inline-block;background:#e0f2fe;color:#0369a1;'
-    #         f'padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;'
-    #         f'margin:3px 4px 3px 0;">{s}</span>'
-    #         for s in skill_list[:10]  # cap at 10 skills
-    #     ])
-    #     skills_html = f"""
-    #     <div style="margin-bottom:16px;">
-    #       <div style="font-size:12px;font-weight:700;color:#64748b;
-    #                   text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
-    #         Key Skills
-    #       </div>
-    #       <div>{badges}</div>
-    #     </div>
-    #     """
-
-    # # Format quick-info pills (location, exp, type, salary)
-    # meta_items = []
-    # if jd_location:
-    #     meta_items.append(("📍", jd_location))
-    # if jd_experience:
-    #     meta_items.append(("💼", f"{jd_experience} yrs experience"))
-    # if jd_employment:
-    #     meta_items.append(("⏱️", jd_employment))
-    # if salary_str:
-    #     meta_items.append(("💰", salary_str))
-
-    # meta_html = ""
-    # if meta_items:
-    #     pills = "".join([
-    #         f'<div style="display:flex;align-items:center;gap:6px;'
-    #         f'background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;'
-    #         f'padding:8px 14px;margin:4px;">'
-    #         f'<span style="font-size:14px;">{icon}</span>'
-    #         f'<span style="font-size:13px;color:#374151;font-weight:500;">{text}</span>'
-    #         f'</div>'
-    #         for icon, text in meta_items
-    #     ])
-    #     meta_html = f"""
-    #     <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:20px;">
-    #       {pills}
-    #     </div>
-    #     """
-
-    # # Format description (first 300 chars as teaser)
-    # desc_html = ""
-    # if jd_description:
-    #     teaser = str(jd_description)[:350].strip()
-    #     if len(str(jd_description)) > 350:
-    #         teaser += "…"
-    #     desc_html = f"""
-    #     <div style="margin-bottom:16px;">
-    #       <div style="font-size:12px;font-weight:700;color:#64748b;
-    #                   text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
-    #         About the Role
-    #       </div>
-    #       <p style="color:#475569;font-size:13px;line-height:1.7;margin:0;">{teaser}</p>
-    #     </div>
-    #     """
-
-    # # Format responsibilities (first 3 bullet points)
-    # resp_html = ""
-    # if jd_responsibilities:
-    #     if isinstance(jd_responsibilities, list):
-    #         resp_list = jd_responsibilities[:4]
-    #     else:
-    #         resp_list = [r.strip() for r in str(jd_responsibilities).split("\n") if r.strip()][:4]
-    #     if resp_list:
-    #         bullets = "".join([
-    #             f'<li style="color:#475569;font-size:13px;line-height:1.7;margin-bottom:4px;">{r}</li>'
-    #             for r in resp_list
-    #         ])
-    #         resp_html = f"""
-    #         <div style="margin-bottom:20px;">
-    #           <div style="font-size:12px;font-weight:700;color:#64748b;
-    #                       text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
-    #             Key Responsibilities
-    #           </div>
-    #           <ul style="margin:0;padding-left:18px;">{bullets}</ul>
-    #         </div>
-    #         """
-
     job_doc = None
     try:
         if job_id:
@@ -1690,6 +1561,36 @@ def screening_response(token, response):
                     candidate["resume_id"] = resume_id
                     candidate["resume_file"] = ""
                     result = mongo.db.candidate_processing.insert_one(candidate)
+                    
+              
+                    try:
+                        from extensions import get_candidate_profiles_col
+                        get_candidate_profiles_col().insert_one({
+                            "candidatename":     conf["candidate_name"],
+                            "candidateEmail":    conf["candidate_email"],
+                            "phone":             raw_doc.get("phone", ""),
+                            "address":           raw_doc.get("location", ""),
+                            "jobRole":           raw_doc.get("current_role", ""),
+                            "summaries":         "",
+                            "overallStatus":     "Interested",
+                            "jdID":              conf.get("job_id", ""),
+                            "resumeUrl":         raw_doc.get("filename", ""),
+                            "match_score":       0,
+                            "ScreeningTestScore": 0,
+                            "mcq_questions":     [],
+                            "subjective_questions": [],
+                            "programming_questions": [],
+                            "interviewFeedback": [],
+                            "recruiterFeedback": "",
+                            "hiringManagerFeedback": "",
+                            "source":            "Auto-converted via Screening Email",
+                            "zentree_resume_id": resume_id,
+                            "raw_resume_id":     raw_doc.get("raw_id", ""),
+                            "created_at":        datetime.utcnow(),
+                            "updated_at":        datetime.utcnow(),
+                        })
+                    except Exception as e:
+                        logger.warning(f"[screening_response] Dual-write to candidate_profiles failed: {e}")
 
                     raw_path  = os.path.join(RAW_DIR, raw_doc.get("filename", ""))
                     perm_name = f"{resume_id}.pdf"
@@ -1739,3 +1640,63 @@ def get_screening_status(raw_id):
         if isinstance(conf.get(f), datetime):
             conf[f] = conf[f].isoformat()
     return jsonify(success=True, data=conf), 200
+
+
+
+
+
+
+# ── GET /api/resumes/resourcing-candidates ────────────────────────────────────
+@resume_bp.route("/resourcing-candidates", methods=["GET"])
+@jwt_required()
+def get_resourcing_candidates():
+    from extensions import get_candidate_profiles_col
+    from bson import ObjectId
+
+    q        = request.args.get("q", "").strip()
+    status   = request.args.get("status", "")
+    jd_id    = request.args.get("jd_id", "")
+    page     = int(request.args.get("page", 1))
+    per_page = int(request.args.get("per_page", 50))
+
+    query = {}
+    if q:
+        query["$or"] = [
+            {"candidatename":  {"$regex": q, "$options": "i"}},
+            {"candidateEmail": {"$regex": q, "$options": "i"}},
+            {"jobRole":        {"$regex": q, "$options": "i"}},
+            {"jdID":           {"$regex": q, "$options": "i"}},
+        ]
+    if status: query["overallStatus"] = status
+    if jd_id:  query["jdID"]          = jd_id
+
+    col   = get_candidate_profiles_col()
+    total = col.count_documents(query)
+    docs  = list(
+        col.find(query)
+        .sort("created_at", -1)
+        .skip((page - 1) * per_page)
+        .limit(per_page)
+    )
+
+    def _deep_serialize(obj):
+        """Recursively convert ObjectId and datetime to JSON-safe types."""
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, dict):
+            return {k: _deep_serialize(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_deep_serialize(item) for item in obj]
+        return obj
+
+    def _serialize(doc):
+        return _deep_serialize(dict(doc))
+
+    return jsonify(
+        success=True,
+        data=[_serialize(d) for d in docs],
+        total=total, page=page, per_page=per_page,
+        pages=(total + per_page - 1) // per_page,
+    ), 200
