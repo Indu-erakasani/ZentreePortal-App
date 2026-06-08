@@ -11,7 +11,9 @@ import {
   CloudUpload, CheckCircle, Done, NavigateBefore,
   Close as CloseIcon, PictureAsPdf, OpenInNew, Person,
 } from "@mui/icons-material";
-
+import Share from '@mui/icons-material/Share';
+import ContentCopy from '@mui/icons-material/ContentCopy';
+import SkillRatingInput from "./SkillRatingInput";
 const BASE = process.env.REACT_APP_API_BASE_URL;
 const BENCH_BASE = process.env.REACT_APP_API_BENCH_URL;
 const PDF_PARSING = process.env.REACT_APP_API_PDF_PARSING_URL;
@@ -73,7 +75,7 @@ const STAGE_COLOR = {
 };
 const SCORE_LABEL = ["", "Poor", "Below Avg", "Average", "Good", "Excellent"];
 const EMPTY_FORM = {
-  name: "", email: "", phone: "", current_role: "", skills: "",
+  name: "", email: "", phone: "", current_role: "", skills: [],
   experience: "", location: "", current_salary: "", expected_salary: "",
   notice_period: "Immediate", last_client: "", last_project: "",
   status: "Available", added_by: "", employment_type: "Permanent", notes: "",
@@ -224,43 +226,150 @@ function BenchDetailContent({ person, jobs, onClose, onEdit, onViewPdf }) {
   });
   const [pipeError,  setPipeError]  = React.useState("");
   const [pipeSaving, setPipeSaving] = React.useState(false);
+  const [assignOpen, setAssignOpen] = React.useState(false);
+  const [assignForm, setAssignForm] = React.useState({
+    job_id: "", senior_reviewer_email: "", senior_reviewer_name: "",
+  });
+  const [assignSaving, setAssignSaving] = React.useState(false);
+  const [assignError,  setAssignError]  = React.useState("");
+  const [assignDone,   setAssignDone]   = React.useState(false);
 
-  const loadTracking = React.useCallback(() => {
-    setLoadingT(true);
-    getTrackingByBench(person.bench_id)
-      .then(res => setTracking(res.data || []))
-      .catch(() => setTracking([]))
-      .finally(() => setLoadingT(false));
-  }, [person.bench_id]);
 
-  React.useEffect(() => { loadTracking(); }, [loadTracking]);
+// to view the resumes collected fromt he candidate for the particular js
+const [jdReviews,    setJdReviews]    = React.useState([]);
+const [loadingJD,    setLoadingJD]    = React.useState(false);
+const [reviewPdfUrl, setReviewPdfUrl] = React.useState(null);
+const [reviewPdfOpen,setReviewPdfOpen]= React.useState(false);
+const loadTracking = React.useCallback(() => {
+  setLoadingT(true);
+  getTrackingByBench(person.bench_id)
+    .then(res => setTracking(res.data || []))
+    .catch(() => setTracking([]))
+    .finally(() => setLoadingT(false));
+}, [person.bench_id]);
 
-  const activeTrack = tracking[0];
+React.useEffect(() => { loadTracking(); }, [loadTracking]);
 
-  const handleAddPipeline = async () => {
-    if (!pipeForm.job_id) { setPipeError("Please select a job"); return; }
-    setPipeSaving(true); setPipeError("");
+const activeTrack = tracking[0];
+const loadJdReviews = React.useCallback(() => {
+  setLoadingJD(true);
+  fetch(`${BASE}/jd-review/?bench_id=${person.bench_id}`, { headers: getHeaders() })
+    .then(r => r.json())
+    .then(d => setJdReviews(d.data || []))
+    .catch(() => setJdReviews([]))
+    .finally(() => setLoadingJD(false));
+}, [person.bench_id]);
+
+React.useEffect(() => { loadTracking(); loadJdReviews(); }, [loadTracking, loadJdReviews]);
+
+const openReviewPdf = (reviewId) => {
+  fetch(`${BASE}/jd-review/${reviewId}/file`, { headers: getHeaders() })
+    .then(r => r.blob())
+    .then(b => { setReviewPdfUrl(URL.createObjectURL(b)); setReviewPdfOpen(true); })
+    .catch(() => alert("Could not load PDF"));
+};
+
+
+
+
+
+const handleAddPipeline = async () => {
+  if (!pipeForm.job_id) { setPipeError("Please select a job"); return; }
+  setPipeSaving(true); setPipeError("");
+  try {
+    const job = jobs.find(j => j._id === pipeForm.job_id);
+
+    // ── Step 1: Promote bench person to candidate if not already there ──
+    await fetch(`${process.env.REACT_APP_API_BENCH_URL}/${person.bench_id}/promote-to-candidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+      },
+      body: JSON.stringify({
+        job_id:      pipeForm.job_id,
+        job_title:   job?.title || "",
+        client_name: job?.client_name || "",
+      }),
+    }).then(r => r.json());
+
+    // ── Step 2: Create tracking record (existing logic) ──
+    await createTracking({
+      resume_id:       person.bench_id?.trim(),
+      candidate_name:  person.name,
+      job_id:          pipeForm.job_id,
+      job_title:       job?.title || "",
+      client_name:     job?.client_name || "",
+      current_stage:   pipeForm.current_stage,
+      recruiter:       pipeForm.recruiter,
+      notes:           pipeForm.notes,
+      next_step:       pipeForm.next_step,
+      pipeline_status: "Active",
+    });
+
+    setAddPipeline(false);
+    setPipeForm({ job_id: "", current_stage: "Screening", recruiter: "", notes: "", next_step: "" });
+    loadTracking();
+  } catch (err) {
+    setPipeError(err?.message || "Failed to add to pipeline");
+  } finally { setPipeSaving(false); }
+};
+
+  // const handleAddPipeline = async () => {
+  //   if (!pipeForm.job_id) { setPipeError("Please select a job"); return; }
+  //   setPipeSaving(true); setPipeError("");
+  //   try {
+  //     const job = jobs.find(j => j._id === pipeForm.job_id);
+  //     await createTracking({
+  //       resume_id:       person.bench_id?.trim(),
+  //       candidate_name:  person.name,
+  //       job_id:          pipeForm.job_id,
+  //       job_title:       job?.title || "",
+  //       client_name:     job?.client_name || "",
+  //       current_stage:   pipeForm.current_stage,
+  //       recruiter:       pipeForm.recruiter,
+  //       notes:           pipeForm.notes,
+  //       next_step:       pipeForm.next_step,
+  //       pipeline_status: "Active",
+  //     });
+  //     setAddPipeline(false);
+  //     setPipeForm({ job_id: "", current_stage: "Screening", recruiter: "", notes: "", next_step: "" });
+  //     loadTracking();
+  //   } catch (err) {
+  //     setPipeError(err?.message || "Failed to add to pipeline");
+  //   } finally { setPipeSaving(false); }
+  // };
+
+
+
+
+
+  const handleAssign = async () => {
+    if (!assignForm.job_id || !assignForm.senior_reviewer_email) {
+      setAssignError("Job and reviewer email are required"); return;
+    }
+    setAssignSaving(true); setAssignError("");
     try {
-      const job = jobs.find(j => j._id === pipeForm.job_id);
-      await createTracking({
-        resume_id:       person.bench_id?.trim(),
-        candidate_name:  person.name,
-        job_id:          pipeForm.job_id,
-        job_title:       job?.title || "",
-        client_name:     job?.client_name || "",
-        current_stage:   pipeForm.current_stage,
-        recruiter:       pipeForm.recruiter,
-        notes:           pipeForm.notes,
-        next_step:       pipeForm.next_step,
-        pipeline_status: "Active",
-      });
-      setAddPipeline(false);
-      setPipeForm({ job_id: "", current_stage: "Screening", recruiter: "", notes: "", next_step: "" });
-      loadTracking();
-    } catch (err) {
-      setPipeError(err?.message || "Failed to add to pipeline");
-    } finally { setPipeSaving(false); }
+      await fetch(`${process.env.REACT_APP_API_BASE_URL}/jd-review/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("access_token")}` },
+        body: JSON.stringify({
+          bench_id:               person.bench_id,
+          job_id:                 assignForm.job_id,
+          senior_reviewer_email:  assignForm.senior_reviewer_email,
+          senior_reviewer_name:   assignForm.senior_reviewer_name,
+          assigned_by:            JSON.parse(localStorage.getItem("user")||"{}").email || "",
+        }),
+      }).then(r => r.json()).then(d => { if (!d.success) throw new Error(d.message); });
+      setAssignDone(true);
+    } catch(e) { setAssignError(e.message); }
+    finally { setAssignSaving(false); }
   };
+
+
+
+
 
   return (
     <>
@@ -319,14 +428,33 @@ function BenchDetailContent({ person, jobs, onClose, onEdit, onViewPdf }) {
               ))}
             </Grid>
 
-            {person.skills && (
+            {/* {person.skills && ( */}
+            {person.skills?.length > 0 && (
               <Box mb={2}>
                 <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase" mb={1}>Skills</Typography>
                 <Box display="flex" flexWrap="wrap" gap={0.8}>
-                  {person.skills.split(",").filter(Boolean).map((s, i) => (
+                  {/* {person.skills.split(",").filter(Boolean).map((s, i) => (
                     <Chip key={i} label={s.trim()} size="small" variant="outlined"
                       sx={{ fontSize: 11, borderColor: "#0369a1", color: "#0369a1" }} />
-                  ))}
+                  ))} */}
+                  {(Array.isArray(person.skills) ? person.skills : []).map((s, i) => {
+  const skill = typeof s === "object" ? s : { name: s, rating: 0 };
+  const ratingColor = r => r <= 1 ? "#ef4444" : r === 2 ? "#f97316" : r === 3 ? "#eab308" : r === 4 ? "#22c55e" : "#0369a1";
+  return (
+    <Box key={i} display="flex" alignItems="center" gap={1}
+      sx={{ px: 1.5, py: 0.8, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#f8fafc" }}>
+      <Typography fontSize={12} fontWeight={600} flex={1}>{skill.name}</Typography>
+      {skill.rating > 0 && (
+        <Box display="flex" gap={0.4}>
+          {[1,2,3,4,5].map(r => (
+            <Box key={r} sx={{ width: 8, height: 8, borderRadius: "50%",
+              bgcolor: r <= skill.rating ? ratingColor(skill.rating) : "#e2e8f0" }} />
+          ))}
+        </Box>
+      )}
+    </Box>
+  );
+})}
                 </Box>
               </Box>
             )}
@@ -356,6 +484,147 @@ function BenchDetailContent({ person, jobs, onClose, onEdit, onViewPdf }) {
         {/* TAB 1 — Pipeline */}
         {tab === 1 && (
           <Box p={3}>
+
+
+
+{/* ── JD Review Section ─────────────────────────────── */}
+{loadingJD ? (
+  <Box display="flex" justifyContent="center" py={2}>
+    <CircularProgress size={24} />
+  </Box>
+) : jdReviews.length > 0 && (
+  <Box mb={3}>
+    <Typography fontSize={11} fontWeight={700} color="text.secondary"
+      textTransform="uppercase" mb={1.5}>
+      JD Resume Reviews
+    </Typography>
+    {jdReviews.map((review) => {
+      const statusColor = {
+        "Accepted":       { bg: "#f0fdf4", border: "#86efac", chip: "success",  dot: "#15803d" },
+        "Rejected":       { bg: "#fef2f2", border: "#fca5a5", chip: "error",    dot: "#dc2626" },
+        "Pending Review": { bg: "#fffbeb", border: "#fcd34d", chip: "warning",  dot: "#d97706" },
+        "Pending Upload": { bg: "#f0f9ff", border: "#7dd3fc", chip: "info",     dot: "#0369a1" },
+      }[review.status] || { bg: "#f8fafc", border: "#e2e8f0", chip: "default", dot: "#64748b" };
+
+      return (
+        <Box key={review._id} p={2} mb={1.5} borderRadius={2}
+          sx={{ bgcolor: statusColor.bg, border: `1px solid ${statusColor.border}` }}>
+
+          {/* Header row */}
+          <Box display="flex" alignItems="flex-start" justifyContent="space-between" mb={1}>
+            <Box>
+              <Box display="flex" alignItems="center" gap={1} mb={0.4}>
+                <Box sx={{ width: 8, height: 8, borderRadius: "50%",
+                  bgcolor: statusColor.dot, flexShrink: 0 }} />
+                <Typography fontWeight={700} fontSize={13}>{review.job_title}</Typography>
+                <Typography fontSize={12} color="text.secondary">@ {review.client_name}</Typography>
+              </Box>
+              <Typography fontSize={11} color="text.secondary">
+                Reviewer: <strong>{review.senior_reviewer_name}</strong>
+                {" · "}Assigned by: <strong>{review.assigned_by}</strong>
+              </Typography>
+            </Box>
+            <Chip
+              label={review.status}
+              color={statusColor.chip}
+              size="small"
+              sx={{ fontWeight: 700, fontSize: 11 }}
+            />
+          </Box>
+
+          {/* Feedback if rejected */}
+          {review.status === "Rejected" && review.feedback && (
+            <Box p={1.2} bgcolor="#fef2f2" borderRadius={1.5} mb={1}
+              sx={{ borderLeft: "3px solid #ef4444" }}>
+              <Typography fontSize={11} fontWeight={700} color="#dc2626"
+                textTransform="uppercase" mb={0.3}>Reviewer Feedback</Typography>
+              <Typography fontSize={12} color="#7f1d1d">{review.feedback}</Typography>
+            </Box>
+          )}
+
+          {/* Accepted — show resume + Add to Pipeline CTA */}
+          {review.status === "Accepted" && (
+            <Box display="flex" alignItems="center" gap={1.5} mt={1}
+              p={1.5} bgcolor="#dcfce7" borderRadius={1.5}
+              sx={{ border: "1px solid #86efac" }}>
+              <CheckCircle sx={{ color: "#15803d", fontSize: 20 }} />
+              <Box flex={1}>
+                <Typography fontSize={12} fontWeight={700} color="#15803d">
+                  Tailored resume approved — ready to process!
+                </Typography>
+                <Typography fontSize={11} color="#166534">
+                  You can now view the resume and add this candidate to the pipeline.
+                </Typography>
+              </Box>
+              <Box display="flex" gap={1}>
+                <Button size="small" variant="outlined"
+                  onClick={() => openReviewPdf(review._id)}
+                  sx={{ fontSize: 11, borderColor: "#15803d", color: "#15803d",
+                    "&:hover": { bgcolor: "#f0fdf4" } }}
+                  startIcon={<PictureAsPdf sx={{ fontSize: 14 }} />}>
+                  View Resume
+                </Button>
+                <Button size="small" variant="contained"
+                  onClick={() => {
+                    setPipeForm(p => ({ ...p, job_id: review.job_id }));
+                    setAddPipeline(true);
+                  }}
+                  sx={{ fontSize: 11, bgcolor: "#15803d",
+                    "&:hover": { bgcolor: "#166534" } }}>
+                  + Add to Pipeline
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Pending states */}
+          {review.status === "Pending Upload" && (
+            <Typography fontSize={11} color="#0369a1" mt={0.5}>
+              ⏳ Waiting for candidate to upload their tailored resume…
+            </Typography>
+          )}
+          {review.status === "Pending Review" && (
+            <Typography fontSize={11} color="#d97706" mt={0.5}>
+              ⏳ Resume uploaded — waiting for {review.senior_reviewer_name} to review…
+            </Typography>
+          )}
+
+          {/* Rejection count badge */}
+          {review.rejection_count > 0 && (
+            <Typography fontSize={10} color="text.disabled" mt={0.5}>
+              Rejected {review.rejection_count} time{review.rejection_count > 1 ? "s" : ""}
+            </Typography>
+          )}
+        </Box>
+      );
+    })}
+  </Box>
+)}
+
+{/* PDF viewer for tailored resume */}
+<Dialog open={reviewPdfOpen} onClose={() => { setReviewPdfOpen(false); setReviewPdfUrl(null); }}
+  maxWidth="lg" fullWidth PaperProps={{ sx: { height: "90vh" } }}>
+  <DialogTitle sx={{ py: 1.5, borderBottom: "1px solid #e0e0e0" }}>
+    <Box display="flex" justifyContent="space-between" alignItems="center">
+      <Typography fontWeight={700}>Tailored Resume — {person.name}</Typography>
+      <IconButton size="small" onClick={() => { setReviewPdfOpen(false); setReviewPdfUrl(null); }}>
+        <CloseIcon fontSize="small" />
+      </IconButton>
+    </Box>
+  </DialogTitle>
+  <DialogContent sx={{ p: 0 }}>
+    {reviewPdfUrl && <iframe src={reviewPdfUrl} title="Tailored Resume"
+      style={{ width: "100%", height: "100%", border: "none" }} />}
+  </DialogContent>
+</Dialog>
+
+
+
+
+
+
+
+
             {addPipeline ? (
               <Box mb={3} p={2.5} borderRadius={2} sx={{ border: "1.5px solid #0369a1", bgcolor: "#f0f9ff" }}>
                 <Typography fontWeight={700} fontSize={14} color="#0369a1" mb={2}>Add to Pipeline</Typography>
@@ -411,6 +680,7 @@ function BenchDetailContent({ person, jobs, onClose, onEdit, onViewPdf }) {
                 </Button>
               </Box>
             )}
+
 
             {loadingT ? (
               <Box display="flex" justifyContent="center" py={6}><CircularProgress size={32} /></Box>
@@ -505,10 +775,95 @@ function BenchDetailContent({ person, jobs, onClose, onEdit, onViewPdf }) {
           </Box>
         )}
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
-        <Button onClick={onClose}>Close</Button>
-        <Button variant="contained" onClick={onEdit} sx={{ bgcolor: "#0369a1", "&:hover": { bgcolor: "#075985" } }}>Edit</Button>
-      </DialogActions>
+
+
+
+
+<DialogActions sx={{px: 3,pb: 2.5,borderTop: "1px solid #e0e0e0",justifyContent: "space-between", }}>
+  {/* Left Side */}
+  <Button
+    size="small"
+    variant="outlined"
+    onClick={() => setAssignOpen(true)}
+    sx={{ textTransform: "none", fontWeight: 700, borderColor: "#075985", color: "#075985",
+      "&:hover": { bgcolor: "#f5f3ff",},
+    }}
+  >
+     Send JD to Candidate
+  </Button>
+
+  {/* Right Side */}
+  <Box display="flex" gap={1}>
+    <Button onClick={onClose}>Close</Button>
+
+    <Button
+      variant="contained"
+      onClick={onEdit}
+      sx={{ bgcolor: "#0369a1","&:hover": {bgcolor: "#075985",},}}
+    >
+      Edit
+    </Button>
+  </Box>
+</DialogActions>
+
+
+
+
+
+{/* Assign Dialog */}
+<Dialog open={assignOpen} onClose={() => { setAssignOpen(false); setAssignDone(false); }}
+  maxWidth="sm" fullWidth>
+  <DialogTitle fontWeight={700}>Send JD & Request Tailored Resume</DialogTitle>
+  <DialogContent sx={{ pt: 2 }}>
+    {assignDone ? (
+      <Box textAlign="center" py={4}>
+        <Typography variant="h6" color="success.main" fontWeight={700}>✅ Email sent to candidate!</Typography>
+        <Typography fontSize={13} color="text.secondary" mt={1}>
+          They'll receive the JD and a secure upload link.
+          You'll be notified once the senior reviewer accepts.
+        </Typography>
+      </Box>
+    ) : (
+      <Grid container spacing={2} mt={0.5}>
+        <Grid item xs={12}>
+          <TextField select fullWidth size="small" required label="Select Job (JD)"
+            value={assignForm.job_id}
+            onChange={e => setAssignForm(p => ({ ...p, job_id: e.target.value }))}>
+            <MenuItem value="">— Select —</MenuItem>
+            {jobs.map(j => (
+              <MenuItem key={j._id} value={j._id}>
+                <Box><Typography fontSize={13} fontWeight={600}>{j.title}</Typography>
+                  <Typography fontSize={11} color="text.secondary">{j.client_name}</Typography>
+                </Box>
+              </MenuItem>
+            ))}
+          </TextField>
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField fullWidth size="small" required label="Senior Reviewer Name"
+            value={assignForm.senior_reviewer_name}
+            onChange={e => setAssignForm(p => ({ ...p, senior_reviewer_name: e.target.value }))} />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField fullWidth size="small" required label="Senior Reviewer Email"
+            type="email" value={assignForm.senior_reviewer_email}
+            onChange={e => setAssignForm(p => ({ ...p, senior_reviewer_email: e.target.value }))} />
+        </Grid>
+        {assignError && <Grid item xs={12}><Alert severity="error">{assignError}</Alert></Grid>}
+      </Grid>
+    )}
+  </DialogContent>
+  <DialogActions sx={{ px: 3, pb: 2 }}>
+    <Button onClick={() => { setAssignOpen(false); setAssignDone(false); }}>Close</Button>
+    {!assignDone && (
+      <Button variant="contained" onClick={handleAssign} disabled={assignSaving}
+        sx={{ bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}
+        endIcon={assignSaving ? <CircularProgress size={16} color="inherit" /> : null}>
+        {assignSaving ? "Sending…" : "Send JD to Candidate"}
+      </Button>
+    )}
+  </DialogActions>
+</Dialog>
     </>
   );
 }
@@ -539,6 +894,15 @@ export default function BenchPeople() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkDone,   setBulkDone]   = useState(false);
 
+
+
+
+  const [shareOpen,    setShareOpen]    = useState(false);
+  const [shareLabel,   setShareLabel]   = useState("");
+  const [shareResult,  setShareResult]  = useState(null);  // { url, expires_at, label }
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareCopied,  setShareCopied]  = useState(false);
+
   const load = useCallback(async () => {
     try { setLoading(true); setError(""); const res = await getAllBench(); setBench(res.data || []); }
     catch (err) { setError(err?.message || "Failed to load"); setBench([]); }
@@ -554,7 +918,12 @@ export default function BenchPeople() {
 
   const filtered = bench.filter(p => {
     const q = search.toLowerCase();
-    const mQ = !q || p.name?.toLowerCase().includes(q) || p.skills?.toLowerCase().includes(q) || p.bench_id?.toLowerCase().includes(q);
+
+  const skillsMatch = Array.isArray(p.skills)
+  ? p.skills.some(s => (typeof s === "object" ? s.name : s).toLowerCase().includes(q))
+  : false;
+  const mQ = !q || p.name?.toLowerCase().includes(q) || skillsMatch || p.bench_id?.toLowerCase().includes(q);
+    // const mQ = !q || p.name?.toLowerCase().includes(q) || p.skills?.toLowerCase().includes(q) || p.bench_id?.toLowerCase().includes(q);
     const mS = !statusF || p.status === statusF;
     return mQ && mS;
   });
@@ -624,6 +993,40 @@ export default function BenchPeople() {
       setInlineFiles([...updated]);
     }));
   };
+  const generateLink = (label) =>
+    fetch(`${BENCH_BASE}/generate-link`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ label, expires_in_days: 7 }),
+    }).then(handle);
+
+
+
+    const handleGenerateLink = async () => {
+      setShareLoading(true);
+      try {
+        const res = await generateLink(shareLabel || "Candidate Registration");
+        setShareResult(res);
+      } catch (err) {
+        setError(err?.message || "Failed to generate link");
+      } finally {
+        setShareLoading(false);
+      }
+    };
+    
+    const handleCopyLink = () => {
+      navigator.clipboard.writeText(shareResult.url);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    };
+
+
+
+
+
+
+
+
 
   const openBulkReview = () => { setBulkFiles(inlineFiles); setBulkStep(0); setBulkDone(false); setBulkOpen(true); };
   const clearInline    = () => { setShowParsing(false); setInlineFiles([]); };
@@ -681,6 +1084,10 @@ export default function BenchPeople() {
             sx={{ borderColor: "#0369a1", color: "#0369a1" }}>Upload Resume</Button>
           <Button variant="contained" startIcon={<Add />} onClick={openCreate} size="large"
             sx={{ bgcolor: "#0369a1", "&:hover": { bgcolor: "#075985" } }}>Add Person</Button>
+            <Button variant="outlined" startIcon={<Share />} onClick={() => setShareOpen(true)} size="large"
+              sx={{ borderColor: "#0369a1", color: "#0369a1" }}>
+              Share Form
+            </Button>
         </Box>
       </Box>
 
@@ -753,12 +1160,19 @@ export default function BenchPeople() {
                     <TableCell><Typography fontSize={13}>{p.current_role || "—"}</Typography></TableCell>
                     <TableCell>
                       <Box display="flex" flexWrap="wrap" gap={0.5}>
-                        {(p.skills || "").split(",").filter(Boolean).slice(0, 3).map((s, i) => (
+                        {/* {(p.skills || "").split(",").filter(Boolean).slice(0, 3).map((s, i) => (
                           <Chip key={i} label={s.trim()} size="small" sx={{ fontSize: 10, height: 20, bgcolor: "#e0f2fe", color: "#0369a1" }} />
                         ))}
                         {(p.skills || "").split(",").filter(Boolean).length > 3 && (
                           <Chip label={`+${(p.skills || "").split(",").length - 3}`} size="small" sx={{ fontSize: 10, height: 20 }} />
-                        )}
+                        )} */}
+
+                          {(Array.isArray(p.skills) ? p.skills : []).slice(0, 3).map((s, i) => (
+                            <Chip key={i} label={typeof s === "object" ? s.name : s} size="small" sx={{ fontSize: 10, height: 20, bgcolor: "#e0f2fe", color: "#0369a1" }} />
+                          ))}
+                          {(Array.isArray(p.skills) ? p.skills : []).length > 3 && (
+                            <Chip label={`+${p.skills.length - 3}`} size="small" sx={{ fontSize: 10, height: 20 }} />
+                          )}
                       </Box>
                     </TableCell>
                     <TableCell sx={{ fontSize: 12 }}>{p.experience} yrs</TableCell>
@@ -838,7 +1252,19 @@ export default function BenchPeople() {
                       <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Location" name="location" value={currentEntry.formData.location} onChange={handleBulkChange} /></Grid>
                       <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Current Role" name="current_role" value={currentEntry.formData.current_role} onChange={handleBulkChange} /></Grid>
                       <Grid item xs={12} sm={6}><TextField fullWidth size="small" type="number" label="Experience (yrs)" name="experience" value={currentEntry.formData.experience} onChange={handleBulkChange} /></Grid>
-                      <Grid item xs={12}><TextField fullWidth size="small" label="Skills (comma-separated)" name="skills" value={currentEntry.formData.skills} onChange={handleBulkChange} /></Grid>
+                      <Grid item xs={12}>
+                        {/* <TextField fullWidth size="small" label="Skills (comma-separated)" name="skills" value={currentEntry.formData.skills} onChange={handleBulkChange} /> */}
+                      
+                   
+  <Typography fontSize={12} color="text.secondary" fontWeight={600} mb={0.8}>Skills & Proficiency</Typography>
+  <SkillRatingInput
+    value={currentEntry.formData.skills}
+    onChange={val => setBulkFiles(prev => prev.map((entry, idx) =>
+      idx !== bulkStep ? entry : { ...entry, formData: { ...entry.formData, skills: val } }
+    ))}
+  />
+
+                      </Grid>
                       <Grid item xs={12} sm={4}><TextField fullWidth size="small" type="number" label="Current Salary (₹)" name="current_salary" value={currentEntry.formData.current_salary} onChange={handleBulkChange} /></Grid>
                       <Grid item xs={12} sm={4}><TextField fullWidth size="small" type="number" label="Expected Salary (₹)" name="expected_salary" value={currentEntry.formData.expected_salary} onChange={handleBulkChange} /></Grid>
                       <Grid item xs={12} sm={4}>
@@ -910,7 +1336,17 @@ export default function BenchPeople() {
                 </TextField>
               </Grid>
               <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Added By (Recruiter)" name="added_by" value={formData.added_by} onChange={handleChange} /></Grid>
-              <Grid item xs={12}><TextField fullWidth size="small" label="Skills (comma-separated)" name="skills" value={formData.skills} onChange={handleChange} /></Grid>
+              <Grid item xs={12}>
+    
+   
+  <Typography fontSize={12} color="text.secondary" fontWeight={600} mb={0.8}>Skills & Proficiency</Typography>
+  <SkillRatingInput
+    value={formData.skills}
+    onChange={val => setFormData(p => ({ ...p, skills: val }))}
+  />
+
+                {/* <TextField fullWidth size="small" label="Skills (comma-separated)" name="skills" value={formData.skills} onChange={handleChange} /> */}
+                </Grid>
               <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Last Client" name="last_client" value={formData.last_client} onChange={handleChange} /></Grid>
               <Grid item xs={12} sm={6}><TextField fullWidth size="small" label="Last Project" name="last_project" value={formData.last_project} onChange={handleChange} /></Grid>
             </Grid>
@@ -985,6 +1421,106 @@ export default function BenchPeople() {
           <Button variant="contained" color="error" onClick={handleDelete}>Remove</Button>
         </DialogActions>
       </Dialog>
+
+
+
+
+
+
+
+
+
+
+
+
+      <Dialog open={shareOpen} onClose={() => { setShareOpen(false); setShareResult(null); setShareLabel(""); }}
+  maxWidth="sm" fullWidth>
+  <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0" }}>
+    <Box display="flex" alignItems="center" gap={1.5}>
+      <Share color="primary" />
+      <Typography fontWeight={700}>Share Candidate Form</Typography>
+    </Box>
+  </DialogTitle>
+  <DialogContent sx={{ pt: 3 }}>
+    {!shareResult ? (
+      <Box display="flex" flexDirection="column" gap={2.5}>
+        <Typography fontSize={13} color="text.secondary">
+          Generate a link to share with candidates. They fill the same form and their
+          profile goes into <strong>Pending Review</strong> for you to approve.
+        </Typography>
+        <TextField
+          fullWidth size="small"
+          label="Form Label (optional)"
+          placeholder="e.g. Walk-in Drive June 2026"
+          value={shareLabel}
+          onChange={e => setShareLabel(e.target.value)}
+          helperText="Helps you identify which drive this link was for"
+        />
+        <Box p={2} bgcolor="#f0f9ff" borderRadius={2} sx={{ border: "1px solid #bae6fd" }}>
+          <Typography fontSize={12} color="#0369a1" fontWeight={600}>Link expires in 7 days · Multiple candidates can use the same link</Typography>
+        </Box>
+      </Box>
+    ) : (
+      <Box display="flex" flexDirection="column" gap={2.5}>
+        <Box display="flex" alignItems="center" gap={1.5} p={2}
+          bgcolor="#f0fdf4" borderRadius={2} sx={{ border: "1px solid #bbf7d0" }}>
+          <CheckCircle color="success" />
+          <Box>
+            <Typography fontWeight={700} color="success.dark" fontSize={13}>Link generated!</Typography>
+            <Typography fontSize={12} color="text.secondary">
+              Expires: {new Date(shareResult.expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+            </Typography>
+          </Box>
+        </Box>
+        <Box>
+          <Typography fontSize={11} fontWeight={600} color="text.secondary" textTransform="uppercase" mb={0.8}>
+            Shareable Link
+          </Typography>
+          <Box display="flex" gap={1} alignItems="center"
+            p={1.5} bgcolor="#f5f5f5" borderRadius={2} sx={{ border: "1px solid #e0e0e0" }}>
+            <Typography fontSize={12} flex={1} sx={{ wordBreak: "break-all", fontFamily: "monospace" }}>
+              {shareResult.url}
+            </Typography>
+            <Button size="small" variant="contained" onClick={handleCopyLink}
+              startIcon={shareCopied ? <CheckCircle /> : <ContentCopy />}
+              sx={{ flexShrink: 0, bgcolor: shareCopied ? "#15803d" : "#0369a1",
+                "&:hover": { bgcolor: shareCopied ? "#15803d" : "#075985" } }}>
+              {shareCopied ? "Copied!" : "Copy"}
+            </Button>
+          </Box>
+        </Box>
+        <Typography fontSize={12} color="text.secondary">
+          Share this link via WhatsApp, email, or any channel. Candidates fill the form
+          and their profile appears in your bench list under <strong>Pending Review</strong>.
+        </Typography>
+      </Box>
+    )}
+  </DialogContent>
+  <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
+    <Button onClick={() => { setShareOpen(false); setShareResult(null); setShareLabel(""); }}>
+      Close
+    </Button>
+    {!shareResult && (
+      <Button variant="contained" onClick={handleGenerateLink} disabled={shareLoading}
+        endIcon={shareLoading ? <CircularProgress size={16} color="inherit" /> : null}
+        sx={{ bgcolor: "#0369a1", "&:hover": { bgcolor: "#075985" } }}>
+        {shareLoading ? "Generating…" : "Generate Link"}
+      </Button>
+    )}
+    {shareResult && (
+      <Button variant="outlined" onClick={() => { setShareResult(null); setShareLabel(""); }}
+        sx={{ borderColor: "#0369a1", color: "#0369a1" }}>
+        Generate Another
+      </Button>
+    )}
+  </DialogActions>
+</Dialog>
+
+
+
+
+
+
     </Box>
   );
 }

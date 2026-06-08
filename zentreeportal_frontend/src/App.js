@@ -150,11 +150,17 @@ import Tracking   from "./components/RecruiterPages/Tracking";
 import Placements from "./components/RecruiterPages/Placements";
 import Skills     from "./components/RecruiterPages/Skills";
 import Reports    from "./components/RecruiterPages/Report";
-import BenchPeople from "./components/RecruiterPages/Benchpeople";
+import BenchPeople from "./components/RecruiterPages/BenchPeople/Benchpeople";
+import BenchCandidateForm from "./components/RecruiterPages/BenchPeople/BenchCandidateForm";
 import Employees   from "./components/RecruiterPages/EmployeePages/EmployeesPage";
 import ExamPage from "./components/RecruiterPages/ExamPage";
 import InterviewFeedback from "./components/RecruiterPages/InterviewFeedback";
 import OnboardingPage from "./components/HRPages/OnboardingPage";
+
+import ScreeningResponseDone from "./components/RecruiterPages/CandidateIntrest/JDAddingResponseDone";
+import ResumeScreeningResponse from "./components/RecruiterPages/CandidateIntrest/ResumeScreeningResponse";
+import CandidateUploadPage from "./components/RecruiterPages/BenchPeople/CandidateUploadPage";
+import SeniorReviewPage    from "./components/RecruiterPages/BenchPeople/SeniorReviewPage";
 
 const App = () => (
   <ThemeProvider theme={theme}>
@@ -169,6 +175,11 @@ const App = () => (
         <Route path="/register"     element={<RegisterPage />} />
         <Route path="/unauthorized" element={<UnauthorizedPage />} />
         <Route path="/exam/:token"  element={<ExamPage />} />
+        <Route path="/candidate-form/:token" element={<BenchCandidateForm />} /> 
+        <Route path="/screening-response-done" element={<ScreeningResponseDone />} />
+        <Route path="/screening-response/:token/:response" element={<ResumeScreeningResponse />} />
+        <Route path="/jd-resume-upload/:token" element={<CandidateUploadPage />} />
+        <Route path="/jd-resume-review/:token"  element={<SeniorReviewPage />} />
         <Route
           path="/interview/feedback/:trackingId/:scheduleId"
           element={<InterviewFeedback />}
@@ -269,7 +280,7 @@ const App = () => (
           <Route
             path="/manager/recruiters"
             element={
-              <ProtectedRoute allowedRoles={["admin", "manager"]}>
+              <ProtectedRoute allowedRoles={["admin", "manager","recruiter"]}>
                 <RecruiterReportsPage />
               </ProtectedRoute>
             }
@@ -279,11 +290,12 @@ const App = () => (
           <Route
             path="/bench"
             element={
-              <ProtectedRoute allowedRoles={["admin", "hr", "manager"]}>
+              <ProtectedRoute allowedRoles={["admin", "hr", "manager","recruiter"]}>
                 <BenchPeople />
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/employees"
             element={

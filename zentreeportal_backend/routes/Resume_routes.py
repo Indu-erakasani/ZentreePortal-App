@@ -92,14 +92,17 @@ def _resolve_job_id(val: str) -> str:
     return val
 
 
+
 def _serialize_raw(r: dict) -> dict:
     doc = dict(r)
     doc["_id"] = str(doc.get("_id", ""))
     for field in ("created_at", "updated_at"):
         if isinstance(doc.get(field), datetime):
             doc[field] = doc[field].isoformat()
+    # ── ensure screening fields are always present ────────────────────────────
+    doc.setdefault("screening_status", "")   # Sent / Interested / Not Interested
+    doc.setdefault("screening_token",  "")
     return doc
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  RAW RESUME ROUTES  (/api/resumes/raw/...)
@@ -825,3 +828,914 @@ def talent_search():
         ).sort("created_at", -1)
     )
     return jsonify(success=True, data=[serialize_resume(d) for d in docs]), 200
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# candidate intrest to add the resume to the jd for the stored resumes 
+# ── POST /api/resumes/raw/<rid>/send-screening ────────────────────────────────
+
+
+
+# @resume_bp.route("/raw/<rid>/send-screening", methods=["POST"])
+# @jwt_required()
+# def send_screening(rid):
+#     doc, err = _find_raw(rid)
+#     if err:
+#         return err
+
+#     data            = request.get_json(silent=True) or {}
+#     candidate_email = data.get("email") or doc.get("email", "")
+#     job_id          = data.get("job_id", doc.get("linked_job_id", ""))
+#     job_title       = data.get("job_title", doc.get("linked_job_title", ""))
+#     client_name     = data.get("client_name", doc.get("client_name", ""))
+#     candidate_name  = data.get("name") or doc.get("name", "Candidate")
+
+#     if not candidate_email:
+#         return jsonify(success=False, message="Candidate email is required"), 400
+#     if not job_title:
+#         return jsonify(success=False, message="Please assign this resume to a job first"), 400
+
+#     token      = str(uuid.uuid4())
+#     expires_at = datetime.utcnow() + timedelta(days=3)
+
+#     mongo.db.screening_confirmations.insert_one({
+#         "token":           token,
+#         "raw_resume_id":   str(doc["_id"]),
+#         "raw_id":          doc.get("raw_id", ""),
+#         "candidate_email": candidate_email.lower().strip(),
+#         "candidate_name":  candidate_name,
+#         "job_id":          job_id,
+#         "job_title":       job_title,
+#         "client_name":     client_name,
+#         "status":          "Pending",
+#         "created_at":      datetime.utcnow(),
+#         "expires_at":      expires_at,
+#     })
+
+
+
+
+#     smtp_host = os.environ.get("SMTP_SERVER", "")        # was SMTP_HOST
+#     smtp_user = os.environ.get("SMTP_USERNAME", "")      # was SMTP_USER  
+#     smtp_pass = os.environ.get("SMTP_PASSWORD", "")      # was SMTP_PASS
+#     smtp_port = int(os.environ.get("SMTP_PORT", 587))
+#     from_email = os.environ.get("FROM_EMAIL", smtp_user) # SendGrid needs exact from_email
+#     from_name = os.environ.get("FROM_NAME", "Recruitment Team")
+#     frontend_base = os.environ.get("FRONTEND_URL", "http://localhost:3000")  # was FRONTEND_URL
+#     api_base = os.environ.get("API_BASE_URL", "http://10.10.2.240:5000")
+#     yes_link = f"{api_base}/api/resumes/screening/{token}/yes"
+#     no_link  = f"{api_base}/api/resumes/screening/{token}/no"
+#     # yes_link = f"{frontend_base}/screening-response/{token}/yes"
+#     # no_link  = f"{frontend_base}/screening-response/{token}/no"
+
+
+#     # ── Guard: skip email if SMTP not configured ──────────────────────────────
+#     if not smtp_host or not smtp_user or not smtp_pass:
+#         # Still mark as sent in DB so frontend chip updates
+#         mongo.db.raw_resumes.update_one(
+#             {"_id": doc["_id"]},
+#             {"$set": {
+#                 "screening_status": "Sent",
+#                 "screening_token":  token,
+#                 "updated_at":       datetime.utcnow(),
+#             }}
+#         )
+#         return jsonify(
+#             success=True,
+#             message="Token created (SMTP not configured — email not sent)",
+#             token=token,
+#             yes_link=yes_link,
+#             no_link=no_link,
+#         ), 200
+
+#     try:
+#         import smtplib
+#         from email.mime.multipart import MIMEMultipart
+#         from email.mime.text import MIMEText
+
+#         msg            = MIMEMultipart("alternative")
+#         msg["Subject"] = f"Job Opportunity: {job_title}{f' at {client_name}' if client_name else ''}"
+#         msg["From"]    = f"{from_name} <{from_email}>" 
+#         msg["To"]      = candidate_email
+
+#         html = f"""
+#         <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;
+#                     padding:32px 24px;background:#f8fafc;border-radius:12px;">
+#           <div style="background:#fff;border-radius:10px;padding:32px;border:1px solid #e2e8f0;">
+#             <h2 style="color:#1e3a5f;margin:0 0 8px;">Hi {candidate_name},</h2>
+#             <p style="color:#475569;font-size:15px;line-height:1.6;margin:0 0 20px;">
+#               We came across your profile and feel you could be a great fit:
+#             </p>
+#             <div style="background:#f0f9ff;border-left:4px solid #0369a1;
+#                         border-radius:6px;padding:16px 20px;margin-bottom:24px;">
+#               <div style="font-size:18px;font-weight:700;color:#0369a1;">{job_title}</div>
+#               {f'<div style="font-size:14px;color:#64748b;margin-top:4px;">{client_name}</div>'
+#                if client_name else ''}
+#             </div>
+#             <div style="text-align:center;margin-bottom:28px;">
+#               <a href="{yes_link}"
+#                  style="display:inline-block;background:#15803d;color:#fff;
+#                         text-decoration:none;padding:14px 32px;border-radius:8px;
+#                         font-weight:700;font-size:15px;margin-right:12px;">
+#                 ✅ Yes, I'm Interested
+#               </a>
+#               <a href="{no_link}"
+#                  style="display:inline-block;background:#f1f5f9;color:#64748b;
+#                         text-decoration:none;padding:14px 32px;border-radius:8px;
+#                         font-weight:700;font-size:15px;border:1px solid #e2e8f0;">
+#                 No, Not Right Now
+#               </a>
+#             </div>
+#             <p style="color:#94a3b8;font-size:12px;text-align:center;margin:0;">
+#               This link expires in 3 days.
+#             </p>
+#           </div>
+#         </div>
+#         """
+#         msg.attach(MIMEText(html, "html"))
+
+#         with smtplib.SMTP(smtp_host, smtp_port) as server:
+#             server.starttls()
+#             server.login(smtp_user, smtp_pass)
+#             server.sendmail(from_email, candidate_email, msg.as_string())
+
+#         mongo.db.raw_resumes.update_one(
+#             {"_id": doc["_id"]},
+#             {"$set": {
+#                 "screening_status": "Sent",
+#                 "screening_token":  token,
+#                 "updated_at":       datetime.utcnow(),
+#             }}
+#         )
+#         return jsonify(
+#             success=True,
+#             message=f"Screening email sent to {candidate_email}",
+#             token=token,
+#         ), 200
+
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         return jsonify(success=False, message=f"Failed to send email: {str(e)}"), 500
+
+
+
+
+
+@resume_bp.route("/raw/<rid>/send-screening", methods=["POST"])
+@jwt_required()
+def send_screening(rid):
+    doc, err = _find_raw(rid)
+    if err:
+        return err
+
+    data            = request.get_json(silent=True) or {}
+    candidate_email = data.get("email") or doc.get("email", "")
+    job_id          = data.get("job_id", doc.get("linked_job_id", ""))
+    job_title       = data.get("job_title", doc.get("linked_job_title", ""))
+    client_name     = data.get("client_name", doc.get("client_name", ""))
+    candidate_name  = data.get("name") or doc.get("name", "Candidate")
+
+    if not candidate_email:
+        return jsonify(success=False, message="Candidate email is required"), 400
+    if not job_title:
+        return jsonify(success=False, message="Please assign this resume to a job first"), 400
+
+    # ── Fetch full JD details from jobs collection ────────────────────────────
+    # job_doc = None
+    # try:
+    #     if job_id:
+    #         # Try by job_id string first, then by mongo _id
+    #         job_doc = mongo.db.jobs.find_one({"job_id": job_id})
+    #         if not job_doc and re.match(r'^[a-f0-9]{24}$', job_id.strip()):
+    #             job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
+    # except Exception:
+    #     job_doc = None
+
+    # # Extract JD fields safely
+    # jd_location      = job_doc.get("location", "")           if job_doc else ""
+    # jd_experience    = job_doc.get("experience_required", "") if job_doc else ""
+    # jd_employment    = job_doc.get("employment_type", "")     if job_doc else ""
+    # jd_salary_min    = job_doc.get("salary_min", "")          if job_doc else ""
+    # jd_salary_max    = job_doc.get("salary_max", "")          if job_doc else ""
+    # jd_skills        = job_doc.get("required_skills", "")     if job_doc else ""
+    # jd_description   = job_doc.get("description", "")         if job_doc else ""
+    # jd_responsibilities = job_doc.get("responsibilities", "") if job_doc else ""
+
+    # # Format salary range
+    # salary_str = ""
+    # if jd_salary_min and jd_salary_max:
+    #     salary_str = f"₹{jd_salary_min} – ₹{jd_salary_max} LPA"
+    # elif jd_salary_min:
+    #     salary_str = f"₹{jd_salary_min}+ LPA"
+    # elif jd_salary_max:
+    #     salary_str = f"Up to ₹{jd_salary_max} LPA"
+
+    # # Format skills as badges
+    # skills_html = ""
+    # if jd_skills:
+    #     skill_list = [s.strip() for s in str(jd_skills).split(",") if s.strip()]
+    #     badges = "".join([
+    #         f'<span style="display:inline-block;background:#e0f2fe;color:#0369a1;'
+    #         f'padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;'
+    #         f'margin:3px 4px 3px 0;">{s}</span>'
+    #         for s in skill_list[:10]  # cap at 10 skills
+    #     ])
+    #     skills_html = f"""
+    #     <div style="margin-bottom:16px;">
+    #       <div style="font-size:12px;font-weight:700;color:#64748b;
+    #                   text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+    #         Key Skills
+    #       </div>
+    #       <div>{badges}</div>
+    #     </div>
+    #     """
+
+    # # Format quick-info pills (location, exp, type, salary)
+    # meta_items = []
+    # if jd_location:
+    #     meta_items.append(("📍", jd_location))
+    # if jd_experience:
+    #     meta_items.append(("💼", f"{jd_experience} yrs experience"))
+    # if jd_employment:
+    #     meta_items.append(("⏱️", jd_employment))
+    # if salary_str:
+    #     meta_items.append(("💰", salary_str))
+
+    # meta_html = ""
+    # if meta_items:
+    #     pills = "".join([
+    #         f'<div style="display:flex;align-items:center;gap:6px;'
+    #         f'background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;'
+    #         f'padding:8px 14px;margin:4px;">'
+    #         f'<span style="font-size:14px;">{icon}</span>'
+    #         f'<span style="font-size:13px;color:#374151;font-weight:500;">{text}</span>'
+    #         f'</div>'
+    #         for icon, text in meta_items
+    #     ])
+    #     meta_html = f"""
+    #     <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:20px;">
+    #       {pills}
+    #     </div>
+    #     """
+
+    # # Format description (first 300 chars as teaser)
+    # desc_html = ""
+    # if jd_description:
+    #     teaser = str(jd_description)[:350].strip()
+    #     if len(str(jd_description)) > 350:
+    #         teaser += "…"
+    #     desc_html = f"""
+    #     <div style="margin-bottom:16px;">
+    #       <div style="font-size:12px;font-weight:700;color:#64748b;
+    #                   text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+    #         About the Role
+    #       </div>
+    #       <p style="color:#475569;font-size:13px;line-height:1.7;margin:0;">{teaser}</p>
+    #     </div>
+    #     """
+
+    # # Format responsibilities (first 3 bullet points)
+    # resp_html = ""
+    # if jd_responsibilities:
+    #     if isinstance(jd_responsibilities, list):
+    #         resp_list = jd_responsibilities[:4]
+    #     else:
+    #         resp_list = [r.strip() for r in str(jd_responsibilities).split("\n") if r.strip()][:4]
+    #     if resp_list:
+    #         bullets = "".join([
+    #             f'<li style="color:#475569;font-size:13px;line-height:1.7;margin-bottom:4px;">{r}</li>'
+    #             for r in resp_list
+    #         ])
+    #         resp_html = f"""
+    #         <div style="margin-bottom:20px;">
+    #           <div style="font-size:12px;font-weight:700;color:#64748b;
+    #                       text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+    #             Key Responsibilities
+    #           </div>
+    #           <ul style="margin:0;padding-left:18px;">{bullets}</ul>
+    #         </div>
+    #         """
+
+    job_doc = None
+    try:
+        if job_id:
+            job_doc = mongo.db.jobs.find_one({"job_id": job_id})
+            if not job_doc and re.match(r'^[a-f0-9]{24}$', job_id.strip()):
+                job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
+    except Exception:
+        job_doc = None
+
+    # Extract JD fields safely
+    jd_location      = job_doc.get("location", "")            if job_doc else ""
+    jd_experience    = job_doc.get("experience_required", "")  if job_doc else ""
+    jd_employment    = job_doc.get("employment_type", "")      if job_doc else ""
+    jd_salary_min    = job_doc.get("salary_min", "")           if job_doc else ""
+    jd_salary_max    = job_doc.get("salary_max", "")           if job_doc else ""
+    jd_skills        = job_doc.get("required_skills", "")      if job_doc else ""
+    jd_description   = job_doc.get("description", "")          if job_doc else ""
+    jd_requirements  = job_doc.get("requirements", "")         if job_doc else ""
+    jd_responsibilities = job_doc.get("responsibilities", "")  if job_doc else ""
+    jd_nice_to_have  = job_doc.get("nice_to_have", "")         if job_doc else ""
+
+    # ── Format salary — convert raw numbers to LPA ────────────────────────────
+    def fmt_salary(val):
+        """Convert 500000 → 5 LPA, 1200000 → 12 LPA, already-string → as-is."""
+        if not val:
+            return ""
+        try:
+            n = float(str(val).replace(",", "").strip())
+            if n >= 100000:                        # raw rupees → LPA
+                lpa = n / 100000
+                return f"{lpa:.0f} LPA" if lpa == int(lpa) else f"{lpa:.1f} LPA"
+            elif n > 0:                            # already in lakhs
+                return f"{n:.0f} LPA" if n == int(n) else f"{n:.1f} LPA"
+        except (ValueError, TypeError):
+            return str(val)                        # already a string like "8-10 LPA"
+        return ""
+
+    sal_min_str = fmt_salary(jd_salary_min)
+    sal_max_str = fmt_salary(jd_salary_max)
+
+    if sal_min_str and sal_max_str:
+        salary_str = f"₹{sal_min_str} – ₹{sal_max_str}"
+    elif sal_min_str:
+        salary_str = f"₹{sal_min_str}+"
+    elif sal_max_str:
+        salary_str = f"Up to ₹{sal_max_str}"
+    else:
+        salary_str = ""
+
+    # ── Skills badges ─────────────────────────────────────────────────────────
+    skills_html = ""
+    if jd_skills:
+        skill_list = [s.strip() for s in str(jd_skills).split(",") if s.strip()]
+        badges = "".join([
+            f'<span style="display:inline-block;background:#e0f2fe;color:#0369a1;'
+            f'padding:4px 12px;border-radius:99px;font-size:12px;font-weight:600;'
+            f'margin:3px 4px 3px 0;">{s}</span>'
+            for s in skill_list
+        ])
+        skills_html = f"""
+        <div style="margin-bottom:18px;">
+          <div style="font-size:11px;font-weight:700;color:#64748b;
+                      text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            Key Skills Required
+          </div>
+          <div>{badges}</div>
+        </div>
+        """
+
+    # ── Meta pills ────────────────────────────────────────────────────────────
+    meta_items = []
+    if jd_location:
+        meta_items.append(("📍", jd_location))
+    if jd_experience:
+        meta_items.append(("💼", f"{jd_experience} yrs exp"))
+    if jd_employment:
+        meta_items.append(("⏱️", jd_employment))
+    if salary_str:
+        meta_items.append(("💰", salary_str))
+
+    meta_html = ""
+    if meta_items:
+        pills = "".join([
+            f'<div style="display:inline-flex;align-items:center;gap:5px;'
+            f'background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;'
+            f'padding:7px 12px;margin:3px 4px 3px 0;">'
+            f'<span style="font-size:13px;">{icon}</span>'
+            f'<span style="font-size:12px;color:#374151;font-weight:500;">{text}</span>'
+            f'</div>'
+            for icon, text in meta_items
+        ])
+        meta_html = f'<div style="margin-bottom:18px;">{pills}</div>'
+
+    # ── Full description (no truncation) ─────────────────────────────────────
+    desc_html = ""
+    if jd_description:
+        # Convert newlines to <br> for proper HTML rendering
+        desc_formatted = str(jd_description).replace("\n", "<br>")
+        desc_html = f"""
+        <div style="margin-bottom:18px;">
+          <div style="font-size:11px;font-weight:700;color:#64748b;
+                      text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+            About the Role
+          </div>
+          <p style="color:#475569;font-size:13px;line-height:1.8;margin:0;">
+            {desc_formatted}
+          </p>
+        </div>
+        """
+
+    # ── Requirements ─────────────────────────────────────────────────────────
+    req_html = ""
+    if jd_requirements:
+        if isinstance(jd_requirements, list):
+            req_list = jd_requirements
+        else:
+            req_list = [r.strip() for r in str(jd_requirements).split("\n") if r.strip()]
+        if req_list:
+            bullets = "".join([
+                f'<li style="color:#475569;font-size:13px;line-height:1.8;'
+                f'margin-bottom:4px;">{r}</li>'
+                for r in req_list
+            ])
+            req_html = f"""
+            <div style="margin-bottom:18px;">
+              <div style="font-size:11px;font-weight:700;color:#64748b;
+                          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+                Requirements
+              </div>
+              <ul style="margin:0;padding-left:20px;">{bullets}</ul>
+            </div>
+            """
+
+    # ── Responsibilities ──────────────────────────────────────────────────────
+    resp_html = ""
+    if jd_responsibilities:
+        if isinstance(jd_responsibilities, list):
+            resp_list = jd_responsibilities
+        else:
+            resp_list = [r.strip() for r in str(jd_responsibilities).split("\n") if r.strip()]
+        if resp_list:
+            bullets = "".join([
+                f'<li style="color:#475569;font-size:13px;line-height:1.8;'
+                f'margin-bottom:4px;">{r}</li>'
+                for r in resp_list
+            ])
+            resp_html = f"""
+            <div style="margin-bottom:18px;">
+              <div style="font-size:11px;font-weight:700;color:#64748b;
+                          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+                Key Responsibilities
+              </div>
+              <ul style="margin:0;padding-left:20px;">{bullets}</ul>
+            </div>
+            """
+
+    # ── Nice to have ──────────────────────────────────────────────────────────
+    nice_html = ""
+    if jd_nice_to_have:
+        if isinstance(jd_nice_to_have, list):
+            nice_list = jd_nice_to_have
+        else:
+            nice_list = [r.strip() for r in str(jd_nice_to_have).split("\n") if r.strip()]
+        if nice_list:
+            bullets = "".join([
+                f'<li style="color:#475569;font-size:13px;line-height:1.8;'
+                f'margin-bottom:4px;">{r}</li>'
+                for r in nice_list
+            ])
+            nice_html = f"""
+            <div style="margin-bottom:18px;">
+              <div style="font-size:11px;font-weight:700;color:#64748b;
+                          text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">
+                Nice to Have
+              </div>
+              <ul style="margin:0;padding-left:20px;">{bullets}</ul>
+            </div>
+            """
+    token      = str(uuid.uuid4())
+    expires_at = datetime.utcnow() + timedelta(days=3)
+
+    mongo.db.screening_confirmations.insert_one({
+        "token":           token,
+        "raw_resume_id":   str(doc["_id"]),
+        "raw_id":          doc.get("raw_id", ""),
+        "candidate_email": candidate_email.lower().strip(),
+        "candidate_name":  candidate_name,
+        "job_id":          job_id,
+        "job_title":       job_title,
+        "client_name":     client_name,
+        "status":          "Pending",
+        "created_at":      datetime.utcnow(),
+        "expires_at":      expires_at,
+    })
+
+    smtp_host  = os.environ.get("SMTP_SERVER",   "")
+    smtp_user  = os.environ.get("SMTP_USERNAME", "")
+    smtp_pass  = os.environ.get("SMTP_PASSWORD", "")
+    smtp_port  = int(os.environ.get("SMTP_PORT", 587))
+    from_email = os.environ.get("FROM_EMAIL",    smtp_user)
+    from_name  = os.environ.get("FROM_NAME",     "Recruitment Team")
+    api_base   = os.environ.get("API_BASE_URL",  "http://10.10.2.240:5000")
+    frontend_base = os.environ.get("FRONTEND_URL", "http://10.10.2.240:3000")
+
+    yes_link = f"{api_base}/api/resumes/screening/{token}/yes"
+    no_link  = f"{api_base}/api/resumes/screening/{token}/no"
+
+    # ── Guard: skip email if SMTP not configured ──────────────────────────────
+    if not smtp_host or not smtp_user or not smtp_pass:
+        mongo.db.raw_resumes.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {
+                "screening_status": "Sent",
+                "screening_token":  token,
+                "updated_at":       datetime.utcnow(),
+            }}
+        )
+        return jsonify(
+            success=True,
+            message="Token created (SMTP not configured — email not sent)",
+            token=token,
+            yes_link=yes_link,
+            no_link=no_link,
+        ), 200
+
+    try:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        msg            = MIMEMultipart("alternative")
+        msg["Subject"] = f"Job Opportunity: {job_title}{f' at {client_name}' if client_name else ''}"
+        msg["From"]    = f"{from_name} <{from_email}>"
+        msg["To"]      = candidate_email
+
+#         html = f"""
+# <!DOCTYPE html>
+# <html>
+# <body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif;">
+# <div style="max-width:580px;margin:32px auto;padding:0 16px;">
+
+#   <!-- Header -->
+#   <div style="background:#1e3a5f;border-radius:12px 12px 0 0;padding:24px 32px;text-align:center;">
+#     <div style="color:#93c5fd;font-size:12px;font-weight:700;
+#                 text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">
+#       {from_name}
+#     </div>
+#     <div style="color:#fff;font-size:22px;font-weight:800;">
+#       We found a role that fits you
+#     </div>
+#   </div>
+
+#   <!-- Body -->
+#   <div style="background:#fff;padding:32px;border:1px solid #e2e8f0;border-top:none;">
+
+#     <!-- Greeting -->
+#     <p style="color:#1e293b;font-size:16px;font-weight:600;margin:0 0 6px;">
+#       Hi {candidate_name},
+#     </p>
+#     <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 24px;">
+#       We came across your profile and believe you could be an excellent fit for the
+#       following opportunity. We'd love to know if you're open to exploring it.
+#     </p>
+
+#     <!-- Job Card -->
+#     <div style="background:#f0f9ff;border:2px solid #bae6fd;border-radius:10px;
+#                 padding:20px 24px;margin-bottom:24px;">
+
+#       <!-- Job title + company -->
+#       <div style="font-size:20px;font-weight:800;color:#0369a1;margin-bottom:4px;">
+#         {job_title}
+#       </div>
+#       {f'<div style="font-size:14px;color:#64748b;font-weight:600;margin-bottom:16px;">🏢 {client_name}</div>' if client_name else '<div style="margin-bottom:16px;"></div>'}
+
+#       <!-- Meta pills -->
+#       {meta_html}
+
+#       <!-- Skills -->
+#       {skills_html}
+
+#       <!-- Description -->
+#       {desc_html}
+
+#       <!-- Responsibilities -->
+#       {resp_html}
+
+#     </div>
+
+#     <!-- CTA -->
+#     <p style="color:#475569;font-size:14px;text-align:center;margin:0 0 24px;">
+#       Are you open to exploring this opportunity?
+#     </p>
+#     <div style="text-align:center;margin-bottom:28px;">
+#       <a href="{yes_link}"
+#          style="display:inline-block;background:#15803d;color:#fff;
+#                 text-decoration:none;padding:14px 36px;border-radius:8px;
+#                 font-weight:700;font-size:15px;margin-right:12px;
+#                 box-shadow:0 2px 8px rgba(21,128,61,0.3);">
+#         ✅ Yes, I'm Interested
+#       </a>
+#       <a href="{no_link}"
+#          style="display:inline-block;background:#f8fafc;color:#64748b;
+#                 text-decoration:none;padding:14px 36px;border-radius:8px;
+#                 font-weight:700;font-size:15px;border:1.5px solid #e2e8f0;">
+#         No, Not Right Now
+#       </a>
+#     </div>
+
+#     <p style="color:#94a3b8;font-size:12px;text-align:center;margin:0;">
+#       This link expires in 3 days · Simply reply to this email if you have questions.
+#     </p>
+#   </div>
+
+#   <!-- Footer -->
+#   <div style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;
+#               border-radius:0 0 12px 12px;padding:16px 32px;text-align:center;">
+#     <p style="color:#94a3b8;font-size:11px;margin:0;">
+#       You're receiving this because a recruiter at {from_name} reviewed your profile.
+#       This email was sent to {candidate_email}.
+#     </p>
+#   </div>
+
+# </div>
+# </body>
+# </html>
+#         """
+
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,sans-serif;">
+        <div style="max-width:620px;margin:32px auto;padding:0 16px;">
+
+        <!-- Header -->
+        <div style="background:#1e3a5f;border-radius:12px 12px 0 0;padding:24px 32px;text-align:center;">
+            <div style="color:#93c5fd;font-size:12px;font-weight:700;
+                        text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">
+            {from_name}
+            </div>
+            <div style="color:#fff;font-size:22px;font-weight:800;">
+            We found a role that fits you
+            </div>
+        </div>
+
+        <!-- Body -->
+        <div style="background:#fff;padding:32px;border:1px solid #e2e8f0;border-top:none;">
+
+            <!-- Greeting -->
+            <p style="color:#1e293b;font-size:16px;font-weight:600;margin:0 0 6px;">
+            Hi {candidate_name},
+            </p>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 24px;">
+            We came across your profile and believe you could be an excellent fit for the
+            following opportunity. We'd love to know if you're open to exploring it.
+            </p>
+
+            <!-- Job Card -->
+            <div style="background:#f0f9ff;border:2px solid #bae6fd;border-radius:10px;
+                        padding:24px;margin-bottom:28px;">
+
+            <div style="font-size:22px;font-weight:800;color:#0369a1;margin-bottom:4px;">
+                {job_title}
+            </div>
+            {f'<div style="font-size:14px;color:#64748b;font-weight:600;margin-bottom:16px;">🏢 {client_name}</div>' if client_name else '<div style="margin-bottom:16px;"></div>'}
+
+            {meta_html}
+            {skills_html}
+            {desc_html}
+            {req_html}
+            {resp_html}
+            {nice_html}
+
+            </div>
+
+            <!-- CTA -->
+            <p style="color:#475569;font-size:14px;text-align:center;margin:0 0 20px;">
+            Are you open to exploring this opportunity?
+            </p>
+            <div style="text-align:center;margin-bottom:28px;">
+            <a href="{yes_link}"
+                style="display:inline-block;background:#15803d;color:#fff;
+                        text-decoration:none;padding:14px 36px;border-radius:8px;
+                        font-weight:700;font-size:15px;margin-right:12px;
+                        box-shadow:0 2px 8px rgba(21,128,61,0.3);">
+                ✅ Yes, I'm Interested
+            </a>
+            <a href="{no_link}"
+                style="display:inline-block;background:#f8fafc;color:#64748b;
+                        text-decoration:none;padding:14px 36px;border-radius:8px;
+                        font-weight:700;font-size:15px;border:1.5px solid #e2e8f0;">
+                No, Not Right Now
+            </a>
+            </div>
+
+            <p style="color:#94a3b8;font-size:12px;text-align:center;margin:0;">
+            This link expires in 3 days · Simply reply to this email if you have questions.
+            </p>
+        </div>
+
+        <!-- Footer -->
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;
+                    border-radius:0 0 12px 12px;padding:16px 32px;text-align:center;">
+            <p style="color:#94a3b8;font-size:11px;margin:0;">
+            You're receiving this because a recruiter at {from_name} reviewed your profile.
+            Sent to {candidate_email}.
+            </p>
+        </div>
+
+        </div>
+        </body>
+        </html>
+                """
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_email, candidate_email, msg.as_string())
+
+        mongo.db.raw_resumes.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {
+                "screening_status": "Sent",
+                "screening_token":  token,
+                "updated_at":       datetime.utcnow(),
+            }}
+        )
+        return jsonify(
+            success=True,
+            message=f"Screening email sent to {candidate_email}",
+            token=token,
+        ), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify(success=False, message=f"Failed to send email: {str(e)}"), 500
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ── GET /api/resumes/screening-token-info/<token> — public, no auth ───────────
+@resume_bp.route("/screening-token-info/<token>", methods=["GET"])
+def screening_token_info(token):
+    conf = mongo.db.screening_confirmations.find_one({"token": token})
+    if not conf:
+        return jsonify(success=False), 404
+    return jsonify(
+        success=True,
+        job_title=conf.get("job_title", ""),
+        status=conf.get("status", "Pending"),
+    ), 200
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ── GET /api/resumes/screening/<token>/<response> ─────────────────────────────
+# ── GET /api/resumes/screening/<token>/<response> ─────────────────────────────
+@resume_bp.route("/screening/<token>/<response>", methods=["GET"])
+def screening_response(token, response):
+    """Candidate clicks Yes/No link in email — no auth needed."""
+    conf = mongo.db.screening_confirmations.find_one({"token": token})
+    if not conf:
+        return jsonify(success=False, message="Invalid or expired link"), 404
+    if conf.get("expires_at") and conf["expires_at"] < datetime.utcnow():
+        # Still redirect but with expired status
+        frontend_base = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+        from flask import redirect
+        return redirect(f"{frontend_base}/screening-response-done?status=Expired&job={conf.get('job_title','')}")
+    if conf.get("status") != "Pending":
+        # Already responded — redirect with their original response
+        frontend_base = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+        from flask import redirect
+        return redirect(f"{frontend_base}/screening-response-done?status={conf['status'].replace(' ', '+')}&job={conf.get('job_title','')}&already=true")
+
+    status = "Interested" if response == "yes" else "Not Interested"
+
+    mongo.db.screening_confirmations.update_one(
+        {"token": token},
+        {"$set": {"status": status, "responded_at": datetime.utcnow()}}
+    )
+
+    # ── Always update raw_resume screening_status ─────────────────────────────
+    mongo.db.raw_resumes.update_one(
+        {"_id": ObjectId(conf["raw_resume_id"])},
+        {"$set": {
+            "screening_status": status,
+            "updated_at":       datetime.utcnow(),
+        }}
+    )
+
+    # ── If interested, auto-convert ───────────────────────────────────────────
+    if status == "Interested":
+        try:
+            raw_doc = mongo.db.raw_resumes.find_one({"_id": ObjectId(conf["raw_resume_id"])})
+            if raw_doc and raw_doc.get("status") != "Converted":
+                if not mongo.db.candidate_processing.find_one({"email": conf["candidate_email"]}):
+                    from models.Resume_model import resume_schema, serialize_resume
+                    candidate = resume_schema(
+                        name             = conf["candidate_name"],
+                        email            = conf["candidate_email"],
+                        phone            = raw_doc.get("phone", ""),
+                        current_role     = raw_doc.get("current_role", ""),
+                        current_company  = raw_doc.get("current_company", ""),
+                        experience       = raw_doc.get("experience", 0),
+                        skills           = raw_doc.get("skills", ""),
+                        location         = raw_doc.get("location", ""),
+                        current_salary   = raw_doc.get("current_salary", 0),
+                        expected_salary  = raw_doc.get("expected_salary", 0),
+                        notice_period    = raw_doc.get("notice_period", "30 days"),
+                        source           = "Direct",
+                        status           = "New",
+                        linked_job_id    = conf.get("job_id", ""),
+                        linked_job_title = conf.get("job_title", ""),
+                        notes            = "Auto-added after candidate confirmed interest via email screening",
+                    )
+                    resume_id              = _next_resume_id()
+                    candidate["resume_id"] = resume_id
+                    candidate["resume_file"] = ""
+                    result = mongo.db.candidate_processing.insert_one(candidate)
+
+                    raw_path  = os.path.join(RAW_DIR, raw_doc.get("filename", ""))
+                    perm_name = f"{resume_id}.pdf"
+                    perm_path = os.path.join(RESUME_DIR, perm_name)
+                    if os.path.exists(raw_path):
+                        shutil.copy2(raw_path, perm_path)
+                        mongo.db.candidate_processing.update_one(
+                            {"_id": result.inserted_id},
+                            {"$set": {"resume_file": perm_name}}
+                        )
+
+                    mongo.db.raw_resumes.update_one(
+                        {"_id": raw_doc["_id"]},
+                        {"$set": {
+                            "status":               "Converted",
+                            "converted_resume_id":  resume_id,
+                            "screening_status":     "Interested",
+                            "updated_at":           datetime.utcnow(),
+                        }}
+                    )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+
+    frontend_base = os.environ.get("FRONTEND_URL", "http://localhost:3000")  # ← FIXED
+    from flask import redirect
+    return redirect(
+        f"{frontend_base}/screening-response-done"
+        f"?status={status.replace(' ', '+')}"
+        f"&job={conf.get('job_title', '')}"
+    )
+
+
+# ── GET /api/resumes/screening-status/<raw_id> ────────────────────────────────
+@resume_bp.route("/screening-status/<raw_id>", methods=["GET"])
+@jwt_required()
+def get_screening_status(raw_id):
+    """Recruiter checks if candidate has responded to screening email."""
+    conf = mongo.db.screening_confirmations.find_one(
+        {"raw_id": raw_id},
+        sort=[("created_at", -1)]
+    )
+    if not conf:
+        return jsonify(success=True, data=None), 200
+    conf["_id"] = str(conf["_id"])
+    for f in ("created_at", "expires_at", "responded_at"):
+        if isinstance(conf.get(f), datetime):
+            conf[f] = conf[f].isoformat()
+    return jsonify(success=True, data=conf), 200

@@ -1,7 +1,7 @@
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-BENCH_STATUSES   = ["Available", "In Interview", "Deployed", "On Hold", "Resigned"]
+BENCH_STATUSES   = ["Available", "In Interview", "Deployed", "On Hold", "Resigned","Pending Review"]
 EMPLOYMENT_TYPES = ["Permanent", "Contract", "C2H", "Freelance"]
 NOTICE_PERIODS   = ["Immediate", "15 days", "30 days", "60 days", "90 days"]
 
@@ -11,7 +11,8 @@ def bench_schema(
     email: str,
     phone: str = "",
     current_role: str = "",
-    skills: str = "",
+    # skills: str = "",
+    skills: list = [], 
     experience: float = 0,
     location: str = "",
     current_salary: float = 0,
@@ -33,7 +34,8 @@ def bench_schema(
         "email":             email.lower().strip(),
         "phone":             phone,
         "current_role":      current_role,
-        "skills":            skills,
+        # "skills":            skills,
+        "skills": skills if isinstance(skills, list) else [],
         "experience":        float(experience),
         "location":          location,
         "current_salary":    float(current_salary),

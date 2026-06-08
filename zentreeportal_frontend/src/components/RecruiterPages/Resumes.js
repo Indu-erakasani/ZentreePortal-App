@@ -7,7 +7,7 @@ import {
   MenuItem, Table, TableHead, TableBody, TableRow, TableCell,
   Paper, Chip, IconButton, Tooltip, CircularProgress, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions, Avatar,
-  InputAdornment, Divider, LinearProgress, Grid, Tabs, Tab, Badge,
+  InputAdornment, Divider, LinearProgress, Grid, Tabs, Tab, Badge,Menu,
 } from "@mui/material";
 import {
   Add, Search, Edit, Delete, Visibility,
@@ -368,6 +368,7 @@ function ExamMonitoringPanel({ candidateId, candidateName, examMap }) {
   const [procData,    setProcData]    = useState(null);
   const [procLoading, setProcLoading] = useState(false);
   const [procTab,     setProcTab]     = useState(0); // 0=Events, 1=Snapshots
+
 
   useEffect(() => {
     if (!candidateId) return;
@@ -1384,7 +1385,59 @@ function ScheduleInterviewCard({ tracking, candidate, onScheduled }) {
 }
 
 
+function RawActionMenu({ r, openConvert, getHeaders, setError, loadRaw, RESUMES_BASE, handle }) {
+  const [anchorEl, setAnchorEl] = React.useState(null);
 
+  return (
+    <>
+      <Tooltip title="Convert / Send Screening">
+        <IconButton size="small" sx={{ color: "#2e7d32" }}
+          onClick={e => setAnchorEl(e.currentTarget)}>
+          <PersonAdd fontSize="small" />
+        </IconButton>
+      </Tooltip>
+
+      <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
+        <MenuItem onClick={() => { setAnchorEl(null); openConvert(r); }}>
+          <PersonAdd fontSize="small" sx={{ mr: 1, color: "#2e7d32" }} />
+          Convert to Candidate (Manual)
+        </MenuItem>
+
+        <MenuItem
+          disabled={!r.email || !r.linked_job_id}
+          onClick={async () => {
+            setAnchorEl(null);
+            if (!r.email)         { setError("No email on file for this candidate"); return; }
+            if (!r.linked_job_id) { setError("Please assign a job first before sending screening"); return; }
+            try {
+              await fetch(`${RESUMES_BASE}/raw/${r._id}/send-screening`, {
+                method: "POST",
+                headers: getHeaders(),
+                body: JSON.stringify({
+                  email:       r.email,
+                  name:        r.name,
+                  job_id:      r.linked_job_id,
+                  job_title:   r.linked_job_title,
+                  client_name: r.client_name || "",
+                }),
+              }).then(handle);
+              setError("");
+              alert(`Screening email sent to ${r.email}`);
+              loadRaw();
+            } catch (err) {
+              setError(err?.message || "Failed to send screening email");
+            }
+          }}
+        >
+          <Assignment fontSize="small" sx={{ mr: 1, color: "#0369a1" }} />
+          Send Screening Email
+          {!r.email        && <Typography fontSize={10} color="error" ml={1}>(no email)</Typography>}
+          {!r.linked_job_id && <Typography fontSize={10} color="error" ml={1}>(no job)</Typography>}
+        </MenuItem>
+      </Menu>
+    </>
+  );
+}
 
 
 
@@ -1546,7 +1599,7 @@ export default function Resumes() {
   const [dupConfirmOpen,    setDupConfirmOpen]    = useState(false);
   const [dupConfirmData,    setDupConfirmData]    = useState(null);  // existing candidate info
   const [dupPendingPayload, setDupPendingPayload] = useState(null);  // payload to retry
-
+  const [anchorEl, setAnchorEl] = useState(null);
   // ── Loaders ────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     try { setLoading(true); setError(""); const res = await getAllResumes(); setResumes(res.data || []); }
@@ -2091,9 +2144,10 @@ const handleTrackingIvSave = async (e) => {
   useEffect(() => {
     // loadNotifications();
     loadExams();
+    loadRaw();
     const interval = setInterval(() => {
       //  loadNotifications(); 
-      loadExams(); }, 30000);
+      loadExams(); loadRaw(); }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -2581,7 +2635,36 @@ const handleTrackingIvSave = async (e) => {
                           </TableCell>
                         </TableCell>
                         <TableCell><Chip label={r.parse_status || "pending"} size="small" color={PARSE_COLOR[r.parse_status] || "default"} sx={{ fontSize: 10, fontWeight: 700 }} /></TableCell>
-                        <TableCell><Chip label={r.status} size="small" color={RAW_STATUS_COLOR[r.status] || "default"} sx={{ fontSize: 11, fontWeight: 700 }} /></TableCell>
+                        {/* <TableCell><Chip label={r.status} size="small" color={RAW_STATUS_COLOR[r.status] || "default"} sx={{ fontSize: 11, fontWeight: 700 }} /></TableCell> */}
+                        
+                        <TableCell>
+                            <Chip
+                              label={r.status}
+                              size="small"
+                              color={RAW_STATUS_COLOR[r.status] || "default"}
+                              sx={{ fontSize: 11, fontWeight: 700 }}
+                            />
+                            {r.screening_status && (
+                              <Chip
+                                label={
+                                  r.screening_status === "Sent"         ? "📧 Screening Sent"  :
+                                  r.screening_status === "Interested"   ? "✅ Interested"       :
+                                                                          "❌ Not Interested"
+                                }
+                                size="small"
+                                sx={{
+                                  mt: 0.5, fontSize: 9, height: 16, display: "flex",
+                                  bgcolor:
+                                    r.screening_status === "Interested"     ? "#e8f5e9" :
+                                    r.screening_status === "Not Interested" ? "#fce4ec" : "#e3f2fd",
+                                  color:
+                                    r.screening_status === "Interested"     ? "#2e7d32" :
+                                    r.screening_status === "Not Interested" ? "#c62828" : "#0277bd",
+                                }}
+                              />
+                            )}
+                          </TableCell>
+                        
                         <TableCell>
                           <Box display="flex" gap={0.5}>
                             <Tooltip title={r.filename ? "View PDF" : "No PDF attached"}>
@@ -2604,13 +2687,24 @@ const handleTrackingIvSave = async (e) => {
                             </Tooltip>
 
                             {/* Convert — only for non-converted */}
-                            {r.status !== "Converted" && (
+                            {/* {r.status !== "Converted" && (
                               <Tooltip title="Convert to full candidate">
                                 <IconButton size="small" sx={{ color: "#2e7d32" }} onClick={() => openConvert(r)}>
                                   <PersonAdd fontSize="small" />
                                 </IconButton>
                               </Tooltip>
-                            )}
+                            )} */}
+                              {r.status !== "Converted" && (
+                                <RawActionMenu
+                                  r={r}
+                                  openConvert={openConvert}
+                                  getHeaders={getHeaders}
+                                  setError={setError}
+                                  loadRaw={loadRaw}
+                                  RESUMES_BASE={RESUMES_BASE}
+                                  handle={handle}
+                                />
+                              )}
 
                             {/* Converted indicator */}
                             {r.status === "Converted" && (
@@ -2742,6 +2836,85 @@ const handleTrackingIvSave = async (e) => {
         </Button>
       </Box>
     )}
+{/* ── Stage Timeline ── */}
+{candidateTracking?.stage_history?.length > 0 && (
+  <Card variant="outlined" sx={{ borderRadius: 2 }}>
+    <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+      <Typography fontSize={11} fontWeight={700} color="text.secondary"
+        textTransform="uppercase" letterSpacing={0.5} mb={2}>
+        Candidate Journey
+      </Typography>
+      {candidateTracking.stage_history.map((entry, i) => {
+        const isLast    = i === candidateTracking.stage_history.length - 1;
+        const isBad     = ["Rejected", "Withdrawn", "Offer Declined"].includes(entry.stage);
+        const isGood    = ["Offer Accepted", "Joined"].includes(entry.stage);
+        const dotColor  = isBad ? "#c62828" : isGood ? "#2e7d32" : isLast ? "#1565c0" : "#90caf9";
+        const lineColor = "#e0e0e0";
+        // Find interview feedback for this stage
+        const ivFeedback = candidateTracking.interviews?.find(iv => iv.stage === entry.stage);
+        return (
+          <Box key={i} display="flex" gap={1.5} alignItems="flex-start">
+            <Box display="flex" flexDirection="column" alignItems="center" sx={{ pt: 0.4 }}>
+              <Box sx={{
+                width: 12, height: 12, borderRadius: "50%", flexShrink: 0,
+                bgcolor: dotColor, border: `2px solid ${dotColor}`,
+                boxShadow: isLast ? `0 0 0 3px ${dotColor}22` : "none",
+              }} />
+              {!isLast && <Box sx={{ width: 2, flexGrow: 1, minHeight: 28, bgcolor: lineColor, my: 0.4 }} />}
+            </Box>
+            <Box pb={isLast ? 0 : 2} flex={1}>
+              <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+                <Typography fontSize={13} fontWeight={700}
+                  color={isBad ? "error.main" : isGood ? "success.dark" : "text.primary"}>
+                  {entry.stage}
+                </Typography>
+                {isLast && !entry.exited_at && (
+                  <Chip label="Current" size="small"
+                    sx={{ fontSize: 9, height: 16, bgcolor: "#e3f2fd", color: "#0277bd", fontWeight: 700 }} />
+                )}
+                {isBad && <Chip label="❌ Rejected" size="small" color="error" sx={{ fontSize: 9, height: 16 }} />}
+                {isGood && <Chip label="✅ Selected" size="small" color="success" sx={{ fontSize: 9, height: 16 }} />}
+              </Box>
+              <Typography fontSize={11} color="text.secondary">
+                {entry.entered_at ? new Date(entry.entered_at).toLocaleDateString("en-IN", {
+                  day: "numeric", month: "short", year: "numeric"
+                }) : "—"}
+                {entry.exited_at && ` → ${new Date(entry.exited_at).toLocaleDateString("en-IN", {
+                  day: "numeric", month: "short", year: "numeric"
+                })}`}
+              </Typography>
+              {/* Show interview feedback inline if exists for this stage */}
+              {ivFeedback && (
+                <Box mt={0.8} p={1} bgcolor="#f5f7fa" borderRadius={1.5}
+                  sx={{ border: "1px solid #e0e0e0" }}>
+                  <Box display="flex" alignItems="center" gap={1} mb={0.4}>
+                    <Typography fontSize={11} fontWeight={600}>{ivFeedback.interviewer}</Typography>
+                    <Box display="flex">
+                      {[1,2,3,4,5].map(n => (
+                        <Box key={n} sx={{ color: n <= (ivFeedback.feedback_score||0) ? "#f9a825" : "#e0e0e0", fontSize: 12 }}>★</Box>
+                      ))}
+                    </Box>
+                    {ivFeedback.recommendation && (
+                      <Chip label={ivFeedback.recommendation} size="small"
+                        color={["Strong Hire","Hire"].includes(ivFeedback.recommendation) ? "success"
+                          : ivFeedback.recommendation === "No Hire" ? "error" : "default"}
+                        sx={{ fontSize: 9, height: 16, fontWeight: 700 }} />
+                    )}
+                  </Box>
+                  {ivFeedback.feedback_summary && (
+                    <Typography fontSize={11} color="text.secondary">{ivFeedback.feedback_summary}</Typography>
+                  )}
+                </Box>
+              )}
+            </Box>
+          </Box>
+        );
+      })}
+    </CardContent>
+  </Card>
+)}
+
+
 
     {!trackingLoading && candidateTracking && (
       <Box display="flex" flexDirection="column" gap={2.5}>

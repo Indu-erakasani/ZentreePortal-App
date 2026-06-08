@@ -30,6 +30,7 @@ from routes.export_routes    import export_bp
 from routes.Score_routes     import score_bp
 from routes.question_routes  import question_bp
 from routes.exam_routes      import exam_bp
+from routes.JdBenchReview_routes import jd_review_bp
 from routes.Notification_routes import (
     notification_bp,
     # _generate_interview_notifications,
@@ -104,6 +105,7 @@ app.register_blueprint(score_bp,         url_prefix="/api/score")
 app.register_blueprint(question_bp,      url_prefix="/api/questions")
 app.register_blueprint(exam_bp,          url_prefix="/api/exams")
 app.register_blueprint(notification_bp,  url_prefix="/api/notifications")
+app.register_blueprint(jd_review_bp,     url_prefix="/api/jd-review")
 
 # ── Scheduler — runs cleanup daily at 2:00 AM ─────────────────────────────────
 def run_cleanup():

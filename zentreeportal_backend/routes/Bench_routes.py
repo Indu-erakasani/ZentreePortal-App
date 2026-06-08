@@ -3,7 +3,7 @@ from flask import Blueprint, request, jsonify, send_file
 from flask_jwt_extended import jwt_required
 from bson import ObjectId
 from bson.errors import InvalidId
-from datetime import datetime
+from datetime import datetime,timedelta
 import os, json, base64, uuid, shutil
 import requests as http
 from extensions import mongo
@@ -36,6 +36,17 @@ def _next_bench_id() -> str:
     count = mongo.db.bench_people.count_documents({})
     return f"BCH{str(count + 1).zfill(3)}"
 
+def _get_token_doc(token: str):
+    doc = mongo.db.bench_form_tokens.find_one({"token": token})
+    if not doc:
+        return None, (jsonify(success=False, message="Invalid or expired link"), 404)
+    if doc.get("expires_at") and doc["expires_at"] < datetime.utcnow():
+        return None, (jsonify(success=False, message="This link has expired"), 410)
+    if not doc.get("is_active", True):
+        return None, (jsonify(success=False, message="This link has been deactivated"), 403)
+    return doc, None
+
+
 
 # ── POST /api/bench/parse-pdf ────────────────────────────────────────────────
 @bench_bp.route("/parse-pdf", methods=["POST"])
@@ -62,7 +73,7 @@ def parse_pdf():
         "Extract candidate information from this resume and return ONLY a valid JSON object "
         "with no extra text, no markdown, no backticks.\n\n"
         "Use exactly these keys:\n"
-        '{ "name":"","email":"","phone":"","current_role":"","skills":"",'
+        '{ "name":"","email":"","phone":"","current_role":"","skills":[{"name":"","rating":3}],'
         '"experience":0,"location":"","current_salary":0,"expected_salary":0,'
         '"notice_period":"Immediate","last_client":"","last_project":"" }\n\n'
         "Rules: experience=total years as number, skills=comma-separated string, "
@@ -134,7 +145,8 @@ def get_all():
     if q:
         query["$or"] = [
             {"name":         {"$regex": q, "$options": "i"}},
-            {"skills":       {"$regex": q, "$options": "i"}},
+            # {"skills":       {"$regex": q, "$options": "i"}},
+            {"skills.name": {"$regex": q, "$options": "i"}},
             {"current_role": {"$regex": q, "$options": "i"}},
             {"bench_id":     {"$regex": q, "$options": "i"}},
         ]
@@ -328,3 +340,298 @@ def talent_search():
         ).sort("created_at", -1)
     )
     return jsonify(success=True, data=[serialize_bench(d) for d in docs]), 200
+
+
+
+
+
+
+# POST /api/bench/<bench_id>/promote-to-candidate
+@bench_bp.route("/<bench_id>/promote-to-candidate", methods=["POST"])
+@jwt_required()
+def promote_to_candidate(bench_id):
+    bench = mongo.db.bench_people.find_one({"bench_id": bench_id})
+    if not bench:
+        return jsonify(success=False, message="Bench person not found"), 404
+
+    data      = request.get_json(silent=True) or {}
+    job_id    = data.get("job_id", "")      # mongo _id of job
+    job_title = data.get("job_title", "")
+    client_name = data.get("client_name", "")
+
+    # Resolve job_id string from mongo _id
+    resolved_job_id = ""
+    if job_id:
+        try:
+            job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
+            if job_doc:
+                resolved_job_id = job_doc.get("job_id", "")
+                job_title       = job_doc.get("title", job_title)
+                client_name     = job_doc.get("client_name", client_name)
+        except Exception:
+            pass
+
+    # Check if already exists for same email + job combo
+    existing = mongo.db.candidate_processing.find_one({
+        "email":         bench["email"].lower().strip(),
+        "linked_job_id": resolved_job_id,
+    })
+    if existing:
+        from models.Resume_model import serialize_resume
+        return jsonify(
+            success=True,
+            message="Candidate already exists for this job",
+            data=serialize_resume(existing),
+            already_existed=True,
+        ), 200
+
+    # Build skills string from bench skills array
+    skills_raw = bench.get("skills", [])
+    if isinstance(skills_raw, list):
+        skills_str = ", ".join(
+            s["name"] if isinstance(s, dict) else str(s)
+            for s in skills_raw
+        )
+    else:
+        skills_str = str(skills_raw)
+
+    try:
+        from models.Resume_model import resume_schema, serialize_resume
+        
+        # Count for resume_id
+        count     = mongo.db.candidate_processing.count_documents({})
+        resume_id = f"RES{str(count + 1).zfill(3)}"
+
+        candidate = resume_schema(
+            name             = bench["name"],
+            email            = bench["email"],
+            phone            = bench.get("phone", ""),
+            current_role     = bench.get("current_role", ""),
+            current_company  = bench.get("last_client", ""),
+            experience       = bench.get("experience", 0),
+            skills           = skills_str,
+            location         = bench.get("location", ""),
+            current_salary   = bench.get("current_salary", 0),
+            expected_salary  = bench.get("expected_salary", 0),
+            notice_period    = bench.get("notice_period", "Immediate"),
+            source           = "Bench",
+            status           = "Shortlisted",
+            linked_job_id    = resolved_job_id,
+            linked_job_title = job_title,
+            notes            = f"Promoted from bench. Bench ID: {bench_id}. {bench.get('notes','')}",
+        )
+        candidate["resume_id"]    = resume_id
+        candidate["resume_file"]  = bench.get("resume_file", "")
+        candidate["bench_id"]     = bench_id   # link back to bench record
+
+        result = mongo.db.candidate_processing.insert_one(candidate)
+
+        # Copy resume PDF if exists
+        import shutil, os
+        bench_resume = bench.get("resume_file", "")
+        if bench_resume:
+            UPLOAD_DIR = os.environ.get("UPLOAD_FOLDER", "uploads")
+            src  = os.path.join(UPLOAD_DIR, "bench_resumes", bench_resume)
+            dst  = os.path.join(UPLOAD_DIR, "resumes", f"{resume_id}.pdf")
+            if os.path.exists(src):
+                shutil.copy2(src, dst)
+                mongo.db.candidate_processing.update_one(
+                    {"_id": result.inserted_id},
+                    {"$set": {"resume_file": f"{resume_id}.pdf"}}
+                )
+                candidate["resume_file"] = f"{resume_id}.pdf"
+
+        candidate["_id"] = result.inserted_id
+        return jsonify(
+            success=True,
+            message="Bench person promoted to candidate",
+            data=serialize_resume(candidate),
+            already_existed=False,
+        ), 201
+
+    except Exception as e:
+        return jsonify(success=False, message=str(e)), 500
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RECRUITER — Link Generation (JWT protected)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@bench_bp.route("/generate-link", methods=["POST"])
+@jwt_required()
+def generate_link():
+    data            = request.get_json(silent=True) or {}
+    label           = data.get("label", "Candidate Registration Form")
+    expires_in_days = int(data.get("expires_in_days", 7))
+    created_by      = data.get("created_by", "")
+    token           = str(uuid.uuid4())
+    expires_at      = datetime.utcnow() + timedelta(days=expires_in_days)
+    mongo.db.bench_form_tokens.insert_one({
+        "token": token, "label": label, "created_by": created_by,
+        "created_at": datetime.utcnow(), "expires_at": expires_at,
+        "is_active": True, "used_count": 0,
+    })
+    frontend_base = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    return jsonify(success=True, token=token, url=f"{frontend_base}/candidate-form/{token}",
+                   label=label, expires_at=expires_at.isoformat()), 201
+
+
+@bench_bp.route("/form-links", methods=["GET"])
+@jwt_required()
+def list_links():
+    docs = list(mongo.db.bench_form_tokens.find().sort("created_at", -1))
+    for d in docs:
+        d["_id"] = str(d["_id"])
+        for f in ("created_at", "expires_at"):
+            if isinstance(d.get(f), datetime):
+                d[f] = d[f].isoformat()
+    return jsonify(success=True, data=docs), 200
+
+
+@bench_bp.route("/form-links/<token>/deactivate", methods=["PATCH"])
+@jwt_required()
+def deactivate_link(token):
+    res = mongo.db.bench_form_tokens.update_one(
+        {"token": token}, {"$set": {"is_active": False}}
+    )
+    if res.matched_count == 0:
+        return jsonify(success=False, message="Token not found"), 404
+    return jsonify(success=True, message="Link deactivated"), 200
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PUBLIC — Candidate Self-Registration (NO JWT)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@bench_bp.route("/public/bench-form/<token>", methods=["GET"])
+def get_form_meta(token):
+    token_doc, err = _get_token_doc(token)
+    if err:
+        return err
+    return jsonify(success=True, label=token_doc.get("label", "Candidate Registration"),
+                   expires_at=token_doc["expires_at"].isoformat() if token_doc.get("expires_at") else None,
+                   statuses=BENCH_STATUSES, employment_types=EMPLOYMENT_TYPES), 200
+
+
+@bench_bp.route("/public/bench-form/<token>/parse-pdf", methods=["POST"])
+def public_parse_pdf(token):
+    token_doc, err = _get_token_doc(token)
+    if err:
+        return err
+    data     = request.get_json(silent=True) or {}
+    file_b64 = data.get("file_b64", "")
+    if not file_b64:
+        return jsonify(success=False, message="'file_b64' is required"), 400
+    file_id   = str(uuid.uuid4())
+    temp_path = os.path.join(BENCH_DIR, f"temp_{file_id}.pdf")
+    try:
+        with open(temp_path, "wb") as f:
+            f.write(base64.b64decode(file_b64))
+    except Exception as e:
+        return jsonify(success=False, message=f"Failed to save file: {e}"), 500
+    prompt = (
+        "Extract candidate information from this resume and return ONLY a valid JSON object "
+        "with no extra text, no markdown, no backticks.\n\n"
+        "Use exactly these keys:\n"
+        '{ "name":"","email":"","phone":"","current_role":"","skills":"",'
+        '"experience":0,"location":"","current_salary":0,"expected_salary":0,'
+        '"notice_period":"Immediate","last_client":"","last_project":"" }\n\n'
+        "Rules: experience=total years as number, skills=comma-separated string, "
+        "salaries=annual INR as number (0 if not found), "
+        'notice_period: one of "Immediate","15 days","30 days","60 days","90 days"'
+    )
+    try:
+        raw    = ai_parse_pdf(file_b64, prompt, timeout=60)
+        parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
+        return jsonify(success=True, data=parsed, file_id=file_id), 200
+    except json.JSONDecodeError:
+        return jsonify(success=False, message="AI returned non-JSON — fill manually", file_id=file_id), 422
+    except Exception as e:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        return jsonify(success=False, message=str(e)), 500
+
+
+@bench_bp.route("/public/bench-form/<token>/submit", methods=["POST"])
+def submit_form(token):
+    token_doc, err = _get_token_doc(token)
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    for f in ["name", "email"]:
+        if not data.get(f):
+            return jsonify(success=False, message=f"'{f}' is required"), 400
+    if mongo.db.bench_people.find_one({"email": data["email"].lower().strip()}):
+        return jsonify(success=False, message="A profile with this email already exists"), 409
+    try:
+        doc = bench_schema(
+            name            = data["name"],
+            email           = data["email"],
+            phone           = data.get("phone", ""),
+            current_role    = data.get("current_role", ""),
+            skills          = data.get("skills", ""),
+            experience      = data.get("experience", 0),
+            location        = data.get("location", ""),
+            current_salary  = data.get("current_salary", 0),
+            expected_salary = data.get("expected_salary", 0),
+            notice_period   = data.get("notice_period", "Immediate"),
+            last_client     = data.get("last_client", ""),
+            last_project    = data.get("last_project", ""),
+            status          = "Pending Review",
+            added_by        = f"self_registered:{token_doc.get('label', token)}",
+            employment_type = data.get("employment_type", "Permanent"),
+            notes           = data.get("notes", ""),
+        )
+        bench_id           = _next_bench_id()
+        doc["bench_id"]    = bench_id
+        doc["resume_file"] = ""
+        doc["source"]      = "self_registered"
+        doc["form_token"]  = token
+        result = mongo.db.bench_people.insert_one(doc)
+        file_id = data.get("file_id", "")
+        if file_id:
+            temp_path = os.path.join(BENCH_DIR, f"temp_{file_id}.pdf")
+            perm_name = f"{bench_id}.pdf"
+            perm_path = os.path.join(BENCH_DIR, perm_name)
+            if os.path.exists(temp_path):
+                shutil.move(temp_path, perm_path)
+                mongo.db.bench_people.update_one(
+                    {"_id": result.inserted_id}, {"$set": {"resume_file": perm_name}}
+                )
+        mongo.db.bench_form_tokens.update_one({"token": token}, {"$inc": {"used_count": 1}})
+        return jsonify(success=True,
+                       message="Profile submitted! Our team will review and get in touch.",
+                       bench_id=bench_id), 201
+    except Exception as e:
+        return jsonify(success=False, message=str(e)), 500
