@@ -3,11 +3,16 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 from datetime import datetime
 import uuid, os, base64
-
-from extensions import mongo
+import random, string
+from extensions import mongo,resourcing_db
 from models.JdBenchReview_model import jd_review_schema, serialize_review
 
 from utils.email_service import *
+
+import logging
+
+logger = logging.getLogger(__name__)
+
 jd_review_bp = Blueprint("jd_review", __name__)
 
 UPLOAD_DIR   = os.environ.get("UPLOAD_FOLDER", "uploads")
@@ -34,7 +39,41 @@ def assign_review():
         return jsonify(success=False, message="Bench person not found"), 404
 
     # Fetch job
-    job = mongo.db.jobs.find_one({"_id": ObjectId(data["job_id"])})
+    # job = mongo.db.jobs.find_one({"_id": ObjectId(data["job_id"])})
+    # if not job:
+    #     return jsonify(success=False, message="Job not found"), 404
+    # Fetch job — from zentree or resourcing_bot depending on source
+  
+
+    source      = data.get("source", "zentree")
+    job         = None
+    job_title   = ""
+    client_name = ""
+
+    if source == "resourcing_bot":
+        try:
+            rb_job = resourcing_db["jd_details"].find_one({"_id": ObjectId(data["job_id"])})
+            if rb_job:
+                job_title   = rb_job.get("jobRole", rb_job.get("jobTitle", ""))
+                client_name = rb_job.get("companyName", "")
+                # Wrap into a job-like dict so the rest of the function works unchanged
+                job = {
+                    "title":       job_title,
+                    "client_name": client_name,
+                    "description": rb_job.get("jobDescription", ""),
+                    "skills":      rb_job.get("skills", []),
+                }
+        except Exception:
+            pass
+    else:
+        try:
+            job = mongo.db.jobs.find_one({"_id": ObjectId(data["job_id"])})
+            if job:
+                job_title   = job.get("title", "")
+                client_name = job.get("client_name", "")
+        except Exception:
+            pass
+
     if not job:
         return jsonify(success=False, message="Job not found"), 404
 
@@ -63,6 +102,7 @@ def assign_review():
     )
     doc["upload_token"] = upload_token
     doc["review_token"] = review_token
+    doc["source"]       = source
 
     result = mongo.db.jd_reviews.insert_one(doc)
 
@@ -216,6 +256,99 @@ def get_review_meta(token):
     ), 200
 
 
+def _generate_candidate_id():
+    digits = ''.join(random.choices(string.digits, k=8))
+    return f"CD-{digits}"
+def _upsert_reviewed_candidate(
+    bench: dict,
+    parsed: dict,
+    doc: dict,
+    rb_jd_id: str,
+    recruiter_id: str,
+    resume_file: str,
+):
+    """
+    Upsert a candidate_profiles record in ResourcingBot using
+    AI-parsed data from the JD-tailored resume.
+    Falls back to bench fields where parsed data is missing.
+    """
+    from extensions import get_candidate_profiles_col
+
+    col = get_candidate_profiles_col()
+
+    # Skills — parsed gives a list of strings; fall back to bench skills
+    parsed_skills = parsed.get("skills", [])
+    if not parsed_skills:
+        raw = bench.get("skills", [])
+        if isinstance(raw, list):
+            parsed_skills = [
+                s["name"] if isinstance(s, dict) else str(s)
+                for s in raw
+            ]
+        else:
+            parsed_skills = [s.strip() for s in str(raw).split(",") if s.strip()]
+
+    # Core fields — prefer parsed, fall back to bench
+    candidate_email = (
+        parsed.get("email") or bench.get("email", "")
+    ).lower().strip()
+
+    profile = {
+        # ── Identity ────────────────────────────────────────────────────
+        "candidatename":  parsed.get("name")         or bench.get("name", ""),
+        "candidateEmail": candidate_email,
+        "phone":          parsed.get("phone")         or bench.get("phone", ""),
+        "address":        parsed.get("location")      or bench.get("location", ""),
+        "jobRole": doc.get("job_title", ""),
+
+        # ── JD linkage ──────────────────────────────────────────────────
+        "jdID":        rb_jd_id,
+        "companyName": doc.get("client_name", ""),
+        # "jobTitle":    doc.get("job_title", ""),
+
+        # ── Skills ──────────────────────────────────────────────────────
+        "skills": parsed_skills,
+
+        # ── Screening placeholders ───────────────────────────────────────
+        "summaries":             bench.get("notes", ""),
+        "overallStatus":         "Shortlisted",
+        "match_score":           0,
+        "ScreeningTestScore":    0,
+        "mcq_questions":         [],
+        "subjective_questions":  [],
+        "programming_questions": [],
+        "interviewFeedback":     [],
+        "recruiterFeedback":     "",
+        "hiringManagerFeedback": "",
+
+        # ── Source tracking ─────────────────────────────────────────────
+        "source":            "Bench",
+        "bench_id":          bench.get("bench_id", ""),
+        "recruiterid":       recruiter_id,
+        "jd_review_id":      str(doc["_id"]),   # link back to the review
+
+        # ── Resume — point to the tailored file ─────────────────────────
+        "resumeUrl": resume_file,
+
+        # ── Timestamps ──────────────────────────────────────────────────
+        "updated_at": datetime.utcnow(),
+    }
+
+    # Upsert — if a profile already exists for same email + jdID, update it
+    # (bench promotion may have already created a stub record)
+    result = col.update_one(
+        {
+            "candidateEmail": candidate_email,
+            "jdID":           rb_jd_id,
+        },
+        {
+            "$set":         profile,
+            "$setOnInsert": {"created_at": datetime.utcnow(),"candidateID": _generate_candidate_id(),},
+        },
+        upsert=True,
+    )
+
+    return result
 # GET /api/jd-review/public/review/<review_token>/file  → serve the resume PDF
 @jd_review_bp.route("/public/review/<token>/file", methods=["GET"])
 def get_review_file(token):
@@ -268,17 +401,90 @@ def submit_decision(token):
         update["$set"]["status"] = "Rejected"
 
     mongo.db.jd_reviews.update_one({"_id": doc["_id"]}, update)
-
+    
     if decision == "Accepted":
-        # Notify recruiter
         bench = mongo.db.bench_people.find_one({"bench_id": doc["bench_id"]})
+
+        # ── Parse the tailored resume and upsert into ResourcingBot ──────────
+        try:
+            from ai_service import ai_parse_pdf
+            import base64, json as _json
+
+            resume_path = os.path.join(REVIEW_DIR, doc["resume_file"])
+            with open(resume_path, "rb") as f:
+                file_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            prompt = (
+                "Extract candidate information from this resume and return ONLY a valid JSON object "
+                "with no extra text, no markdown, no backticks.\n\n"
+                "Use exactly these keys:\n"
+                '{ "name":"","email":"","phone":"","current_role":"","skills":[],'
+                '"experience":0,"location":"","current_salary":0,"expected_salary":0,'
+                '"notice_period":"Immediate","last_client":"","last_project":"" }\n\n'
+                "Rules: experience=total years as number, "
+                "skills=list of strings (skill names only), "
+                "salaries=annual INR as number (0 if not found), "
+                'notice_period: one of "Immediate","15 days","30 days","60 days","90 days"'
+            )
+
+            raw    = ai_parse_pdf(file_b64, prompt, timeout=60)
+            parsed = _json.loads(raw.replace("```json", "").replace("```", "").strip())
+        except Exception as parse_err:
+            logger.warning(f"[accept] Resume parse failed, falling back to bench data: {parse_err}")
+            parsed = {}   # fallback — _write_to_resourcing_bot will use bench fields
+
+        # ── Resolve rb_jd_id ─────────────────────────────────────────────────
+        try:
+            from extensions import resourcing_db
+            source  = doc.get("source", "zentree")
+            rb_jd_id = ""
+            if source == "resourcing_bot":
+                rb_jd = resourcing_db["jd_details"].find_one(
+                    {"_id": ObjectId(doc["job_id"])}
+                )
+                rb_jd_id = rb_jd.get("jdID", doc["job_id"]) if rb_jd else doc["job_id"]
+            else:
+                rb_jd = resourcing_db["jd_details"].find_one(
+                    {"zentree_job_id": doc.get("job_id", "")}
+                )
+                rb_jd_id = rb_jd.get("jdID", doc["job_id"]) if rb_jd else doc["job_id"]
+        except Exception:
+            rb_jd_id = doc.get("job_id", "")
+
+        # ── Resolve recruiter id ──────────────────────────────────────────────
+        rb_recruiter_id = ""
+        try:
+            if doc.get("assigned_by"):
+                zentree_user = mongo.db.users.find_one({"email": doc["assigned_by"]})
+                if zentree_user:
+                    rb_user = resourcing_db["users"].find_one(
+                        {"email": zentree_user.get("email", "")}
+                    )
+                    if rb_user:
+                        rb_recruiter_id = str(rb_user["_id"])
+        except Exception:
+            pass
+
+        # ── Write / upsert candidate profile ─────────────────────────────────
+        try:
+            from extensions import get_candidate_profiles_col
+            _upsert_reviewed_candidate(
+                bench        = bench,
+                parsed       = parsed,
+                doc          = doc,
+                rb_jd_id     = rb_jd_id,
+                recruiter_id = rb_recruiter_id,
+                resume_file  = doc["resume_file"],   # tailored resume filename
+            )
+        except Exception as rb_err:
+            logger.warning(f"[accept] ResourcingBot upsert failed (non-fatal): {rb_err}")
+
+        # ── Notify recruiter (existing logic, unchanged) ──────────────────────
         recruiter_email = bench.get("added_by_email") if bench else None
-        # fallback: look up recruiter by assigned_by name in users collection
         if not recruiter_email and doc.get("assigned_by"):
             u = mongo.db.users.find_one({"email": doc["assigned_by"]})
             if u:
                 recruiter_email = u["email"]
-
         if recruiter_email:
             review_url = f"{FRONTEND_BASE}/jd-resume-review/{token}"
             send_recruiter_accepted_email(
@@ -288,7 +494,6 @@ def submit_decision(token):
                 reviewer_name  = doc["senior_reviewer_name"],
                 review_url     = review_url,
             )
-
     elif decision == "Rejected":
         # Notify candidate to re-upload
         upload_url = f"{FRONTEND_BASE}/jd-resume-upload/{doc['upload_token']}"

@@ -1647,11 +1647,17 @@ def get_screening_status(raw_id):
 
 
 # ── GET /api/resumes/resourcing-candidates ────────────────────────────────────
+
+
+
+
 @resume_bp.route("/resourcing-candidates", methods=["GET"])
 @jwt_required()
 def get_resourcing_candidates():
-    from extensions import get_candidate_profiles_col
+    from extensions import get_candidate_profiles_col, resourcing_db
+    from flask_jwt_extended import get_jwt_identity
     from bson import ObjectId
+    import json as _json
 
     q        = request.args.get("q", "").strip()
     status   = request.args.get("status", "")
@@ -1659,7 +1665,54 @@ def get_resourcing_candidates():
     page     = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 50))
 
+    # ── Resolve caller identity & role ────────────────────────────────────────
+    identity  = get_jwt_identity()   # returns the raw _id string stored at login
+    caller_id = str(identity)
+
+    caller_role = ""
+    try:
+        caller_doc  = mongo.db.users.find_one({"_id": ObjectId(caller_id)})
+        caller_role = caller_doc.get("role", "") if caller_doc else ""
+    except Exception:
+        caller_role = ""
+
     query = {}
+
+    # ── Recruiter gate: only show candidates assigned to them ─────────────────
+    if caller_role == "recruiter":
+        # Step 1: get their email from zentree users
+        user_email = ""
+        try:
+            zentree_user = mongo.db.users.find_one({"_id": ObjectId(caller_id)})
+            user_email   = zentree_user.get("email", "") if zentree_user else ""
+        except Exception:
+            user_email = ""
+
+        # Step 2: find matching user in resourcing_bot DB by email
+        rb_user_id = None
+        if user_email:
+            try:
+                rb_user = resourcing_db["users"].find_one({"email": user_email})
+                if rb_user:
+                    rb_user_id = str(rb_user["_id"])
+            except Exception:
+                rb_user_id = None
+
+        # Step 3: filter by recruiterid — if no rb account, return empty
+        if rb_user_id:
+            query["recruiterid"] = rb_user_id
+        else:
+            return jsonify(
+                success  = True,
+                data     = [],
+                total    = 0,
+                page     = page,
+                per_page = per_page,
+                pages    = 0,
+                message  = "No Resourcing Bot account found for this recruiter"
+            ), 200
+
+    # ── Search & status filters (applied on top of role filter) ───────────────
     if q:
         query["$or"] = [
             {"candidatename":  {"$regex": q, "$options": "i"}},
@@ -1695,8 +1748,10 @@ def get_resourcing_candidates():
         return _deep_serialize(dict(doc))
 
     return jsonify(
-        success=True,
-        data=[_serialize(d) for d in docs],
-        total=total, page=page, per_page=per_page,
-        pages=(total + per_page - 1) // per_page,
+        success  = True,
+        data     = [_serialize(d) for d in docs],
+        total    = total,
+        page     = page,
+        per_page = per_page,
+        pages    = (total + per_page - 1) // per_page,
     ), 200

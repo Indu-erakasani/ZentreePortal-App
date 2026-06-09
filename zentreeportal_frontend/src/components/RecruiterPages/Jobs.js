@@ -244,6 +244,7 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
 // ─────────────────────────────────────────────────────────────────────────────
 
   function JDDetailsTab({ initialClientName = "", onClearClientFilter }) {
+    const navigate = useNavigate();
   // ── State ──────────────────────────────────────────────────────────────────
   const [jds,         setJDs]         = useState([]);
   const [loading,     setLoading]     = useState(true);
@@ -455,6 +456,7 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
                   "Expires", "Status", "Actions"].map(h => (
                   <TableCell key={h} sx={{ fontWeight: 700, fontSize: 12, color: "#546e7a" }}>{h}</TableCell>
                 ))}
+                
               </TableRow>
             </TableHead>
             <TableBody>
@@ -468,7 +470,13 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
                 const exp    = expStatus(j.expiration_time);
                 const qCount = totalQs(j);
                 return (
-                  <TableRow key={j._id} hover>
+                  // <TableRow key={j._id} hover>
+                  <TableRow
+                    key={j._id}
+                    hover
+                    onClick={() => navigate(`/resumes?tab=2&jd=${j.jdID}`)}
+                    sx={{ cursor: "pointer" }}
+                  >
                     {/* JD ID */}
                     <TableCell sx={{ fontWeight: 700, color: "#0277bd", fontSize: 12, whiteSpace: "nowrap" }}>
                       {j.jdID}
@@ -567,6 +575,13 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
                       )}
                     </TableCell>
 
+
+
+
+
+
+                    
+
                     {/* Created */}
                     <TableCell sx={{ fontSize: 11, color: "text.secondary", whiteSpace: "nowrap" }}>
                       {fmtDate(j.creation_time)}
@@ -589,12 +604,15 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
                     </TableCell>
 
                     {/* Actions */}
+
                     <TableCell>
-                      <Tooltip title="View Full Details">
-                        <IconButton size="small" onClick={() => openDetail(j)}>
-                          <Visibility fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      <Box display="flex" gap={0.5}>
+                        <Tooltip title="View Full Details">
+                          <IconButton size="small" onClick={() => openDetail(j)}>
+                            <Visibility fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
                     </TableCell>
                   </TableRow>
                 );

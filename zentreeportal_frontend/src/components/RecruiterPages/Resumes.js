@@ -1468,7 +1468,8 @@ export default function Resumes() {
   const [urlJobTitle,    setUrlJobTitle]    = useState(_qp.get("job_title")   || "");
   const [isJobLocked,    setIsJobLocked]    = useState(!!_qp.get("job"));
 
-  
+
+
   useEffect(() => {
     const p      = new URLSearchParams(location.search);
     const cid    = p.get("client")      || "";
@@ -1480,6 +1481,11 @@ export default function Resumes() {
     setUrlJobId(jid); setUrlJobTitle(jtitle); setIsJobLocked(!!jid);
     if (jid) setJobF(jid);
     else if (!cid) setJobF("");
+
+    // Resourcing Bot JD filter
+    const jd = p.get("jd") || "";
+    setRbJdFilter(jd);
+    if (jd || p.get("tab") === "2") setMainTab(2);
   
     // HR always sees only Hired candidates
     if (isHR) setStatusF("Hired");
@@ -1619,7 +1625,11 @@ const [rbPerPage]                 = useState(50);
   const [dupConfirmOpen,    setDupConfirmOpen]    = useState(false);
   const [dupConfirmData,    setDupConfirmData]    = useState(null);  // existing candidate info
   const [dupPendingPayload, setDupPendingPayload] = useState(null);  // payload to retry
+  const [rbJdFilter, setRbJdFilter] = useState("");
   const [anchorEl, setAnchorEl] = useState(null);
+
+
+
   // ── Loaders ────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     try { setLoading(true); setError(""); const res = await getAllResumes(); setResumes(res.data || []); }
@@ -1675,13 +1685,17 @@ const [rbPerPage]                 = useState(50);
         per_page: rbPerPage,
         ...(rbSearch  ? { q: rbSearch }           : {}),
         ...(rbStatusF ? { status: rbStatusF }      : {}),
+        ...(rbJdFilter  ? { jd_id: rbJdFilter }   : {}),
       });
       setRbCandidates(res.data || []);
       setRbTotal(res.total || 0);
       setRbPage(page);
     } catch { setRbCandidates([]); }
     finally { setRbLoading(false); }
-  }, [rbSearch, rbStatusF, rbPerPage]);
+  }, [rbSearch, rbStatusF, rbPerPage,rbJdFilter]);
+
+
+
   const loadAllJobsCombined = useCallback(async () => {
     try {
       const res = await getAllJobsCombined();
@@ -1692,7 +1706,7 @@ const [rbPerPage]                 = useState(50);
 
   useEffect(() => {
     if (mainTab === 2) loadRB(1);
-  }, [rbSearch, rbStatusF]);
+  }, [rbSearch, rbStatusF, rbJdFilter]);
   useEffect(() => {
     load(); loadRaw(); loadJobs(); loadClients(); loadRecruiters(); loadAllTracking(); loadRB(); loadAllJobsCombined();
   }, [load, loadRaw, loadJobs, loadClients, loadRecruiters, loadAllTracking, loadRB ,loadAllJobsCombined]);
@@ -2893,7 +2907,7 @@ const handleTrackingIvSave = async (e) => {
 ══════════════════════════════════════════════════════════════════════ */}
 {mainTab === 2 && (
   <>
-    <Box px={2} py={1.5} bgcolor="#e8eaf6" borderRadius={2}
+<Box px={2} py={1.5} bgcolor="#e8eaf6" borderRadius={2}
       border="1px solid #9fa8da" display="flex" alignItems="center" gap={1.5}>
       <People fontSize="small" sx={{ color: "#1a237e" }} />
       <Typography fontSize={13} color="#1a237e">
@@ -2903,6 +2917,24 @@ const handleTrackingIvSave = async (e) => {
         stored resumes.
       </Typography>
     </Box>
+
+    {rbJdFilter && (
+      <Alert severity="info" icon={<FilterList fontSize="small" />}
+        action={
+          <Chip
+            label="Show all candidates"
+            size="small"
+            variant="outlined"
+            onDelete={() => { setRbJdFilter(""); }}
+            onClick={() => { setRbJdFilter(""); }}
+            deleteIcon={<CloseIcon />}
+            sx={{ fontSize: 11, cursor: "pointer" }}
+          />
+        }
+        sx={{ py: 0.5 }}>
+        Showing candidates for JD <strong>{rbJdFilter}</strong>
+      </Alert>
+    )}
 
     <Box display="flex" gap={2} flexWrap="wrap">
       <TextField

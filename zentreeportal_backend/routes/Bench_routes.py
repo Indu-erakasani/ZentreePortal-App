@@ -1,6 +1,6 @@
 
 from flask import Blueprint, request, jsonify, send_file
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required,get_jwt_identity
 from bson import ObjectId
 from bson.errors import InvalidId
 from datetime import datetime,timedelta
@@ -12,7 +12,8 @@ from models.Benchpeople_model import (
 )
 from routes.Resume_routes import _extract_gemini_text
 from ai_service import ai_parse_pdf
-
+import logging
+logger = logging.getLogger(__name__)
 bench_bp = Blueprint("bench", __name__)
 
 _default_upload = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
@@ -346,38 +347,101 @@ def talent_search():
 
 
 
-# POST /api/bench/<bench_id>/promote-to-candidate
+
+
 @bench_bp.route("/<bench_id>/promote-to-candidate", methods=["POST"])
 @jwt_required()
 def promote_to_candidate(bench_id):
+
     bench = mongo.db.bench_people.find_one({"bench_id": bench_id})
     if not bench:
         return jsonify(success=False, message="Bench person not found"), 404
 
-    data      = request.get_json(silent=True) or {}
-    job_id    = data.get("job_id", "")      # mongo _id of job
-    job_title = data.get("job_title", "")
+    # ── Resolve logged-in recruiter's RB user _id ─────────────────────────────
+    identity        = get_jwt_identity()
+    rb_recruiter_id = ""
+    try:
+        from extensions import resourcing_db as _rdb
+        zentree_user = mongo.db.users.find_one({"_id": ObjectId(identity)})
+        if zentree_user:
+            rb_user = _rdb["users"].find_one({"email": zentree_user.get("email", "")})
+            if rb_user:
+                rb_recruiter_id = str(rb_user["_id"])
+    except Exception:
+        pass
+    # ─────────────────────────────────────────────────────────────────────────
+
+    data        = request.get_json(silent=True) or {}
+    job_id      = data.get("job_id", "")
+    job_title   = data.get("job_title", "")
     client_name = data.get("client_name", "")
 
-    # Resolve job_id string from mongo _id
+    # ── Resolve job_id string and jdID from mongo _id ─────────────────────────
     resolved_job_id = ""
-    if job_id:
-        try:
-            job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
-            if job_doc:
-                resolved_job_id = job_doc.get("job_id", "")
-                job_title       = job_doc.get("title", job_title)
-                client_name     = job_doc.get("client_name", client_name)
-        except Exception:
-            pass
+    rb_jd_id        = ""
+    source          = data.get("source", "zentree")   # ← read source from request
 
-    # Check if already exists for same email + job combo
+    if job_id:
+        if source == "resourcing_bot":
+            # ── Job is from ResourcingBot jd_details ─────────────────────────
+            try:
+                from extensions import resourcing_db
+                rb_jd = resourcing_db["jd_details"].find_one({"_id": ObjectId(job_id)})
+                if rb_jd:
+                    rb_jd_id        = rb_jd.get("jdID", job_id)
+                    resolved_job_id = rb_jd_id          # use jdID as canonical id
+                    job_title       = rb_jd.get("jobRole", rb_jd.get("jobTitle", job_title))
+                    client_name     = rb_jd.get("companyName", client_name)
+            except Exception:
+                rb_jd_id        = job_id
+                resolved_job_id = job_id
+        else:
+            # ── Job is from Zentree jobs ──────────────────────────────────────
+            try:
+                job_doc = mongo.db.jobs.find_one({"_id": ObjectId(job_id)})
+                if job_doc:
+                    resolved_job_id = job_doc.get("job_id", "")
+                    job_title       = job_doc.get("title", job_title)
+                    client_name     = job_doc.get("client_name", client_name)
+            except Exception:
+                pass
+
+            # Look up matching jdID in resourcing_bot by zentree_job_id
+            try:
+                from extensions import resourcing_db
+                rb_jd = resourcing_db["jd_details"].find_one({"zentree_job_id": resolved_job_id})
+                if rb_jd:
+                    rb_jd_id = rb_jd.get("jdID", resolved_job_id)
+                else:
+                    rb_jd_id = resolved_job_id
+            except Exception:
+                rb_jd_id = resolved_job_id
+
+    # ── Check if already exists in zentree for same email + job ──────────────
     existing = mongo.db.candidate_processing.find_one({
         "email":         bench["email"].lower().strip(),
         "linked_job_id": resolved_job_id,
     })
     if existing:
         from models.Resume_model import serialize_resume
+
+        # ── Still sync to ResourcingBot if missing there ───────────────────
+        try:
+            from extensions import get_candidate_profiles_col
+            col = get_candidate_profiles_col()
+            already_in_rb = col.find_one({
+                "candidateEmail": bench["email"].lower().strip(),
+                "jdID":           rb_jd_id,
+            })
+            if not already_in_rb:
+                _write_to_resourcing_bot(
+                    bench, rb_jd_id, job_title, client_name,
+                    existing.get("resume_id", ""), bench_id,
+                    recruiter_id=rb_recruiter_id
+                )
+        except Exception as rb_err:
+            logger.warning(f"[promote] ResourcingBot sync skipped: {rb_err}")
+
         return jsonify(
             success=True,
             message="Candidate already exists for this job",
@@ -385,7 +449,7 @@ def promote_to_candidate(bench_id):
             already_existed=True,
         ), 200
 
-    # Build skills string from bench skills array
+    # ── Build skills string ───────────────────────────────────────────────────
     skills_raw = bench.get("skills", [])
     if isinstance(skills_raw, list):
         skills_str = ", ".join(
@@ -397,8 +461,7 @@ def promote_to_candidate(bench_id):
 
     try:
         from models.Resume_model import resume_schema, serialize_resume
-        
-        # Count for resume_id
+
         count     = mongo.db.candidate_processing.count_documents({})
         resume_id = f"RES{str(count + 1).zfill(3)}"
 
@@ -420,19 +483,18 @@ def promote_to_candidate(bench_id):
             linked_job_title = job_title,
             notes            = f"Promoted from bench. Bench ID: {bench_id}. {bench.get('notes','')}",
         )
-        candidate["resume_id"]    = resume_id
-        candidate["resume_file"]  = bench.get("resume_file", "")
-        candidate["bench_id"]     = bench_id   # link back to bench record
+        candidate["resume_id"]   = resume_id
+        candidate["resume_file"] = bench.get("resume_file", "")
+        candidate["bench_id"]    = bench_id
 
         result = mongo.db.candidate_processing.insert_one(candidate)
 
-        # Copy resume PDF if exists
-        import shutil, os
+        # ── Copy resume PDF ───────────────────────────────────────────────
         bench_resume = bench.get("resume_file", "")
         if bench_resume:
             UPLOAD_DIR = os.environ.get("UPLOAD_FOLDER", "uploads")
-            src  = os.path.join(UPLOAD_DIR, "bench_resumes", bench_resume)
-            dst  = os.path.join(UPLOAD_DIR, "resumes", f"{resume_id}.pdf")
+            src = os.path.join(UPLOAD_DIR, "bench_resumes", bench_resume)
+            dst = os.path.join(UPLOAD_DIR, "resumes", f"{resume_id}.pdf")
             if os.path.exists(src):
                 shutil.copy2(src, dst)
                 mongo.db.candidate_processing.update_one(
@@ -440,6 +502,14 @@ def promote_to_candidate(bench_id):
                     {"$set": {"resume_file": f"{resume_id}.pdf"}}
                 )
                 candidate["resume_file"] = f"{resume_id}.pdf"
+
+        # ── Write to ResourcingBot candidate_profiles ─────────────────────
+        try:
+            _write_to_resourcing_bot(
+                bench, rb_jd_id, job_title, client_name, resume_id, bench_id, recruiter_id=rb_recruiter_id
+            )
+        except Exception as rb_err:
+            logger.warning(f"[promote] ResourcingBot write failed (non-fatal): {rb_err}")
 
         candidate["_id"] = result.inserted_id
         return jsonify(
@@ -453,19 +523,83 @@ def promote_to_candidate(bench_id):
         return jsonify(success=False, message=str(e)), 500
 
 
+def _write_to_resourcing_bot(
+    bench: dict,
+    jd_id: str,
+    job_title: str,
+    client_name: str,
+    resume_id: str,
+    bench_id: str,
+    recruiter_id: str = "",
+):
+    """
+    Mirror a bench-promoted candidate into resourcing_bot_db.candidate_profiles.
+    Fails silently — never crashes the main promote flow.
+    """
+    from extensions import get_candidate_profiles_col, resourcing_db
 
+    # ── Skills: list of dicts → comma-separated string ────────────────────────
+    skills_raw = bench.get("skills", [])
+    if isinstance(skills_raw, list):
+        skills_list = [
+            s["name"] if isinstance(s, dict) else str(s)
+            for s in skills_raw
+        ]
+    else:
+        skills_list = [s.strip() for s in str(skills_raw).split(",") if s.strip()]
 
+    col = get_candidate_profiles_col()
 
+    # ── Guard: skip if already present for same email + jdID ─────────────────
+    if col.find_one({
+        "candidateEmail": bench["email"].lower().strip(),
+        "jdID":           jd_id,
+    }):
+        return
 
+    profile_doc = {
+        # ── Identity ──────────────────────────────────────────────────────────
+        "candidatename":  bench.get("name", ""),
+        "candidateEmail": bench["email"].lower().strip(),
+        "phone":          bench.get("phone", ""),
+        "address":        bench.get("location", ""),
+        "jobRole":        job_title,
 
+        # ── JD linkage ────────────────────────────────────────────────────────
+        "jdID":           jd_id,
+        "companyName":    client_name,
+        # "jobTitle":       job_title,
 
+        # ── Screening placeholders ────────────────────────────────────────────
+        "summaries":              bench.get("notes", ""),
+        "overallStatus":          "Shortlisted",
+        "match_score":            0,
+        "ScreeningTestScore":     0,
+        "mcq_questions":          [],
+        "subjective_questions":   [],
+        "programming_questions":  [],
+        "interviewFeedback":      [],
+        "recruiterFeedback":      "",
+        "hiringManagerFeedback":  "",
 
+        # ── Skills ────────────────────────────────────────────────────────────
+        "skills":         skills_list,
 
+        # ── Source tracking ───────────────────────────────────────────────────
+        "source":              "Bench",
+        "zentree_resume_id":   resume_id,
+        "bench_id":            bench_id,
+        "recruiterid":         recruiter_id,
 
+        # ── Resume ────────────────────────────────────────────────────────────
+        "resumeUrl":      bench.get("resume_file", ""),
 
+        # ── Timestamps ────────────────────────────────────────────────────────
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    }
 
-
-
+    col.insert_one(profile_doc)
 
 
 

@@ -45,7 +45,11 @@ const getTrackingByBench = (bench_id) =>
 const createTracking   = (pl) =>
   fetch(`${TRACKING_BASE}/`, { method: "POST", headers: getHeaders(), body: JSON.stringify(pl) }).then(handle);
 const getAllJobs        = () => fetch(`${JOBS_BASE}/`, { headers: getHeaders() }).then(handle);
-
+// Add alongside getAllJobs
+const getAllJds = (p = {}) => {
+  const qs = new URLSearchParams(p).toString();
+  return fetch(`${JOBS_BASE}/jd/${qs ? "?" + qs : ""}`, { headers: getHeaders() }).then(handle);
+};
 const toBase64 = (file) => new Promise((res, rej) => {
   const r = new FileReader();
   r.onload = () => res(r.result.split(",")[1]);
@@ -216,7 +220,7 @@ const PdfViewer = ({ open, onClose, person }) => {
 
 // ── Bench Detail Content ──────────────────────────────────────────────────────
 // Defined OUTSIDE BenchPeople() to avoid React recreation on every render
-function BenchDetailContent({ person, jobs, onClose, onEdit, onViewPdf }) {
+function BenchDetailContent({ person, jobs, allJds = [],onClose, onEdit, onViewPdf }) {
   const [tracking,    setTracking]    = React.useState([]);
   const [loadingT,    setLoadingT]    = React.useState(true);
   const [tab,         setTab]         = React.useState(0);
@@ -237,9 +241,15 @@ function BenchDetailContent({ person, jobs, onClose, onEdit, onViewPdf }) {
 
 // to view the resumes collected fromt he candidate for the particular js
 const [jdReviews,    setJdReviews]    = React.useState([]);
+console.log("aaaaaaaaaaaaaaaaa:",jdReviews)
 const [loadingJD,    setLoadingJD]    = React.useState(false);
 const [reviewPdfUrl, setReviewPdfUrl] = React.useState(null);
 const [reviewPdfOpen,setReviewPdfOpen]= React.useState(false);
+
+
+
+
+
 const loadTracking = React.useCallback(() => {
   setLoadingT(true);
   getTrackingByBench(person.bench_id)
@@ -277,29 +287,42 @@ const handleAddPipeline = async () => {
   if (!pipeForm.job_id) { setPipeError("Please select a job"); return; }
   setPipeSaving(true); setPipeError("");
   try {
-    const job = jobs.find(j => j._id === pipeForm.job_id);
+    // Parse job selection — may be plain _id (zentree) or JSON string (RB)
+    let jobId = pipeForm.job_id;
+    let jobTitle = "";
+    let clientName = "";
+    let source = "zentree";
 
-    // ── Step 1: Promote bench person to candidate if not already there ──
+    try {
+      const parsed = JSON.parse(pipeForm.job_id);
+      jobId  = parsed.id;
+      source = parsed.source;
+      // For RB jobs, look up title/client from allJds
+      const rbJob = allJds.find(j => j._id === jobId);
+      jobTitle   = rbJob?.jobRole || rbJob?.jobTitle || "";
+      clientName = rbJob?.companyName || "";
+    } catch {
+      // Plain zentree _id
+      const job = jobs.find(j => j._id === jobId);
+      jobTitle   = job?.title || "";
+      clientName = job?.client_name || "";
+    }
+
+    // ── Step 1: Promote to candidate ──
     await fetch(`${process.env.REACT_APP_API_BENCH_URL}/${person.bench_id}/promote-to-candidate`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-      },
-      body: JSON.stringify({
-        job_id:      pipeForm.job_id,
-        job_title:   job?.title || "",
-        client_name: job?.client_name || "",
-      }),
+      headers: { "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("access_token")}` },
+      body: JSON.stringify({ job_id: jobId, job_title: jobTitle, client_name: clientName,source: source, }),
     }).then(r => r.json());
 
-    // ── Step 2: Create tracking record (existing logic) ──
+    // ── Step 2: Create tracking record ──
     await createTracking({
       resume_id:       person.bench_id?.trim(),
       candidate_name:  person.name,
-      job_id:          pipeForm.job_id,
-      job_title:       job?.title || "",
-      client_name:     job?.client_name || "",
+      job_id:          jobId,
+      job_title:       jobTitle,
+      client_name:     clientName,
       current_stage:   pipeForm.current_stage,
       recruiter:       pipeForm.recruiter,
       notes:           pipeForm.notes,
@@ -315,32 +338,6 @@ const handleAddPipeline = async () => {
   } finally { setPipeSaving(false); }
 };
 
-  // const handleAddPipeline = async () => {
-  //   if (!pipeForm.job_id) { setPipeError("Please select a job"); return; }
-  //   setPipeSaving(true); setPipeError("");
-  //   try {
-  //     const job = jobs.find(j => j._id === pipeForm.job_id);
-  //     await createTracking({
-  //       resume_id:       person.bench_id?.trim(),
-  //       candidate_name:  person.name,
-  //       job_id:          pipeForm.job_id,
-  //       job_title:       job?.title || "",
-  //       client_name:     job?.client_name || "",
-  //       current_stage:   pipeForm.current_stage,
-  //       recruiter:       pipeForm.recruiter,
-  //       notes:           pipeForm.notes,
-  //       next_step:       pipeForm.next_step,
-  //       pipeline_status: "Active",
-  //     });
-  //     setAddPipeline(false);
-  //     setPipeForm({ job_id: "", current_stage: "Screening", recruiter: "", notes: "", next_step: "" });
-  //     loadTracking();
-  //   } catch (err) {
-  //     setPipeError(err?.message || "Failed to add to pipeline");
-  //   } finally { setPipeSaving(false); }
-  // };
-
-
 
 
 
@@ -350,13 +347,23 @@ const handleAddPipeline = async () => {
     }
     setAssignSaving(true); setAssignError("");
     try {
+      // Parse the job selection value
+      let jobId = assignForm.job_id;
+      let source = "zentree";
+      try {
+        const parsed = JSON.parse(assignForm.job_id);
+        jobId  = parsed.id;
+        source = parsed.source;
+      } catch { /* plain string fallback */ }
+  
       await fetch(`${process.env.REACT_APP_API_BASE_URL}/jd-review/assign`, {
         method: "POST",
         headers: { "Content-Type": "application/json",
           Authorization: `Bearer ${localStorage.getItem("access_token")}` },
         body: JSON.stringify({
           bench_id:               person.bench_id,
-          job_id:                 assignForm.job_id,
+          job_id:                 jobId,
+          source:                 source,           // ← tells backend which DB
           senior_reviewer_email:  assignForm.senior_reviewer_email,
           senior_reviewer_name:   assignForm.senior_reviewer_name,
           assigned_by:            JSON.parse(localStorage.getItem("user")||"{}").email || "",
@@ -366,9 +373,6 @@ const handleAddPipeline = async () => {
     } catch(e) { setAssignError(e.message); }
     finally { setAssignSaving(false); }
   };
-
-
-
 
 
   return (
@@ -517,6 +521,7 @@ const handleAddPipeline = async () => {
                 <Box sx={{ width: 8, height: 8, borderRadius: "50%",
                   bgcolor: statusColor.dot, flexShrink: 0 }} />
                 <Typography fontWeight={700} fontSize={13}>{review.job_title}</Typography>
+                <Typography fontSize={12} color="text.secondary">@ {review.jdID}</Typography>
                 <Typography fontSize={12} color="text.secondary">@ {review.client_name}</Typography>
               </Box>
               <Typography fontSize={11} color="text.secondary">
@@ -565,8 +570,12 @@ const handleAddPipeline = async () => {
                   View Resume
                 </Button>
                 <Button size="small" variant="contained"
+
                   onClick={() => {
-                    setPipeForm(p => ({ ...p, job_id: review.job_id }));
+                    const jobVal = review.source === "resourcing_bot"
+                      ? JSON.stringify({ id: review.job_id, source: "resourcing_bot" })
+                      : review.job_id;
+                    setPipeForm(p => ({ ...p, job_id: jobVal }));
                     setAddPipeline(true);
                   }}
                   sx={{ fontSize: 11, bgcolor: "#15803d",
@@ -630,17 +639,34 @@ const handleAddPipeline = async () => {
                 <Typography fontWeight={700} fontSize={14} color="#0369a1" mb={2}>Add to Pipeline</Typography>
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
+
                     <TextField select fullWidth size="small" required label="Select Job" name="job_id"
-                      value={pipeForm.job_id} onChange={e => setPipeForm(p => ({ ...p, job_id: e.target.value }))}>
-                      <MenuItem value="">— Select a job —</MenuItem>
-                      {jobs.map(j => (
-                        <MenuItem key={j._id} value={j._id}>
-                          <Box><Typography fontSize={13} fontWeight={600}>{j.title}</Typography>
-                            {j.client_name && <Typography fontSize={11} color="text.secondary">{j.client_name}</Typography>}
-                          </Box>
-                        </MenuItem>
-                      ))}
-                    </TextField>
+                        value={pipeForm.job_id} onChange={e => setPipeForm(p => ({ ...p, job_id: e.target.value }))}>
+                        <MenuItem value="">— Select a job —</MenuItem>
+
+                        {/* ResourcingBot Active JDs */}
+                        {allJds.length > 0 && (
+                          <MenuItem disabled sx={{ fontSize: 11, fontWeight: 700, color: "#7c3aed",
+                            bgcolor: "#faf5ff", opacity: "1 !important", pointerEvents: "none" }}>
+                            ──Active JDs ──
+                          </MenuItem>
+                        )}
+                        {allJds.map(j => (
+                          <MenuItem key={`rb-${j._id}`} value={JSON.stringify({ id: j._id, source: "resourcing_bot" })}>
+                            <Box>
+                              <Typography fontSize={13} fontWeight={600}>
+                                {j.jobRole || j.jobTitle}
+                                {" "}<Box component="span" sx={{ color: "#0277bd", fontWeight: 700 }}>({j.jdID})</Box>
+                              </Typography>
+                              <Typography fontSize={11} color="text.secondary">
+                                {j.companyName}
+                                <Chip label="RB" size="small"
+                                  sx={{ ml: 1, height: 16, fontSize: 9, bgcolor: "#ede9fe", color: "#7c3aed" }} />
+                              </Typography>
+                            </Box>
+                          </MenuItem>
+                        ))}
+                      </TextField>
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <TextField select fullWidth size="small" label="Starting Stage" name="current_stage"
@@ -826,18 +852,33 @@ const handleAddPipeline = async () => {
     ) : (
       <Grid container spacing={2} mt={0.5}>
         <Grid item xs={12}>
-          <TextField select fullWidth size="small" required label="Select Job (JD)"
-            value={assignForm.job_id}
-            onChange={e => setAssignForm(p => ({ ...p, job_id: e.target.value }))}>
-            <MenuItem value="">— Select —</MenuItem>
-            {jobs.map(j => (
-              <MenuItem key={j._id} value={j._id}>
-                <Box><Typography fontSize={13} fontWeight={600}>{j.title}</Typography>
-                  <Typography fontSize={11} color="text.secondary">{j.client_name}</Typography>
-                </Box>
-              </MenuItem>
-            ))}
-          </TextField>
+
+          <TextField select sx={{width:300}} size="small" required label="Select Job (JD)"
+  value={assignForm.job_id}
+  onChange={e => setAssignForm(p => ({ ...p, job_id: e.target.value }))}>
+  <MenuItem value="">— Select —</MenuItem>
+  {/* ResourcingBot JDs */}
+  {allJds.length > 0 && (
+    <MenuItem disabled sx={{ fontSize: 11, fontWeight: 700, color: "#7c3aed",
+      bgcolor: "#faf5ff", opacity: "1 !important", pointerEvents: "none" }}>
+      ── Active JDs ──
+    </MenuItem>
+  )}
+  {allJds.map(j => (
+    <MenuItem key={`rb-${j._id}`} value={JSON.stringify({ id: j._id, source: "resourcing_bot" })}>
+      <Box display="flex" alignItems="center" gap={1}>
+        <Box>
+          <Typography fontSize={13} fontWeight={600}>{j.jobRole || j.jobTitle} {" "}
+          <Box component="span" sx={{ color: "#0277bd",fontWeight: 700, }} > ({j.jdID})</Box>
+          </Typography>
+          <Typography fontSize={11} color="text.secondary">
+            {j.companyName}
+          </Typography>
+        </Box>
+      </Box>
+    </MenuItem>
+  ))}
+</TextField>
         </Grid>
         <Grid item xs={12} sm={6}>
           <TextField fullWidth size="small" required label="Senior Reviewer Name"
@@ -845,7 +886,7 @@ const handleAddPipeline = async () => {
             onChange={e => setAssignForm(p => ({ ...p, senior_reviewer_name: e.target.value }))} />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" required label="Senior Reviewer Email"
+          <TextField sx={{width:300}} size="small" required label="Senior Reviewer Email"
             type="email" value={assignForm.senior_reviewer_email}
             onChange={e => setAssignForm(p => ({ ...p, senior_reviewer_email: e.target.value }))} />
         </Grid>
@@ -894,7 +935,7 @@ export default function BenchPeople() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkDone,   setBulkDone]   = useState(false);
 
-
+  const [allJds, setAllJds] = useState([]);
 
 
   const [shareOpen,    setShareOpen]    = useState(false);
@@ -914,7 +955,15 @@ export default function BenchPeople() {
     catch { setJobs([]); }
   }, []);
 
-  useEffect(() => { load(); loadJobs(); }, [load, loadJobs]);
+  const loadAllJds = useCallback(async () => {
+    try { 
+      const res = await getAllJds({ per_page: 200, is_active: "true" }); 
+      setAllJds(res.data || []); 
+    }
+    catch { setAllJds([]); }
+  }, []);
+
+  useEffect(() => { load(); loadJobs();loadAllJds(); }, [load, loadJobs,loadAllJds]);
 
   const filtered = bench.filter(p => {
     const q = search.toLowerCase();
@@ -1403,6 +1452,7 @@ export default function BenchPeople() {
           <BenchDetailContent
             person={selected}
             jobs={jobs}
+            allJds={allJds}  
             onClose={() => setDetailOpen(false)}
             onEdit={() => { setDetailOpen(false); openEdit(selected); }}
             onViewPdf={() => { setDetailOpen(false); openPdf(selected); }}

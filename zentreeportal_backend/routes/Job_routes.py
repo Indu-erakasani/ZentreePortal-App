@@ -122,10 +122,97 @@ def _build_doc(data: dict, identity: str, posted_by_name: str) -> dict:
     }
 
 
+def _sync_job_to_resourcingbot(data: dict, identity: str, posted_by_name: str):
+    """
+    Mirror a newly created ZentreePortal job into ResourcingBot's jd_details
+    collection. Marks the source as 'recruitment_portal' so it's identifiable.
+    Fails silently — a ResourcingBot write failure must not break the main flow.
+    """
+    try:
+        # ── Resolve the poster's email from ZentreePortal users ───────────────
+        current_user = mongo.db.users.find_one({"_id": ObjectId(identity)})
+        user_email   = current_user.get("email", "") if current_user else ""
+        user_role    = current_user.get("role",  "") if current_user else ""
+
+        # ── Find the matching user in ResourcingBot by email ──────────────────
+        rb_user = resourcing_db["users"].find_one({"email": user_email}) if user_email else None
+
+        # ── Build recruiterContacts: ObjectId list if poster is a recruiter ───
+        recruiter_contacts = []
+        if rb_user and user_role == "recruiter":
+            recruiter_contacts = [rb_user["_id"]]
+
+        # ── Skills: ZentreePortal stores as list, ResourcingBot expects list ──
+        skills = data.get("skills", [])
+        if isinstance(skills, str):
+            skills = [s.strip() for s in skills.split(",") if s.strip()]
+
+        secondary_skills = data.get("secondary_skills", [])
+        if isinstance(secondary_skills, str):
+            secondary_skills = [s.strip() for s in secondary_skills.split(",") if s.strip()]
+
+        rb_jd_doc = {
+            # ── Identifiers ───────────────────────────────────────────────────
+            "jdID":              data["job_id"].upper().strip(),
+            "companyName":       data.get("client_name", ""),
+
+            # ── Job details ───────────────────────────────────────────────────
+            "jobRole":           data.get("title", ""),
+            "jobDescription":    data.get("description", ""),
+            "skills":            skills,
+            "secondarySkills":   secondary_skills,
+            "experience":        f"{data.get('experience_min', 0)}-{data.get('experience_max', 5)}",
+            "salaryRange":       f"{data.get('salary_min', '')} - {data.get('salary_max', '')}",
+            "preferredLocation": data.get("preferred_location", data.get("location", "")),
+            "department":        data.get("department", ""),
+            "openPositions":     _int(data.get("openings", 1)),
+            "remarks":           data.get("remarks", ""),
+            "programmingLanguage": data.get("programming_language", ""),
+            "programmingLevel":    data.get("programming_level", ""),
+
+            # ── Screening config ──────────────────────────────────────────────
+            "mcq_questions_count":        _int(data.get("mcq_questions_count",        0)),
+            "subjective_questions_count": _int(data.get("subjective_questions_count", 0)),
+            "coding_questions_count":     _int(data.get("coding_questions_count",     0)),
+            "screening_time_minutes":     _int(data.get("screening_time_minutes",     0)),
+            "screeningTestPassPercentage": data.get("screening_test_pass_percentage", ""),
+
+            # ── Contacts ──────────────────────────────────────────────────────
+            "recruiterContacts":   recruiter_contacts,
+            "interviewerContacts": [],
+            "hiringManager":       None,
+
+            # ── Lifecycle ─────────────────────────────────────────────────────
+            "is_active":       data.get("is_active", True),
+            "creation_time":   datetime.utcnow(),
+            "expiration_time": datetime.fromisoformat(data["deadline"]) if data.get("deadline") else None,
+
+            # ── Source tracking ───────────────────────────────────────────────
+            "source":              "recruitment_portal",   # ← marks origin
+            "posted_by_name":      posted_by_name,
+            "posted_by_email":     user_email,
+            "zentree_job_id":      data["job_id"].upper().strip(),  # cross-reference
+
+            # ── Timestamps ────────────────────────────────────────────────────
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+
+        resourcing_db["jd_details"].insert_one(rb_jd_doc)
+
+    except Exception as e:
+        # Log but never crash the main request
+        print(f"[ResourcingBot sync warning] Failed to mirror job: {e}")
+        
+        
+        
+        
 # ── GET /api/jobs ─────────────────────────────────────────────────────────────
 @job_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_jobs():
+    identity = get_jwt_identity()   # ← already available from jwt_required
+
     q         = request.args.get("q", "").strip()
     status    = request.args.get("status",    "")
     priority  = request.args.get("priority",  "")
@@ -133,7 +220,16 @@ def get_jobs():
     page      = max(1, _int(request.args.get("page",     1)))
     per_page  = max(1, _int(request.args.get("per_page", 20)))
 
+    # ── Fetch the logged-in user to check their role ──────────────────────────
+    current_user = mongo.db.users.find_one({"_id": ObjectId(identity)})
+    user_role    = current_user.get("role", "") if current_user else ""
+
     query = {}
+
+    # ── Recruiters only see jobs they posted ──────────────────────────────────
+    if user_role == "recruiter":
+        query["posted_by"] = identity   # stored as string in _build_doc()
+
     if q:
         query["$or"] = [
             {"title":                {"$regex": q, "$options": "i"}},
@@ -163,7 +259,6 @@ def get_jobs():
         per_page = per_page,
         pages    = (total + per_page - 1) // per_page,
     ), 200
-
 
 # ── GET /api/jobs/meta/options ────────────────────────────────────────────────
 # Must stay BEFORE /<job_id> so Flask does not treat "meta" as an _id param
@@ -201,6 +296,7 @@ def create_job():
     posted_by_name = _get_posted_by_name(identity)
 
     try:
+        # ── Write to ZentreePortal DB (existing) ─────────────────────────────
         doc    = _build_doc(data, identity, posted_by_name)
         result = mongo.db.jobs.insert_one(doc)
         mongo.db.clients.update_one(
@@ -208,10 +304,13 @@ def create_job():
             {"$inc": {"active_jobs": 1}}
         )
         doc["_id"] = result.inserted_id
+
+        # ── Sync to ResourcingBot DB ──────────────────────────────────────────
+        _sync_job_to_resourcingbot(data, identity, posted_by_name)
+
         return jsonify(success=True, message="Job created", data=serialize_job(doc)), 201
     except Exception as e:
         return jsonify(success=False, message="Failed to create job", error=str(e)), 500
-
 
 # ── GET /api/jobs/<id> ────────────────────────────────────────────────────────
 @job_bp.route("/<job_id>", methods=["GET"])
@@ -351,15 +450,53 @@ def _find_jd(jd_id_str: str):
 # Must be defined BEFORE /api/jobs/<job_id> to avoid Flask routing conflict.
 # Flask matches routes top-to-bottom; /jd/ is a fixed segment and wins over
 # the dynamic <job_id> only if it appears first in the source file.
+
+
 @job_bp.route("/jd/", methods=["GET"])
 @jwt_required()
 def get_jds():
+    identity = get_jwt_identity()   # logged-in user's _id string (ZentreePortal)
+
     q         = request.args.get("q", "").strip()
     is_active = request.args.get("is_active", "")
     page      = max(1, _int(request.args.get("page",     1)))
     per_page  = max(1, _int(request.args.get("per_page", 20)))
 
+    col = _jd_col()   # resourcing_bot_db["jd_details"]
+
+    # ── Resolve the logged-in user's role and ResourcingBot _id ──────────────
+    current_user = mongo.db.users.find_one({"_id": ObjectId(identity)})
+    user_role    = current_user.get("role", "") if current_user else ""
+    user_email   = current_user.get("email", "") if current_user else ""
+
     query = {}
+
+    if user_role == "recruiter":
+        # Find this recruiter's record in ResourcingBot DB by email
+        rb_user = resourcing_db["users"].find_one({
+            "email": user_email,
+            "userType": "recruiter"
+        })
+
+        if not rb_user:
+            # Recruiter exists in ZentreePortal but not in ResourcingBot —
+            # return empty result rather than erroring out
+            return jsonify(
+                success  = True,
+                data     = [],
+                total    = 0,
+                page     = page,
+                per_page = per_page,
+                pages    = 0,
+                message  = "No ResourcingBot account found for this recruiter"
+            ), 200
+
+        rb_user_id = rb_user["_id"]   # ObjectId in ResourcingBot
+
+        # Filter JDs where recruiterContacts array contains this ObjectId
+        query["recruiterContacts"] = rb_user_id
+
+    # ── Search filters (applied on top of role filter) ────────────────────────
     if q:
         query["$or"] = [
             {"jdID":        {"$regex": q, "$options": "i"}},
@@ -369,7 +506,6 @@ def get_jds():
     if is_active in ("true", "false"):
         query["is_active"] = is_active == "true"
 
-    col   = _jd_col()
     total = col.count_documents(query)
     docs  = list(
         col.find(query)
@@ -377,6 +513,20 @@ def get_jds():
         .skip((page - 1) * per_page)
         .limit(per_page)
     )
+
+    # ── Auto-expire JDs past their expiration_time ────────────────────────────
+    now = datetime.utcnow()
+    for doc in docs:
+        exp = doc.get("expiration_time") or doc.get("deadline")
+        if isinstance(exp, str):
+            try:
+                exp = datetime.fromisoformat(exp.split("T")[0])
+            except ValueError:
+                exp = None
+        if exp and isinstance(exp, datetime) and exp < now and doc.get("is_active", True):
+            col.update_one({"_id": doc["_id"]}, {"$set": {"is_active": False}})
+            doc["is_active"] = False
+
     return jsonify(
         success  = True,
         data     = [_serialize_jd(d) for d in docs],
@@ -385,7 +535,6 @@ def get_jds():
         per_page = per_page,
         pages    = (total + per_page - 1) // per_page,
     ), 200
-
 
 # ── GET /api/jobs/jd/<id> ─────────────────────────────────────────────────────
 @job_bp.route("/jd/<jd_id>", methods=["GET"])
