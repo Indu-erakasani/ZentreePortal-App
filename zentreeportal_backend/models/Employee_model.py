@@ -79,6 +79,14 @@ def engagement_schema(
         "end_date":         end_date,
         "billing_rate":     float(billing_rate),
         "billing_currency": billing_currency,
+        "billing_history": [             
+            {
+                "rate":       float(billing_rate),
+                "currency":   billing_currency,
+                "effective_from": start_date or datetime.utcnow(),
+                "note":       "Initial rate",
+            }
+        ] if billing_rate else [],
         "work_location":    work_location,
         "technology":       technology,
         "notes":            notes,
@@ -96,4 +104,8 @@ def serialize_employee(e: dict) -> dict:
         for df in ("start_date", "end_date", "added_at"):
             if isinstance(ch.get(df), datetime):
                 ch[df] = ch[df].isoformat()
+                
+        for bh in ch.get("billing_history", []):
+            if isinstance(bh.get("effective_from"), datetime):
+                bh["effective_from"] = bh["effective_from"].isoformat()
     return doc

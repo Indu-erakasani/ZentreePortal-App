@@ -146,6 +146,26 @@ def create():
 
         ob = onboarding_schema(str(result.inserted_id), joining_date=doj)
         mongo.db.onboarding.insert_one(ob)
+        
+        # ── Auto-create first client engagement if client is provided ──
+        if data.get("current_client", "").strip():
+            eng = engagement_schema(
+                client_name      = data["current_client"].strip(),
+                project_name     = data.get("current_project", ""),
+                role             = data.get("designation", ""),
+                start_date       = doj or datetime.utcnow(),
+                end_date         = None,
+                billing_rate     = data.get("current_billing_rate", 0),
+                billing_currency = data.get("billing_currency", "INR"),
+                work_location    = data.get("location", ""),
+                technology       = data.get("skills", ""),
+                notes            = "Auto-created on employee registration",
+            )
+            mongo.db.employees.update_one(
+                {"_id": result.inserted_id},
+                {"$push": {"client_history": eng}}
+            )
+            doc = mongo.db.employees.find_one({"_id": result.inserted_id})
 
         return jsonify(success=True, message="Employee created", data=serialize_employee(doc)), 201
     except ValueError as e:
@@ -186,7 +206,45 @@ def update(eid):
             )
         except Exception:
             upd.pop("date_of_joining", None)
+
     upd["updated_at"] = datetime.utcnow()
+
+    # ── Auto-create engagement if client changed ──
+    new_client = upd.get("current_client", "").strip()
+    old_client = doc.get("current_client", "").strip()
+
+    if new_client and new_client != old_client:
+        # Close existing active engagement (no end_date)
+        history = doc.get("client_history", [])
+        for i, eng in enumerate(history):
+            if not eng.get("end_date"):
+                mongo.db.employees.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {f"client_history.{i}.end_date": datetime.utcnow()}}
+                )
+
+        # Push new engagement
+        new_eng = engagement_schema(
+            client_name      = new_client,
+            project_name     = upd.get("current_project", doc.get("current_project", "")),
+            role             = upd.get("designation", doc.get("designation", "")),
+            start_date       = datetime.utcnow(),
+            end_date         = None,
+            billing_rate     = upd.get("current_billing_rate", doc.get("current_billing_rate", 0)),
+            billing_currency = upd.get("billing_currency", doc.get("billing_currency", "INR")),
+            work_location    = upd.get("location", doc.get("location", "")),
+            technology       = upd.get("skills", doc.get("skills", "")),
+            notes            = "Auto-created on client reassignment",
+        )
+        upd_copy = dict(upd)  # avoid mutating upd
+        mongo.db.employees.update_one(
+            {"_id": doc["_id"]},
+            {"$set": upd_copy, "$push": {"client_history": new_eng}}
+        )
+        updated = mongo.db.employees.find_one({"_id": doc["_id"]})
+        return jsonify(success=True, message="Updated", data=serialize_employee(updated)), 200
+
+    # Default update (no client change)
     mongo.db.employees.update_one({"_id": doc["_id"]}, {"$set": upd})
     updated = mongo.db.employees.find_one({"_id": doc["_id"]})
     return jsonify(success=True, message="Updated", data=serialize_employee(updated)), 200
@@ -254,7 +312,7 @@ def add_engagement(eid):
         return jsonify(success=False, message=str(e)), 500
 
 
-@employee_bp.route("/<eid>/engagement/<int:idx>", methods=["PUT"])
+@employee_bp.route("/<eid>/engagement/<int:idx>/end", methods=["PUT"])
 @jwt_required()
 def end_engagement(eid, idx):
     doc, err = _find(eid)
@@ -276,3 +334,104 @@ def end_engagement(eid, idx):
     )
     updated = mongo.db.employees.find_one({"_id": doc["_id"]})
     return jsonify(success=True, message="Engagement ended", data=serialize_employee(updated)), 200
+
+
+
+
+# billing rate update endpoint from the client
+@employee_bp.route("/<eid>/engagement/<int:idx>/billing", methods=["POST"])
+@jwt_required()
+def update_billing_rate(eid, idx):
+    """Add a new billing rate entry to an engagement's history."""
+    doc, err = _find(eid)
+    if err:
+        return err
+    history = doc.get("client_history", [])
+    if idx >= len(history):
+        return jsonify(success=False, message="Engagement index out of range"), 400
+    data = request.get_json(silent=True) or {}
+    new_rate = float(data.get("billing_rate", 0))
+    currency = data.get("billing_currency", "INR")
+    note     = data.get("note", "")
+    effective_from = datetime.utcnow()
+    if data.get("effective_from"):
+        try:
+            effective_from = datetime.fromisoformat(data["effective_from"].replace("Z", "+00:00"))
+        except Exception:
+            pass
+
+    history_entry = {
+        "rate":           new_rate,
+        "currency":       currency,
+        "effective_from": effective_from,
+        "note":           note,
+    }
+    mongo.db.employees.update_one(
+        {"_id": doc["_id"]},
+        {
+            "$set":  {
+                f"client_history.{idx}.billing_rate":     new_rate,
+                f"client_history.{idx}.billing_currency": currency,
+                "updated_at": datetime.utcnow(),
+            },
+            "$push": { f"client_history.{idx}.billing_history": history_entry },
+        }
+    )
+    # If this is the active engagement, also update top-level current_billing_rate
+    if not history[idx].get("end_date"):
+        mongo.db.employees.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"current_billing_rate": new_rate, "billing_currency": currency}}
+        )
+    updated = mongo.db.employees.find_one({"_id": doc["_id"]})
+    return jsonify(success=True, message="Billing rate updated", data=serialize_employee(updated)), 200
+
+
+
+@employee_bp.route("/<eid>/engagement/<int:idx>", methods=["PUT"])
+@jwt_required()
+def update_engagement(eid, idx):
+    """Edit any field of an existing engagement by index."""
+    doc, err = _find(eid)
+    if err:
+        return err
+    history = doc.get("client_history", [])
+    if idx >= len(history):
+        return jsonify(success=False, message="Engagement index out of range"), 400
+
+    data    = request.get_json(silent=True) or {}
+    allowed = ["client_name", "project_name", "role", "work_location", "technology", "notes",
+               "billing_rate", "billing_currency", "start_date", "end_date"]
+    upd = {}
+    for k in allowed:
+        if k in data:
+            upd[f"client_history.{idx}.{k}"] = data[k]
+
+    # Parse dates
+    for df in ("start_date", "end_date"):
+        key = f"client_history.{idx}.{df}"
+        if key in upd:
+            if upd[key]:
+                try:
+                    upd[key] = datetime.fromisoformat(str(upd[key]).replace("Z", "+00:00"))
+                except Exception:
+                    upd.pop(key, None)
+            else:
+                upd[key] = None   # allow clearing end_date to re-activate
+
+    if "billing_rate" in data:
+        upd[f"client_history.{idx}.billing_rate"] = float(data["billing_rate"])
+
+    upd["updated_at"] = datetime.utcnow()
+
+    # If this is the active engagement (no end_date after edit), sync top-level fields
+    is_active_after = not (data.get("end_date") or history[idx].get("end_date"))
+    if is_active_after:
+        if "billing_rate"     in data: upd["current_billing_rate"] = float(data["billing_rate"])
+        if "billing_currency" in data: upd["billing_currency"]     = data["billing_currency"]
+        if "client_name"      in data: upd["current_client"]       = data["client_name"]
+        if "project_name"     in data: upd["current_project"]      = data["project_name"]
+
+    mongo.db.employees.update_one({"_id": doc["_id"]}, {"$set": upd})
+    updated = mongo.db.employees.find_one({"_id": doc["_id"]})
+    return jsonify(success=True, message="Engagement updated", data=serialize_employee(updated)), 200

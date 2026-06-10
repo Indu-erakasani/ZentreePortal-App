@@ -9,7 +9,7 @@ import {
   Menu, MenuItem,
 } from "@mui/material";
 import {
-  Dashboard, People, Work, Assessment, Description, Psychology,
+  Dashboard, People, Work, Assessment, Description, Psychology,BarChart,Groups,
   Menu as MenuIcon, Logout, ChevronLeft, ChevronRight,
   AccountTree, Stars, AccountCircle, Lock, KeyboardArrowDown, ArrowBack,
   PersonOutline, BadgeOutlined, AssignmentInd,              // ← AssignmentInd added
@@ -37,6 +37,26 @@ const NAV_ITEMS = [
     icon:  <People />,
     paths: ["/manager/recruiters"],
     roles: ["admin", "manager","recruiter"],
+  },
+  {
+    label: "RBot Analytics",        // recruiter sees their own data
+    icon:  <BarChart />,            // import BarChart from @mui/icons-material
+    paths: ["/rbot-analytics"],
+    roles: ["recruiter", "admin"],
+  },
+  {
+    label: "Client Analytics",        // manager sees all recruiters
+    icon:  <Groups />,              // import Groups from @mui/icons-material
+    paths: ["/clients/analytics/all"],
+    roles: ["manager"],
+  },
+
+  
+  {
+    label: "Team Analytics",        // manager sees all recruiters
+    icon:  <Groups />,              // import Groups from @mui/icons-material
+    paths: ["/rbot-team-analytics"],
+    roles: ["manager", "admin"],
   },
   {
     label: "Clients",

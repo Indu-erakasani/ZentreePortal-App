@@ -11,7 +11,7 @@ import {
   Add, Search, Edit, Delete, People, CheckCircle, Work,
   Storefront, WorkOutline, PersonSearch, Close, TrendingUp,
   Business, Phone, Email, Language, LocationOn, FilterList,
-  ArrowUpward, FiberManualRecord, EmojiEvents,Assignment
+  ArrowUpward, FiberManualRecord, EmojiEvents,Assignment,Timeline
 } from "@mui/icons-material";
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -55,11 +55,15 @@ const CLIENT_PALETTES = [
   ["#5e3a1f","#f97316"],["#1f4e3d","#34d399"],
 ];
 const clientPalette = (name = "") => CLIENT_PALETTES[(name.charCodeAt(0) || 0) % CLIENT_PALETTES.length];
-
+const fmtDate = (d) => {
+  if (!d) return "";
+  try { return new Date(d).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric" }); }
+  catch { return ""; }
+};
 const EMPTY_FORM = {
   client_id:"", company_name:"", industry:"", company_size:"", location:"",
   primary_contact:"", contact_title:"", email:"", phone:"", city:"", state:"",
-  country:"India", address:"", website:"", agreement_type:"", payment_terms:"Net 30",
+  country:"India", address:"", website:"", agreement_type:"", payment_terms:"Net 30",agreement_start:"", agreement_end:"",
   relationship_status:"Active", account_manager:"", billing_rate:"", notes:"",
 };
 
@@ -280,6 +284,9 @@ const DetailPanel = ({ client, jobCnt, candidateCnt, placedCnt, onClose, onEdit,
         <InfoRow icon={<TrendingUp sx={{ fontSize: 14 }} />} label="Billing Rate"   value={client.billing_rate ? `${client.billing_rate}%` : null} />
         <InfoRow icon={<EmojiEvents sx={{ fontSize: 14 }} />}label="Payment Terms"  value={client.payment_terms} />
         <InfoRow icon={<People sx={{ fontSize: 14 }} />}     label="Account Mgr."   value={client.account_manager} />
+        <InfoRow icon={<People sx={{ fontSize: 14 }} />}     label="Account Mgr."   value={client.account_manager} />
+        <InfoRow icon={<Timeline sx={{ fontSize: 14 }} />}   label="Contract Start" value={client.agreement_start ? new Date(client.agreement_start).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric" }) : null} />
+        <InfoRow icon={<Timeline sx={{ fontSize: 14 }} />}   label="Contract End"   value={client.agreement_end ? new Date(client.agreement_end).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric" }) : null} />
 
         {client.notes && (
           <Box mt={1.5} p={1.5} sx={{ bgcolor: "#f8faff", borderRadius: 2, border: "1px solid #e8edf3" }}>
@@ -335,7 +342,11 @@ export default function Clients() {
   const [saving,     setSaving]    = useState(false);
 
 
-
+const getUser = () => {
+  try { return JSON.parse(localStorage.getItem("user") || "{}"); }
+  catch { return {}; }
+};
+const isManager = (getUser()?.role || "").toLowerCase() === "manager";
 
   const load = useCallback(async () => {
     try { setLoading(true); setError(""); const r = await getAllClients(); setClients(r.data || []); }
@@ -591,12 +602,37 @@ export default function Clients() {
               <Grid item xs={12} sm={4}><TextField  size="small" label="Country" name="country" value={formData.country} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
               <Grid item xs={12}><TextField  size="small" label="Website" name="website" value={formData.website} onChange={handleChange} placeholder="https://…" sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
             </Grid>
+            {/* <Box sx={{ borderLeft: "3px solid #f59e0b", pl: 1.5, mb: 2, borderRadius: 0 }}>
+              <Typography fontSize={13} fontWeight={700} color="#b45309">Billing & Agreement</Typography>
+            </Box>
+            <Grid container spacing={2} mb={2}>
+              <Grid item xs={12} sm={6}><TextField  size="small" type="number" label="Billing Rate (%)" name="billing_rate" value={formData.billing_rate} onChange={handleChange} inputProps={{ step: "0.01" }} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
+              <Grid item xs={12} sm={6}><TextField select  size="small" label="Payment Terms" name="payment_terms" value={formData.payment_terms} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }}>{PAYMENT_TERMS.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}</TextField></Grid>
+            </Grid> */}
             <Box sx={{ borderLeft: "3px solid #f59e0b", pl: 1.5, mb: 2, borderRadius: 0 }}>
               <Typography fontSize={13} fontWeight={700} color="#b45309">Billing & Agreement</Typography>
             </Box>
             <Grid container spacing={2} mb={2}>
               <Grid item xs={12} sm={6}><TextField  size="small" type="number" label="Billing Rate (%)" name="billing_rate" value={formData.billing_rate} onChange={handleChange} inputProps={{ step: "0.01" }} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} /></Grid>
               <Grid item xs={12} sm={6}><TextField select  size="small" label="Payment Terms" name="payment_terms" value={formData.payment_terms} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }}>{PAYMENT_TERMS.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}</TextField></Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  size="small" type="date" label="Contract Start Date" name="agreement_start"
+                  value={formData.agreement_start ? formData.agreement_start.split("T")[0] : ""}
+                  onChange={handleChange}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 }, width: "100%", minWidth: 400 }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  size="small" type="date" label="Contract End Date" name="agreement_end"
+                  value={formData.agreement_end ? formData.agreement_end.split("T")[0] : ""}
+                  onChange={handleChange}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 }, width: "100%", minWidth: 400 }}
+                />
+              </Grid>
             </Grid>
             <TextField  multiline rows={3} size="small" label="Notes" name="notes" value={formData.notes} onChange={handleChange} sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1.5 },width: "100%", minWidth: 400 }} />
           </DialogContent>

@@ -37,6 +37,8 @@ from routes.Notification_routes import (
     # _generate_job_notifications,
     # _generate_resume_expiry_notifications,
 )
+from routes.RbotAnalytics_routes import rbot_analytics_bp
+
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -106,7 +108,7 @@ app.register_blueprint(question_bp,      url_prefix="/api/questions")
 app.register_blueprint(exam_bp,          url_prefix="/api/exams")
 app.register_blueprint(notification_bp,  url_prefix="/api/notifications")
 app.register_blueprint(jd_review_bp,     url_prefix="/api/jd-review")
-
+app.register_blueprint(rbot_analytics_bp, url_prefix="/api/rbot-dashboard")
 # ── Scheduler — runs cleanup daily at 2:00 AM ─────────────────────────────────
 def run_cleanup():
     with app.app_context():

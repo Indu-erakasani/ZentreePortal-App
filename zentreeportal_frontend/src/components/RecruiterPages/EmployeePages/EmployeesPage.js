@@ -88,7 +88,18 @@ const FormSection = ({ children }) => (
 // ── Employee Add / Edit Form ──────────────────────────────────────────────────
 function EmployeeForm({ open, onClose, onSave, selected, saving }) {
   const [form, setForm] = useState(EMPTY_FORM);
-
+  const CLIENT_BASE = process.env.REACT_APP_API_CLIENTS_URL;
+  const [clientNames, setClientNames] = useState([]);
+  
+  useEffect(() => {
+    if (!open) return;
+    fetch(`${CLIENT_BASE}/names/list`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` }
+    })
+      .then(r => r.json())
+      .then(d => { if (d.success) setClientNames(d.data); })
+      .catch(() => setClientNames(["ZentreeLabs Pvt Ltd"]));
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     if (selected) {
@@ -203,7 +214,7 @@ function EmployeeForm({ open, onClose, onSave, selected, saving }) {
               <TextField
                 size="small" type="number" label="Experience (years)" name="experience"
                 value={form.experience} onChange={handle}
-                inputProps={{ min: 0, step: 0.5 }}
+                inputProps={{ min: 0, step: 0.01 }}
                 placeholder="e.g. 3.5" sx={TF}
               />
             </Grid>
@@ -244,11 +255,15 @@ function EmployeeForm({ open, onClose, onSave, selected, saving }) {
           <FormSection>Current Client Deployment</FormSection>
           <Grid container spacing={2.5} mb={2}>
             <Grid item xs={12} sm={6}>
+
               <TextField
-                size="small" label="Current Client" name="current_client"
-                value={form.current_client} onChange={handle}
-                placeholder="Client company name" sx={TF}
-              />
+                select size="small" label="Current Client" name="current_client"
+                value={form.current_client} onChange={handle} sx={TF}>
+                <MenuItem value="">— None —</MenuItem>
+                {clientNames.map(name => (
+                  <MenuItem key={name} value={name}>{name}</MenuItem>
+                ))}
+              </TextField>
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
@@ -326,7 +341,7 @@ function EmployeeTable({ employees, filtered, onView, onEdit, onDelete, onAdd })
         <Table>
           <TableHead>
             <TableRow sx={{ bgcolor: "#f8fafc" }}>
-              {["Employee", "Designation", "Department", "Current Client", "Billing Rate", "DOJ", "Exp.", "Status", "Actions"].map(h => (
+              {["Employee", "Designation", "Department", "Current Client","Salary", "Client Billing", "DOJ", "Exp.", "Status", "Actions"].map(h => (
                 <TableCell key={h} sx={{ fontWeight: 700, fontSize: 12, color: "#64748b" }}>{h}</TableCell>
               ))}
             </TableRow>
@@ -369,6 +384,13 @@ function EmployeeTable({ employees, filtered, onView, onEdit, onDelete, onAdd })
                         )}
                       </Box>
                     ) : <Typography fontSize={12} color="text.disabled">—</Typography>}
+                  </TableCell>
+                  <TableCell>
+                    <Typography fontSize={13}>
+                      {emp.salary
+                        ? `${(Number(emp.salary) / 100000).toFixed(1)} LPA`
+                        : "—"}
+                    </Typography>
                   </TableCell>
                   <TableCell>
                     {emp.current_billing_rate > 0

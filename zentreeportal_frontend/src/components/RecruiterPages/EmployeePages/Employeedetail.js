@@ -60,7 +60,7 @@ const api = {
     return URL.createObjectURL(blob);
   },
   addEngagement: (id, pl)    => fetch(`${EMPLOYEE_BASE}/${id}/engagement`,         { method: "POST", headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
-  endEngagement: (id, idx)   => fetch(`${EMPLOYEE_BASE}/${id}/engagement/${idx}`,  { method: "PUT",  headers: hdrs(), body: JSON.stringify({}) }).then(ok),
+  endEngagement: (id, idx)   => fetch(`${EMPLOYEE_BASE}/${id}/engagement/${idx}/end`,  { method: "PUT",  headers: hdrs(), body: JSON.stringify({}) }).then(ok),
   // Export single employee full profile as Excel
   exportEmployee: async (id, fileName) => {
     const res = await fetch(`${BASE}/export/employee/${id}/excel`, { headers: hdrs() });
@@ -819,14 +819,69 @@ function DocumentsTab({ employee, onboarding, onRefresh }) {
 // ────────────────────────────────────────────────────────────────────────────
 // TAB 3 — Client History / Engagements
 // ────────────────────────────────────────────────────────────────────────────
-function EngagementTab({ employee, onRefresh }) {
-  const [open,   setOpen]   = useState(false);
-  const [form,   setForm]   = useState(EMPTY_ENG);
-  const [saving, setSaving] = useState(false);
-  const dc      = DEPT_COLOR[employee.department] || "#475569";
-  const history = employee.client_history || [];
-  const handle  = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
 
+function EngagementTab({ employee, onRefresh }) {
+  const [open,          setOpen]          = useState(false);
+  const [editOpen,      setEditOpen]      = useState(false);
+  const [editIdx,       setEditIdx]       = useState(null);
+  const [editForm,      setEditForm]      = useState({});
+  const [billingOpen,   setBillingOpen]   = useState(false);
+  const [billingIdx,    setBillingIdx]    = useState(null);
+  const [billingForm,   setBillingForm]   = useState({ billing_rate: "", billing_currency: "INR", effective_from: "", note: "" });
+  const [form,          setForm]          = useState(EMPTY_ENG);
+  const [saving,        setSaving]        = useState(false);
+  const [clientNames,   setClientNames]   = useState([]);
+
+  const CLIENT_BASE = process.env.REACT_APP_API_CLIENTS_URL;
+  const dc          = DEPT_COLOR[employee.department] || "#475569";
+  const history     = employee.client_history || [];
+
+  useEffect(() => {
+    fetch(`${CLIENT_BASE}/names/list`, { headers: hdrs() })
+      .then(r => r.json())
+      .then(d => { if (d.success) setClientNames(d.data); })
+      .catch(() => setClientNames(["ZentreeLabs Pvt Ltd"]));
+  }, []);
+
+  const handle        = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
+  const handleEdit    = e => setEditForm(p => ({ ...p, [e.target.name]: e.target.value }));
+  const handleBilling = e => setBillingForm(p => ({ ...p, [e.target.name]: e.target.value }));
+
+  // ── Open edit dialog pre-filled ──────────────────────────────────────────
+  const openEdit = (originalIdx) => {
+    const eng = history[originalIdx];
+    setEditForm({
+      client_name:      eng.client_name      || "",
+      project_name:     eng.project_name     || "",
+      role:             eng.role             || "",
+      start_date:       eng.start_date       ? eng.start_date.split("T")[0]  : "",
+      end_date:         eng.end_date         ? eng.end_date.split("T")[0]    : "",
+      billing_rate:     eng.billing_rate     || "",
+      billing_currency: eng.billing_currency || "INR",
+      work_location:    eng.work_location    || "",
+      technology:       eng.technology       || "",
+      notes:            eng.notes            || "",
+    });
+    setEditIdx(originalIdx);
+    setEditOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editForm.client_name) return;
+    setSaving(true);
+    try {
+      await fetch(`${EMPLOYEE_BASE}/${employee._id}/engagement/${editIdx}`, {
+        method: "PUT", headers: hdrs(),
+        body: JSON.stringify({
+          ...editForm,
+          billing_rate: editForm.billing_rate ? Number(editForm.billing_rate) : 0,
+        }),
+      }).then(ok);
+      onRefresh(); setEditOpen(false);
+    } finally { setSaving(false); }
+  };
+
+  // ── Add new engagement ───────────────────────────────────────────────────
   const handleSave = async () => {
     if (!form.client_name) return;
     setSaving(true);
@@ -839,6 +894,31 @@ function EngagementTab({ employee, onRefresh }) {
   const handleEnd = async (idx) => {
     await api.endEngagement(employee._id, idx);
     onRefresh();
+  };
+
+  // ── Billing rate update ──────────────────────────────────────────────────
+  const openBillingUpdate = (idx) => {
+    const eng = history[idx];
+    setBillingForm({
+      billing_rate:     eng.billing_rate || "",
+      billing_currency: eng.billing_currency || "INR",
+      effective_from:   new Date().toISOString().split("T")[0],
+      note:             "",
+    });
+    setBillingIdx(idx);
+    setBillingOpen(true);
+  };
+
+  const handleBillingUpdate = async () => {
+    if (!billingForm.billing_rate) return;
+    setSaving(true);
+    try {
+      await fetch(`${EMPLOYEE_BASE}/${employee._id}/engagement/${billingIdx}/billing`, {
+        method: "POST", headers: hdrs(),
+        body: JSON.stringify({ ...billingForm, billing_rate: Number(billingForm.billing_rate) }),
+      }).then(ok);
+      onRefresh(); setBillingOpen(false);
+    } finally { setSaving(false); }
   };
 
   return (
@@ -861,6 +941,8 @@ function EngagementTab({ employee, onRefresh }) {
         [...history].reverse().map((eng, revIdx) => {
           const originalIdx = history.length - 1 - revIdx;
           const isActive    = !eng.end_date;
+          const billingHist = eng.billing_history || [];
+
           return (
             <Box key={revIdx} display="flex" gap={2} mb={3}>
               {/* Timeline dot */}
@@ -876,42 +958,64 @@ function EngagementTab({ employee, onRefresh }) {
                 )}
               </Box>
 
-              {/* Engagement Card */}
+              {/* Card */}
               <Box flex={1} p={2} borderRadius={2}
                 sx={{ border: `1px solid ${isActive ? "#bbf7d0" : "#e2e8f0"}`,
                       bgcolor: isActive ? "#f0fdf4" : "#fafafa" }}>
+
                 <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1.5}>
                   <Box>
                     <Box display="flex" alignItems="center" gap={1} mb={0.3}>
                       <Typography fontWeight={800} fontSize={15} color={isActive ? "#15803d" : "#0f172a"}>
                         {eng.client_name}
                       </Typography>
-                      {isActive && (
-                        <Chip label="Current" size="small" color="success"
-                          sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />
-                      )}
+                      {isActive && <Chip label="Current" size="small" color="success"
+                        sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />}
                     </Box>
                     <Typography fontSize={13} color="text.secondary">
                       {eng.project_name && `${eng.project_name} · `}{eng.role || "—"}
                     </Typography>
                   </Box>
-                  {isActive && (
-                    <Tooltip title="Mark as Ended">
-                      <Button size="small" variant="outlined" color="warning"
-                        onClick={() => handleEnd(originalIdx)}
-                        sx={{ textTransform: "none", fontSize: 11, py: 0.3 }}>
-                        End
+
+                  {/* Action buttons */}
+                  <Box display="flex" gap={0.8} flexWrap="wrap" justifyContent="flex-end">
+                    <Tooltip title="Edit engagement details">
+                      <Button size="small" variant="outlined"
+                        onClick={() => openEdit(originalIdx)}
+                        sx={{ textTransform: "none", fontSize: 11, py: 0.3,
+                              borderColor: "#94a3b8", color: "#475569",
+                              "&:hover": { borderColor: "#1e40af", color: "#1e40af" } }}>
+                        Edit
                       </Button>
                     </Tooltip>
-                  )}
+                    {isActive && (
+                      <>
+                        <Tooltip title="Update billing rate with history">
+                          <Button size="small" variant="outlined" color="info"
+                            onClick={() => openBillingUpdate(originalIdx)}
+                            sx={{ textTransform: "none", fontSize: 11, py: 0.3 }}>
+                            Update Rate
+                          </Button>
+                        </Tooltip>
+                        <Tooltip title="Mark as Ended">
+                          <Button size="small" variant="outlined" color="warning"
+                            onClick={() => handleEnd(originalIdx)}
+                            sx={{ textTransform: "none", fontSize: 11, py: 0.3 }}>
+                            End
+                          </Button>
+                        </Tooltip>
+                      </>
+                    )}
+                  </Box>
                 </Box>
 
-                <Grid container spacing={1.5}>
+                {/* Details */}
+                <Grid container spacing={1.5} mb={1}>
                   {[
-                    ["Start Date", fmtDate(eng.start_date)],
-                    ["End Date",   eng.end_date ? fmtDate(eng.end_date) : "Present"],
-                    ...(eng.billing_rate > 0 ? [["Billing", fmtMoney(eng.billing_rate, eng.billing_currency)]] : []),
-                    ...(eng.work_location    ? [["Location", eng.work_location]] : []),
+                    ["Start Date",    fmtDate(eng.start_date)],
+                    ["End Date",      eng.end_date ? fmtDate(eng.end_date) : "Present"],
+                    ["Current Rate",  fmtMoney(eng.billing_rate, eng.billing_currency)],
+                    ...(eng.work_location ? [["Location", eng.work_location]] : []),
                   ].map(([label, val]) => (
                     <Grid item xs={6} sm={3} key={label}>
                       <Typography fontSize={10} color="text.secondary" fontWeight={600} textTransform="uppercase">{label}</Typography>
@@ -919,6 +1023,33 @@ function EngagementTab({ employee, onRefresh }) {
                     </Grid>
                   ))}
                 </Grid>
+
+                {/* Billing history */}
+                {billingHist.length > 0 && (
+                  <Box mt={1.5} p={1.5} borderRadius={1.5}
+                    sx={{ bgcolor: isActive ? "#ecfdf5" : "#f8fafc",
+                          border: "1px solid", borderColor: isActive ? "#bbf7d0" : "#e2e8f0" }}>
+                    <Typography fontSize={10} fontWeight={700} color="text.secondary"
+                      textTransform="uppercase" letterSpacing={0.5} mb={1}>
+                      Billing Rate History
+                    </Typography>
+                    {billingHist.map((bh, bi) => (
+                      <Box key={bi} display="flex" alignItems="center" gap={2} py={0.5}
+                        sx={{ borderBottom: bi < billingHist.length - 1 ? "1px dashed #e2e8f0" : "none" }}>
+                        <Typography fontSize={12} fontWeight={700}
+                          color={bi === billingHist.length - 1 ? "#15803d" : "text.primary"}>
+                          {fmtMoney(bh.rate, bh.currency)}
+                        </Typography>
+                        <Typography fontSize={11} color="text.secondary">from {fmtDate(bh.effective_from)}</Typography>
+                        {bh.note && <Typography fontSize={11} color="text.disabled">· {bh.note}</Typography>}
+                        {bi === billingHist.length - 1 && (
+                          <Chip label="Current" size="small"
+                            sx={{ height: 16, fontSize: 9, fontWeight: 700, bgcolor: "#d1fae5", color: "#15803d" }} />
+                        )}
+                      </Box>
+                    ))}
+                  </Box>
+                )}
 
                 {eng.technology && (
                   <Box mt={1.5} display="flex" flexWrap="wrap" gap={0.5}>
@@ -930,16 +1061,14 @@ function EngagementTab({ employee, onRefresh }) {
                     ))}
                   </Box>
                 )}
-                {eng.notes && (
-                  <Typography fontSize={11} color="text.secondary" mt={1}>{eng.notes}</Typography>
-                )}
+                {eng.notes && <Typography fontSize={11} color="text.secondary" mt={1}>{eng.notes}</Typography>}
               </Box>
             </Box>
           );
         })
       )}
 
-      {/* ── Add Engagement Dialog ────────────────────────────────────────── */}
+      {/* ── Add Engagement Dialog ─────────────────────────────────────── */}
       <Dialog open={open} onClose={() => { setOpen(false); setForm(EMPTY_ENG); }} maxWidth="sm" fullWidth>
         <DialogTitle fontWeight={700} sx={{ borderBottom: "1px solid #e0e0e0" }}>
           Add Client Engagement
@@ -948,16 +1077,17 @@ function EngagementTab({ employee, onRefresh }) {
         <DialogContent sx={{ pt: 2.5 }}>
           <Grid container spacing={2}>
             <Grid item xs={12}>
-              <TextField fullWidth size="small" required label="Client Name" name="client_name"
-                value={form.client_name} onChange={handle} />
+              <TextField select fullWidth size="small" required label="Client Name" name="client_name"
+                value={form.client_name} onChange={handle}>
+                <MenuItem value="">— Select Client —</MenuItem>
+                {clientNames.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+              </TextField>
             </Grid>
             <Grid item xs={6}>
-              <TextField fullWidth size="small" label="Project Name" name="project_name"
-                value={form.project_name} onChange={handle} />
+              <TextField fullWidth size="small" label="Project Name" name="project_name" value={form.project_name} onChange={handle} />
             </Grid>
             <Grid item xs={6}>
-              <TextField fullWidth size="small" label="Role on Project" name="role"
-                value={form.role} onChange={handle} />
+              <TextField fullWidth size="small" label="Role on Project" name="role" value={form.role} onChange={handle} />
             </Grid>
             <Grid item xs={6}>
               <TextField fullWidth size="small" type="date" label="Start Date" name="start_date"
@@ -968,36 +1098,143 @@ function EngagementTab({ employee, onRefresh }) {
                 name="end_date" value={form.end_date} onChange={handle} InputLabelProps={{ shrink: true }} />
             </Grid>
             <Grid item xs={6}>
-              <TextField fullWidth size="small" type="number" label="Billing Rate"
-                name="billing_rate" value={form.billing_rate} onChange={handle} />
+              <TextField fullWidth size="small" type="number" label="Billing Rate" name="billing_rate" value={form.billing_rate} onChange={handle} />
             </Grid>
             <Grid item xs={6}>
-              <TextField select fullWidth size="small" label="Currency" name="billing_currency"
-                value={form.billing_currency} onChange={handle}>
+              <TextField select fullWidth size="small" label="Currency" name="billing_currency" value={form.billing_currency} onChange={handle}>
                 {CURRENCIES.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
               </TextField>
             </Grid>
             <Grid item xs={6}>
-              <TextField fullWidth size="small" label="Work Location (Onsite/Remote/Hybrid)"
-                name="work_location" value={form.work_location} onChange={handle} />
+              <TextField fullWidth size="small" label="Work Location" name="work_location" value={form.work_location} onChange={handle} />
             </Grid>
             <Grid item xs={6}>
-              <TextField fullWidth size="small" label="Technology Stack (comma-sep)"
-                name="technology" value={form.technology} onChange={handle} />
+              <TextField fullWidth size="small" label="Technology Stack (comma-sep)" name="technology" value={form.technology} onChange={handle} />
             </Grid>
             <Grid item xs={12}>
-              <TextField fullWidth multiline rows={2} size="small" label="Notes"
-                name="notes" value={form.notes} onChange={handle} />
+              <TextField fullWidth multiline rows={2} size="small" label="Notes" name="notes" value={form.notes} onChange={handle} />
             </Grid>
           </Grid>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
           <Button onClick={() => { setOpen(false); setForm(EMPTY_ENG); }}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave}
-            disabled={saving || !form.client_name}
+          <Button variant="contained" onClick={handleSave} disabled={saving || !form.client_name}
             sx={{ bgcolor: "#1e40af", "&:hover": { bgcolor: "#1e3a8a" } }}>
             {saving && <CircularProgress size={16} sx={{ mr: 1, color: "#fff" }} />}
             Save Engagement
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Edit Engagement Dialog ────────────────────────────────────── */}
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle fontWeight={700} sx={{ borderBottom: "1px solid #e0e0e0" }}>
+          Edit Engagement
+          {editIdx !== null && history[editIdx] && (
+            <Typography fontSize={12} color="text.secondary">{history[editIdx].client_name}</Typography>
+          )}
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2.5 }}>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField select fullWidth size="small" required label="Client Name" name="client_name"
+                value={editForm.client_name || ""} onChange={handleEdit}>
+                <MenuItem value="">— Select Client —</MenuItem>
+                {clientNames.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid item xs={6}>
+              <TextField fullWidth size="small" label="Project Name" name="project_name"
+                value={editForm.project_name || ""} onChange={handleEdit} />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField fullWidth size="small" label="Role on Project" name="role"
+                value={editForm.role || ""} onChange={handleEdit} />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField fullWidth size="small" type="date" label="Start Date" name="start_date"
+                value={editForm.start_date || ""} onChange={handleEdit} InputLabelProps={{ shrink: true }} />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField fullWidth size="small" type="date" label="End Date (blank = active)"
+                name="end_date" value={editForm.end_date || ""} onChange={handleEdit} InputLabelProps={{ shrink: true }} />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField fullWidth size="small" type="number" label="Billing Rate" name="billing_rate"
+                value={editForm.billing_rate || ""} onChange={handleEdit} />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField select fullWidth size="small" label="Currency" name="billing_currency"
+                value={editForm.billing_currency || "INR"} onChange={handleEdit}>
+                {CURRENCIES.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid item xs={6}>
+              <TextField fullWidth size="small" label="Work Location" name="work_location"
+                value={editForm.work_location || ""} onChange={handleEdit} />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField fullWidth size="small" label="Technology Stack (comma-sep)" name="technology"
+                value={editForm.technology || ""} onChange={handleEdit} />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField fullWidth multiline rows={2} size="small" label="Notes" name="notes"
+                value={editForm.notes || ""} onChange={handleEdit} />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
+          <Button onClick={() => setEditOpen(false)} sx={{ color: "#64748b" }}>Cancel</Button>
+          <Button variant="contained" onClick={handleEditSave}
+            disabled={saving || !editForm.client_name}
+            sx={{ bgcolor: "#1e40af", "&:hover": { bgcolor: "#1e3a8a" } }}>
+            {saving && <CircularProgress size={16} sx={{ mr: 1, color: "#fff" }} />}
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Update Billing Rate Dialog ────────────────────────────────── */}
+      <Dialog open={billingOpen} onClose={() => setBillingOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle fontWeight={700} sx={{ borderBottom: "1px solid #e0e0e0" }}>
+          Update Billing Rate
+          {billingIdx !== null && history[billingIdx] && (
+            <Typography fontSize={12} color="text.secondary">
+              {history[billingIdx].client_name} · Current: {fmtMoney(history[billingIdx].billing_rate, history[billingIdx].billing_currency)}
+            </Typography>
+          )}
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2.5 }}>
+          <Grid container spacing={2}>
+            <Grid item xs={8}>
+              <TextField fullWidth size="small" type="number" required label="New Billing Rate"
+                name="billing_rate" value={billingForm.billing_rate} onChange={handleBilling} />
+            </Grid>
+            <Grid item xs={4}>
+              <TextField select fullWidth size="small" label="Currency" name="billing_currency"
+                value={billingForm.billing_currency} onChange={handleBilling}>
+                {CURRENCIES.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid item xs={12}>
+              <TextField fullWidth size="small" type="date" label="Effective From"
+                name="effective_from" value={billingForm.effective_from} onChange={handleBilling}
+                InputLabelProps={{ shrink: true }} />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField fullWidth size="small" label="Note (e.g. Annual increment)"
+                name="note" value={billingForm.note} onChange={handleBilling}
+                placeholder="e.g. Annual increment, Revised contract…" />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e0e0e0" }}>
+          <Button onClick={() => setBillingOpen(false)} sx={{ color: "#64748b" }}>Cancel</Button>
+          <Button variant="contained" onClick={handleBillingUpdate}
+            disabled={saving || !billingForm.billing_rate}
+            sx={{ bgcolor: "#15803d", "&:hover": { bgcolor: "#166534" } }}>
+            {saving && <CircularProgress size={16} sx={{ mr: 1, color: "#fff" }} />}
+            Save Rate Change
           </Button>
         </DialogActions>
       </Dialog>
