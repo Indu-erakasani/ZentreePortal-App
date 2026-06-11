@@ -32,21 +32,16 @@ const NAV_ITEMS = [
     ],
     roles: ["admin", "recruiter", "manager", "hr"],
   },
-  {
-    label: "Recruiter Analytics",
-    icon:  <People />,
-    paths: ["/manager/recruiters"],
-    roles: ["admin", "manager","recruiter"],
-  },
-  {
-    label: "RBot Analytics",        // recruiter sees their own data
-    icon:  <BarChart />,            // import BarChart from @mui/icons-material
-    paths: ["/rbot-analytics"],
-    roles: ["recruiter", "admin"],
-  },
+  // {
+  //   label: "Recruiter Analytics",
+  //   icon:  <People />,
+  //   paths: ["/manager/recruiters"],
+  //   roles: ["admin", "manager","recruiter"],
+  // },
+
   {
     label: "Client Analytics",        // manager sees all recruiters
-    icon:  <Groups />,              // import Groups from @mui/icons-material
+    icon:  <Groups />,        
     paths: ["/clients/analytics/all"],
     roles: ["manager"],
   },
@@ -54,7 +49,7 @@ const NAV_ITEMS = [
   
   {
     label: "Team Analytics",        // manager sees all recruiters
-    icon:  <Groups />,              // import Groups from @mui/icons-material
+    icon:  <Groups />,      
     paths: ["/rbot-team-analytics"],
     roles: ["manager", "admin"],
   },

@@ -45,15 +45,30 @@ def send_candidate_jd_email(to_email, candidate_name, job_title, client_name,
     <p style="color:#888;font-size:12px;">This link is specific to you. Do not share it.</p>
     """)
 
-
-def send_senior_review_email(to_email, reviewer_name, candidate_name, job_title, review_url):
-    _send(to_email, f"Resume Review Required: {candidate_name} for {job_title}", f"""
-    <h2>Hi {reviewer_name},</h2>
-    <p><strong>{candidate_name}</strong> has uploaded their tailored resume for
-    <strong>{job_title}</strong>. Please review and provide your decision.</p>
-    <p><a href="{review_url}" style="background:#0369a1;color:#fff;padding:10px 20px;
-    border-radius:6px;text-decoration:none;font-weight:bold;">Review Resume →</a></p>
-    """)
+    
+def send_senior_review_email(to_email,reviewer_name,candidate_name,job_title,job_description,skills_required,review_url):
+    _send(
+        to_email,
+        f"Resume Review Required: {candidate_name} for {job_title}",
+        f"""
+        <h2>Hi {reviewer_name},</h2>
+        <p><strong>{candidate_name}</strong> has uploaded a tailored resume for<strong>{job_title}</strong>.</p
+        <hr/>
+        <h3>Job Details</h3>
+        <p><strong>Job Title:</strong> {job_title}</p>
+        <p><strong>Job Description:</strong><br/> {job_description}</p>
+        <p> <strong>Required Skills:</strong> {skills_required}</p>
+        <hr/>
+        <p>Please review the candidate's resume against the job requirements and provide your decision.</p>
+        <p>
+            <a href="{review_url}"
+               style="background:#0369a1;color:#fff;padding:10px 20px;
+               border-radius:6px;text-decoration:none;font-weight:bold;">
+               Review Resume →
+            </a>
+        </p>
+        """
+    )
 
 
 def send_recruiter_accepted_email(to_email, candidate_name, job_title, reviewer_name, review_url):

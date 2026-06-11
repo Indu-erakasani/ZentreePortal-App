@@ -824,7 +824,7 @@ function BankEmergencyTab({ employeeId, data, onRefresh }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  DETAIL DIALOG
 // ══════════════════════════════════════════════════════════════════════════════
-function OnboardingDetail({ open, onClose, employee }) {
+export function OnboardingDetail({ open, onClose, employee }) {
   const [tab,     setTab]     = useState(0);
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);

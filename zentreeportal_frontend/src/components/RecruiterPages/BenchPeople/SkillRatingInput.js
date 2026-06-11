@@ -29,7 +29,7 @@ const addSkill = () => {
   if (!name || skills.find(s => s.name.toLowerCase() === name.toLowerCase())) {
     setInput(""); return;
   }
-  onChange([...skills, { name, rating: 3 }]);
+  onChange([...skills, { name, rating: 1 }]);
   setInput("");
 };
 

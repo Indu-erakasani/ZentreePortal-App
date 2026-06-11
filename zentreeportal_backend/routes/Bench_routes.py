@@ -572,7 +572,7 @@ def _write_to_resourcing_bot(
 
         # ── Screening placeholders ────────────────────────────────────────────
         "summaries":              bench.get("notes", ""),
-        "overallStatus":          "Shortlisted",
+        "overallStatus":          "NewCandidate",
         "match_score":            0,
         "ScreeningTestScore":     0,
         "mcq_questions":          [],

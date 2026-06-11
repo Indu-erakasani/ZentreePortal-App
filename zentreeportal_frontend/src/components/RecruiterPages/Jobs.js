@@ -399,11 +399,12 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
                   <Grid item xs={12} sm={6} md={4} key={co}>
                     <Box display="flex" justifyContent="space-between" mb={0.5}>
                       <Typography fontSize={13} fontWeight={600}>{co}</Typography>
-                      <Typography fontSize={13} color="text.secondary">{count}</Typography>
+                      <Typography fontSize={12} fontWeight={700}
+                        sx={{ bgcolor: "#e0f2fe", color: "#0369a1", px: 1, py: 0.25, borderRadius: "12px", minWidth: 28, textAlign: "center", }}
+                      >
+                        {count}
+                      </Typography>
                     </Box>
-                    <LinearProgress variant="determinate" value={pct}
-                      sx={{ height: 8, borderRadius: 4, bgcolor: "#e8eaf6",
-                            "& .MuiLinearProgress-bar": { bgcolor: "#1a237e" } }} />
                   </Grid>
                 );
               })}

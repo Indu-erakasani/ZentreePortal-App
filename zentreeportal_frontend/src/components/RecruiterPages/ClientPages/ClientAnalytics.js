@@ -315,8 +315,8 @@ const filtered = clients.filter(c =>
                   <TableCell>Industry</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell align="right">Employees</TableCell>
-                  <TableCell align="right">JDs</TableCell>
-                  <TableCell align="right">Candidates</TableCell>
+                  {/* <TableCell align="right">JDs</TableCell>
+                  <TableCell align="right">Candidates</TableCell> */}
                   <TableCell align="right">Hired</TableCell>
                   <TableCell align="right">Conv %</TableCell>
                   <TableCell align="right">Revenue</TableCell>
@@ -342,34 +342,29 @@ const filtered = clients.filter(c =>
                       </Box>
                     </TableCell>
                     <TableCell><Typography fontSize={12}>{c.industry || "—"}</Typography></TableCell>
-                    {/* <TableCell>
-                      <Chip label={c.relationship_status} size="small"
-                        sx={{ fontWeight: 700, fontSize: 10,
-                          bgcolor: c.relationship_status === "Active" ? "#d1fae5" : "#f3f4f6",
-                          color:   c.relationship_status === "Active" ? EMERALD : SLATE }} />
-                    </TableCell> */}
+          
                     <TableCell>
-  {c.source === "resourcing_bot" ? (
-    <Chip
-      label="ResourcingBot"
-      size="small"
-      sx={{ fontWeight: 700, fontSize: 10, bgcolor: "#ede9fe", color: PURPLE }}
-    />
-  ) : (
-    <Chip
-      label={c.relationship_status}
-      size="small"
-      sx={{
-        fontWeight: 700, fontSize: 10,
-        bgcolor: c.relationship_status === "Active" ? "#d1fae5" : "#f3f4f6",
-        color:   c.relationship_status === "Active" ? EMERALD : SLATE,
-      }}
-    />
-  )}
-</TableCell>
+                        {c.source === "resourcing_bot" ? (
+                            <Chip
+                            label="ResourcingBot"
+                            size="small"
+                            sx={{ fontWeight: 700, fontSize: 10, bgcolor: "#ede9fe", color: PURPLE }}
+                            />
+                        ) : (
+                            <Chip
+                            label={c.relationship_status}
+                            size="small"
+                            sx={{
+                                fontWeight: 700, fontSize: 10,
+                                bgcolor: c.relationship_status === "Active" ? "#d1fae5" : "#f3f4f6",
+                                color:   c.relationship_status === "Active" ? EMERALD : SLATE,
+                            }}
+                            />
+                        )}
+                    </TableCell>
                     <TableCell align="right"><Typography fontSize={13} fontWeight={700} color={SKY}>{c.total_active_employees}</Typography></TableCell>
-                    <TableCell align="right"><Typography fontSize={13} fontWeight={700} color={PURPLE}>{c.total_jds}</Typography></TableCell>
-                    <TableCell align="right"><Typography fontSize={13} fontWeight={700}>{c.total_candidates}</Typography></TableCell>
+                    {/* <TableCell align="right"><Typography fontSize={13} fontWeight={700} color={PURPLE}>{c.total_jds}</Typography></TableCell>
+                    <TableCell align="right"><Typography fontSize={13} fontWeight={700}>{c.total_candidates}</Typography></TableCell> */}
                     <TableCell align="right">
                       <Chip label={c.total_hired} size="small"
                         sx={{ fontWeight: 700, fontSize: 11,
@@ -549,8 +544,8 @@ const filtered = clients.filter(c =>
                 <TableCell>#</TableCell>
                 <TableCell>Department</TableCell>
                 <TableCell align="center">Employees</TableCell>
-                <TableCell align="right">Internal Billing / mo</TableCell>
-                <TableCell align="right">Salary / mo</TableCell>
+                <TableCell align="right">Internal Billing</TableCell>
+                <TableCell align="right">Salary</TableCell>
                 <TableCell align="right">Margin</TableCell>
               </TableRow>
             </TableHead>
@@ -617,8 +612,8 @@ const filtered = clients.filter(c =>
                                   <TableCell>Department</TableCell>
                                   <TableCell>Project</TableCell>
                                   <TableCell>Status</TableCell>
-                                  <TableCell align="right">Internal Billing / mo</TableCell>
-                                  <TableCell align="right">Salary / mo</TableCell>
+                                  <TableCell align="right">Internal Billing</TableCell>
+                                  <TableCell align="right">Salary</TableCell>
                                   <TableCell align="right">Margin</TableCell>
                                 </TableRow>
                               </TableHead>
@@ -747,8 +742,8 @@ const filtered = clients.filter(c =>
               <TableCell>#</TableCell>
               <TableCell>Client</TableCell>
               <TableCell align="center">Employees</TableCell>
-              <TableCell align="right">Billing / mo</TableCell>
-              <TableCell align="right">Salary / mo</TableCell>
+              <TableCell align="right">Billing</TableCell>
+              <TableCell align="right">Salary</TableCell>
               <TableCell align="right">Margin</TableCell>
             </TableRow>
           </TableHead>

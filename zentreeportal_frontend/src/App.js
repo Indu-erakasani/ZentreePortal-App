@@ -43,7 +43,6 @@ import CandidateUploadPage from "./components/RecruiterPages/BenchPeople/Candida
 import SeniorReviewPage    from "./components/RecruiterPages/BenchPeople/SeniorReviewPage";
 
 // Add these imports
-import RbotRecruiterDashboard from "./components/RecruiterPages/RbotRecruiterDashboard";
 import RbotManagerDashboard   from "./components/ManagerPages/RbotManagerDashboard";
 import AllClientsAnalytics from "./components/RecruiterPages/ClientPages/ClientAnalytics";
 
@@ -197,7 +196,7 @@ const App = () => (
             } />
 
 
-            <Route path="/rbot-analytics"         element={<RbotRecruiterDashboard />} />
+            {/* <Route path="/rbot-analytics"         element={<RbotRecruiterDashboard />} /> */}
             <Route path="/rbot-team-analytics"    element={<RbotManagerDashboard />} />
             <Route path="/clients/analytics/all" element={<AllClientsAnalytics />} />
             <Route path="/clients/analytics"     element={<AllClientsAnalytics />} />

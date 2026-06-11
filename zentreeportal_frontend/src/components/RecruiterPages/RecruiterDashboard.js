@@ -1,20 +1,31 @@
 
+
+
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Box, Grid, Card, CardContent, Typography, Chip, CircularProgress,
-  Alert, LinearProgress, Avatar, Divider, Button, Table, TableHead,
-  TableBody, TableRow, TableCell, Paper, IconButton, Tooltip,
+  Alert, Avatar, LinearProgress, Table, TableHead, TableBody,
+  TableRow, TableCell, Paper, Accordion, AccordionSummary,
+  AccordionDetails, TextField, InputAdornment, Divider, Tooltip,
+  IconButton,Button
 } from "@mui/material";
 import {
-  People, Work, CheckCircle, TrendingUp, AccessTime,
-  Star, Add, MonetizationOn, Business, WorkOutline,
-  PersonOff, Schedule, VideoCall, NavigateBefore, NavigateNext,
-  Today, CalendarMonth, BarChart, ArrowUpward, ArrowForward,
+  People, CheckCircle, Cancel, TrendingUp, Work, ExpandMore,
+  Search, Star, Today, Warning, Schedule, NotificationsActive,
+  VideoCall, AccessTime, FiberManualRecord, Business, PersonSearch,
+  Assignment,
 } from "@mui/icons-material";
-import { Link } from "react-router-dom";
 
 const BASE = process.env.REACT_APP_API_BASE_URL;
-
+const TRACKING_BASE = process.env.REACT_APP_API_TRACKING_URL;
+const JOBS_BASE = process.env.REACT_APP_API_JOBS_URL;
+const PERIODS = [
+  { key: "week",    label: "7 days"  },
+  { key: "month",   label: "30 days" },
+  { key: "quarter", label: "90 days" },
+  { key: "year",    label: "1 year"  },
+  { key: "custom",  label: "Custom"  },
+];
 const getHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
@@ -22,1040 +33,873 @@ const getHeaders = () => ({
 
 const authFetch = (url) =>
   fetch(url, { headers: getHeaders() }).then(async (r) => {
-    if (r.status === 401) { localStorage.clear(); window.location.href = "/login"; }
     const d = await r.json();
     if (!r.ok) throw d;
     return d;
   });
 
-const fmt = (v) => {
-  if (!v && v !== 0) return "—";
-  if (v >= 10000000) return `₹${(v / 10000000).toFixed(1)}Cr`;
-  if (v >= 100000)   return `₹${(v / 100000).toFixed(1)}L`;
-  return `₹${Number(v).toLocaleString("en-IN")}`;
+// ── Status ordering & meta (same as manager dashboard) ─────────────────────
+const STATUS_ORDER = [
+  "NewCandidate",
+  "Recruiter_Rejected", "Recruiter_Accepted", "Recruiter_Hold",
+  "HiringManager_Rejected", "HiringManager_Accepted", "HiringManager_Hold",
+  "ScreeningTest_Sent", "ScreeningTest_Resent",
+  "Candidate_Declined", "Candidate_OnHold", "Candidate_Quit",
+  "ScreeningTest_Passed", "ReScreeningTest_Passed",
+  "OnHold_ReScreening", "OnHold_Screening",
+  "TestPassed_Rejected", "ReTestPassed_Rejected",
+  "ScreeningTest_Failed", "ReScreeningTest_Failed",
+  "OnHold_TestPassed",
+  "Interview_Scheduled", "Round1_Rejected", "Round2_Suggested",
+  "Round2_Scheduled", "Interviewer_Selected", "Interviewer_Rejected",
+  "Selected", "Rejected",
+];
+
+const STATUS_META = {
+  NewCandidate:           { bg: "#f1f5f9", color: "#475569",  label: "New Candidate" },
+  Recruiter_Rejected:     { bg: "#fef2f2", color: "#dc2626",  label: "Rctr Rejected" },
+  Recruiter_Accepted:     { bg: "#eff6ff", color: "#2563eb",  label: "Rctr Accepted" },
+  Recruiter_Hold:         { bg: "#fff7ed", color: "#c2410c",  label: "Rctr Hold" },
+  HiringManager_Rejected: { bg: "#fef2f2", color: "#991b1b",  label: "HM Rejected" },
+  HiringManager_Accepted: { bg: "#f0fdf4", color: "#166534",  label: "HM Accepted" },
+  HiringManager_Hold:     { bg: "#fff7ed", color: "#b45309",  label: "HM Hold" },
+  ScreeningTest_Sent:     { bg: "#fefce8", color: "#a16207",  label: "Test Sent" },
+  ScreeningTest_Resent:   { bg: "#fefce8", color: "#ca8a04",  label: "Test Resent" },
+  Candidate_Declined:     { bg: "#fdf4ff", color: "#9333ea",  label: "Cand Declined" },
+  Candidate_OnHold:       { bg: "#fff7ed", color: "#ea580c",  label: "Cand On Hold" },
+  Candidate_Quit:         { bg: "#fef2f2", color: "#b91c1c",  label: "Cand Quit" },
+  ScreeningTest_Passed:   { bg: "#f0fdf4", color: "#15803d",  label: "Test Passed" },
+  ReScreeningTest_Passed: { bg: "#dcfce7", color: "#166534",  label: "Re-Test Passed" },
+  OnHold_ReScreening:     { bg: "#fff7ed", color: "#c2410c",  label: "Hold Re-Screen" },
+  OnHold_Screening:       { bg: "#fff7ed", color: "#d97706",  label: "Hold Screening" },
+  TestPassed_Rejected:    { bg: "#fef2f2", color: "#dc2626",  label: "TestPass Rej" },
+  ReTestPassed_Rejected:  { bg: "#fef2f2", color: "#b91c1c",  label: "ReTestPass Rej" },
+  ScreeningTest_Failed:   { bg: "#fef2f2", color: "#dc2626",  label: "Test Failed" },
+  ReScreeningTest_Failed: { bg: "#fee2e2", color: "#991b1b",  label: "Re-Test Failed" },
+  OnHold_TestPassed:      { bg: "#fff7ed", color: "#c2410c",  label: "Hold (Test ✓)" },
+  Interview_Scheduled:    { bg: "#eff6ff", color: "#1d4ed8",  label: "Interview Sched" },
+  Round1_Rejected:        { bg: "#fef2f2", color: "#dc2626",  label: "Round 1 Rej" },
+  Round2_Suggested:       { bg: "#eff6ff", color: "#0369a1",  label: "Round 2 Sugg" },
+  Round2_Scheduled:       { bg: "#dbeafe", color: "#1d4ed8",  label: "Round 2 Sched" },
+  Interviewer_Selected:   { bg: "#f0fdf4", color: "#15803d",  label: "Intrvwr Select" },
+  Interviewer_Rejected:   { bg: "#fef2f2", color: "#dc2626",  label: "Intrvwr Reject" },
+  Selected:               { bg: "#f0fdf4", color: "#15803d",  label: "Selected" },
+  Rejected:               { bg: "#fef2f2", color: "#dc2626",  label: "Rejected" },
+  Shortlisted:            { bg: "#eff6ff", color: "#1d4ed8",  label: "Shortlisted" },
+  Interested:             { bg: "#ecfdf5", color: "#059669",  label: "Interested" },
 };
 
-const timeAgo = (iso) => {
-  if (!iso) return "";
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-};
+const getStatusMeta = (s) =>
+  STATUS_META[s] || { bg: "#f8fafc", color: "#475569", label: s?.replace(/_/g, " ") || "Unknown" };
+
 
 const nameInitials = (name = "") =>
-  name.split(" ").filter(Boolean).map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
+  name.split(" ").filter(Boolean).map(w => w[0]).join("").toUpperCase().slice(0, 2) || "?";
 
-const PRIORITY_COLOR = { Critical: "error", High: "warning", Medium: "info", Low: "default" };
-
-const STAGE_COLORS = {
-  "Screening":         "#64748b",
-  "Technical Round 1": "#0369a1",
-  "Technical Round 2": "#075985",
-  "HR Round":          "#c2410c",
-  "Manager Round":     "#7e22ce",
-  "Final Round":       "#9d174d",
-  "Offer Stage":       "#1d4ed8",
-  "Negotiation":       "#b45309",
-  "Offer Accepted":    "#15803d",
-  "Joined":            "#14532d",
-  "Rejected":          "#991b1b",
-  "New":               "#475569",
-  "In Review":         "#c2410c",
-  "Shortlisted":       "#0369a1",
-  "Interviewed":       "#6d28d9",
-  "Offered":           "#a16207",
-  "Hired":             "#15803d",
-  "On Hold":           "#78716c",
+const fmtTime = (iso) => {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 };
 
-const ACTIVITY_ICON = {
-  placement: { emoji: "✅", bg: "#f0fdf4", border: "#bbf7d0", text: "#166534" },
-  interview: { emoji: "📅", bg: "#eff6ff", border: "#bfdbfe", text: "#1e40af" },
-  client:    { emoji: "🏢", bg: "#faf5ff", border: "#e9d5ff", text: "#6b21a8" },
-  job:       { emoji: "💼", bg: "#fff7ed", border: "#fed7aa", text: "#9a3412" },
-  candidate: { emoji: "👤", bg: "#f8fafc", border: "#e2e8f0", text: "#475569" },
+const daysUntil = (iso) => {
+  if (!iso) return null;
+  const diff = new Date(iso) - new Date();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
 };
 
-// ── Palette & tokens ────────────────────────────────────────────────────────
-const COLORS = {
-  navy:    "#0f172a",
-  blue:    "#1d4ed8",
-  indigo:  "#4f46e5",
-  teal:    "#0d9488",
-  amber:   "#d97706",
-  green:   "#15803d",
-  red:     "#dc2626",
-  slate:   "#64748b",
-  surface: "#f8fafc",
-};
 
-// ── Stat Card ──────────────────────────────────────────────────────────────
-const StatCard = ({ title, value, icon, accent, sub, progress, trend }) => (
-  <Card
-    elevation={0}
-    sx={{
-      borderRadius: "16px",
-      border: "1px solid #e2e8f0",
-      background: "#fff",
-      position: "relative",
-      overflow: "hidden",
-      transition: "box-shadow 0.2s, transform 0.2s",
-      "&:hover": { boxShadow: "0 8px 32px rgba(15,23,42,0.10)", transform: "translateY(-2px)" },
-    }}
-  >
-    {/* Accent bar top */}
-    <Box sx={{ height: 3, background: accent, borderRadius: "16px 16px 0 0" }} />
-    <CardContent sx={{ p: 2.5 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-        <Box>
-          <Typography
-            sx={{ fontSize: 11, fontWeight: 700, color: "#94a3b8",
-              textTransform: "uppercase", letterSpacing: "0.08em", mb: 0.8 }}
-          >
-            {title}
-          </Typography>
-          <Typography
-            sx={{ fontSize: "2rem", fontWeight: 800, color: COLORS.navy, lineHeight: 1.1 }}
-          >
-            {value ?? "—"}
-          </Typography>
-          {sub && (
-            <Typography sx={{ fontSize: 12, color: "#64748b", mt: 0.5 }}>{sub}</Typography>
-          )}
-          {trend !== undefined && (
-            <Box display="flex" alignItems="center" gap={0.4} mt={0.6}>
-              <ArrowUpward sx={{ fontSize: 12, color: "#15803d" }} />
-              <Typography sx={{ fontSize: 11, color: "#15803d", fontWeight: 700 }}>
-                {trend}%
-              </Typography>
-              <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>vs last month</Typography>
-            </Box>
-          )}
-        </Box>
-        <Box
-          sx={{
-            width: 46, height: 46, borderRadius: "12px",
-            background: `${accent}15`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}
-        >
-          {React.cloneElement(icon, { sx: { color: accent, fontSize: 22 } })}
-        </Box>
+// ── KPI Card ──────────────────────────────────────────────────────────────────
+const KpiCard = ({ title, value, icon, accent, sub }) => (
+  <Card elevation={0} sx={{ borderRadius: "14px", border: "1px solid #e2e8f0", height: "100%" }}>
+    <Box sx={{ height: 3, bgcolor: accent, borderRadius: "14px 14px 0 0" }} />
+    <CardContent sx={{ p: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
+      <Box sx={{ width: 40, height: 40, borderRadius: "10px", bgcolor: `${accent}18`,
+        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        {React.cloneElement(icon, { sx: { color: accent, fontSize: 19 } })}
       </Box>
-      {progress !== undefined && (
-        <Box mt={2}>
-          <LinearProgress
-            variant="determinate"
-            value={Math.min(progress, 100)}
-            sx={{
-              height: 5, borderRadius: 8,
-              bgcolor: `${accent}15`,
-              "& .MuiLinearProgress-bar": { bgcolor: accent, borderRadius: 8 },
-            }}
-          />
-        </Box>
-      )}
+      <Box>
+        <Typography sx={{ fontSize: 10, fontWeight: 700, color: "#94a3b8",
+          textTransform: "uppercase", letterSpacing: "0.07em" }}>{title}</Typography>
+        <Typography sx={{ fontSize: "1.6rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.1 }}>
+          {value ?? 0}
+        </Typography>
+        {sub && <Typography sx={{ fontSize: 10, color: "#94a3b8", mt: 0.2 }}>{sub}</Typography>}
+      </Box>
     </CardContent>
   </Card>
 );
 
-// ── Mini Calendar ──────────────────────────────────────────────────────────
-function MiniCalendar({ allInterviews, onDaySelect, selectedDay, calYear, calMonth, onPrev, onNext, onToday }) {
-  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
-  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-  const firstDay    = new Date(calYear, calMonth, 1).getDay();
-  const today       = new Date();
-
-  const dayMap = {};
-  allInterviews.forEach((ev) => {
-    const d = new Date(ev.scheduled_at);
-    if (d.getMonth() === calMonth && d.getFullYear() === calYear) {
-      const key = d.getDate();
-      if (!dayMap[key]) dayMap[key] = [];
-      dayMap[key].push(ev);
-    }
-  });
-
-  const cells = [];
-  for (let i = 0; i < firstDay; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+// ── Today's interview card ────────────────────────────────────────────────────
+const InterviewSlot = ({ ev }) => {
+  const evDate = new Date(ev.scheduled_at);
+  const now = new Date();
+  const isLive = Math.abs(evDate - now) < 30 * 60 * 1000;
+  const isPast = evDate < now;
 
   return (
-    <Box>
-      {/* Month nav */}
-      <Box display="flex" alignItems="center" justifyContent="space-between" mb={1.5}>
-        <IconButton size="small" onClick={onPrev} sx={{ "&:hover": { bgcolor: "#f1f5f9" } }}>
-          <NavigateBefore fontSize="small" />
-        </IconButton>
-        <Typography sx={{ fontWeight: 700, fontSize: 13, color: COLORS.navy }}>
-          {MONTHS[calMonth]} {calYear}
+    <Box sx={{
+      p: 1.5, borderRadius: "10px",
+      bgcolor: isLive ? "#f0fdf4" : isPast ? "#f8fafc" : "#fff",
+      border: `1px solid ${isLive ? "#86efac" : isPast ? "#f1f5f9" : "#e2e8f0"}`,
+      display: "flex", alignItems: "center", gap: 1.5,
+    }}>
+      <Box sx={{ textAlign: "center", minWidth: 44, flexShrink: 0 }}>
+        <Typography sx={{ fontSize: 13, fontWeight: 800,
+          color: isLive ? "#15803d" : isPast ? "#94a3b8" : "#1d4ed8" }}>
+          {fmtTime(ev.scheduled_at)}
         </Typography>
-        <IconButton size="small" onClick={onNext} sx={{ "&:hover": { bgcolor: "#f1f5f9" } }}>
-          <NavigateNext fontSize="small" />
-        </IconButton>
+        <Typography sx={{ fontSize: 10, color: "#94a3b8" }}>{ev.duration_minutes}m</Typography>
       </Box>
-
-      <Button
-        size="small" fullWidth onClick={onToday} startIcon={<Today fontSize="small" />}
-        variant="outlined"
-        sx={{ mb: 1.5, textTransform: "none", fontSize: 11, borderRadius: "10px",
-          borderColor: "#e2e8f0", color: "#475569",
-          "&:hover": { borderColor: "#1d4ed8", color: "#1d4ed8", bgcolor: "#eff6ff" } }}
-      >
-        Go to Today
-      </Button>
-
-      {/* Day headers */}
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", mb: 0.5 }}>
-        {DAYS.map((d) => (
-          <Typography key={d} sx={{ fontSize: 10, fontWeight: 700, color: "#94a3b8",
-            textAlign: "center", py: 0.3 }}>{d}</Typography>
-        ))}
+      <Box sx={{ width: 2, height: 36, borderRadius: 4, flexShrink: 0,
+        bgcolor: isLive ? "#15803d" : isPast ? "#e2e8f0" : "#1d4ed8" }} />
+      <Box flex={1} minWidth={0}>
+        <Typography sx={{ fontWeight: 700, fontSize: 12, color: "#0f172a" }} noWrap>
+          {ev.candidate_name}
+        </Typography>
+        <Typography sx={{ fontSize: 11, color: "#64748b" }} noWrap>
+          {ev.stage || ev.interview_type} · {ev.job_title || ""}
+        </Typography>
       </Box>
+      {isLive && (
+        <Chip label="Live" size="small"
+          sx={{ bgcolor: "#f0fdf4", color: "#15803d", fontWeight: 700, fontSize: 10 }} />
+      )}
+      {ev.meeting_link && (
+        <Tooltip title="Join meeting">
+          <IconButton size="small" component="a" href={ev.meeting_link} target="_blank"
+            sx={{ color: "#15803d", bgcolor: "#f0fdf4",
+              "&:hover": { bgcolor: "#dcfce7" }, width: 28, height: 28 }}>
+            <VideoCall sx={{ fontSize: 15 }} />
+          </IconButton>
+        </Tooltip>
+      )}
+      {isPast && !isLive && (
+        <Typography sx={{ fontSize: 10, color: "#94a3b8", flexShrink: 0 }}>Done</Typography>
+      )}
+    </Box>
+  );
+};
 
-      {/* Cells */}
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: "3px" }}>
-        {cells.map((day, i) => {
-          if (!day) return <Box key={i} />;
-          const hasEvents  = !!dayMap[day];
-          const count      = dayMap[day]?.length || 0;
-          const isToday    = today.getDate() === day && today.getMonth() === calMonth && today.getFullYear() === calYear;
-          const isSelected = selectedDay === day;
+// ── Closing job alert card ────────────────────────────────────────────────────
+const ClosingJobCard = ({ job }) => {
+  const days = daysUntil(job.deadline || job.expiration_time);
+  const urgent = days !== null && days <= 3;
+  const soon   = days !== null && days <= 7;
 
-          return (
-            <Box
-              key={i}
-              onClick={() => hasEvents && onDaySelect(day)}
-              sx={{
-                aspectRatio: "1", display: "flex", flexDirection: "column",
-                alignItems: "center", justifyContent: "center",
-                borderRadius: "8px", cursor: hasEvents ? "pointer" : "default",
-                bgcolor: isSelected ? "#1d4ed8" : isToday ? "#eff6ff" : "transparent",
-                border: isToday && !isSelected ? "1.5px solid #bfdbfe" : "1.5px solid transparent",
-                transition: "all 0.15s",
-                "&:hover": hasEvents ? { bgcolor: isSelected ? "#1d4ed8" : "#f1f5f9" } : {},
-              }}
-            >
-              <Typography sx={{ fontSize: 11, fontWeight: isToday || isSelected ? 700 : 400,
-                color: isSelected ? "#fff" : isToday ? "#1d4ed8" : "#334155" }}>
-                {day}
-              </Typography>
-              {hasEvents && (
-                <Box sx={{
-                  width: count > 1 ? 14 : 5, height: 5, borderRadius: 4, mt: "2px",
-                  bgcolor: isSelected ? "#fff" : "#1d4ed8",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  {count > 1 && (
-                    <Typography sx={{ fontSize: 8, color: isSelected ? "#1d4ed8" : "#fff",
-                      fontWeight: 700, lineHeight: 1 }}>{count}</Typography>
-                  )}
-                </Box>
-              )}
-            </Box>
-          );
-        })}
+  return (
+    <Box sx={{
+      p: 1.5, borderRadius: "10px", display: "flex", alignItems: "center", gap: 1.5,
+      bgcolor: urgent ? "#fef2f2" : soon ? "#fff7ed" : "#f8fafc",
+      border: `1px solid ${urgent ? "#fca5a5" : soon ? "#fed7aa" : "#e2e8f0"}`,
+    }}>
+      <Box sx={{ width: 36, height: 36, borderRadius: "8px", flexShrink: 0,
+        bgcolor: urgent ? "#fef2f2" : soon ? "#fff7ed" : "#eff6ff",
+        display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {urgent
+          ? <Warning sx={{ color: "#dc2626", fontSize: 17 }} />
+          : <Schedule sx={{ color: soon ? "#c2410c" : "#1d4ed8", fontSize: 17 }} />}
       </Box>
-
-      <Box mt={2} pt={1.5} sx={{ borderTop: "1px solid #f1f5f9" }}>
-        <Box display="flex" alignItems="center" gap={1}>
-          <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#1d4ed8" }} />
-          <Typography sx={{ fontSize: 10, color: "#94a3b8" }}>Has interviews</Typography>
-        </Box>
+      <Box flex={1} minWidth={0}>
+        <Typography fontWeight={700} fontSize={12} color="#0f172a" noWrap>{job.title}</Typography>
+        <Typography fontSize={11} color="#64748b" noWrap>{job.client_name}</Typography>
+      </Box>
+      <Box textAlign="right" flexShrink={0}>
+        <Chip
+          label={days === 0 ? "Today" : days < 0 ? "Expired" : `${days}d left`}
+          size="small"
+          sx={{
+            fontWeight: 700, fontSize: 10,
+            bgcolor: urgent ? "#fef2f2" : soon ? "#fff7ed" : "#f1f5f9",
+            color:   urgent ? "#dc2626" : soon ? "#c2410c" : "#475569",
+          }}
+        />
+        <Typography fontSize={10} color="#94a3b8" mt={0.3}>
+          {job.openings} opening{job.openings !== 1 ? "s" : ""}
+        </Typography>
       </Box>
     </Box>
   );
-}
+};
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  MAIN DASHBOARD
-// ═══════════════════════════════════════════════════════════════════════════
-export default function RecruiterDashboard() {
-  const [dash,          setDash]          = useState(null);
-  const [myData,        setMyData]        = useState(null);
-  const [loading,       setLoading]       = useState(true);
-  const [error,         setError]         = useState("");
-  const [allInterviews, setAllInterviews] = useState([]);
-  const [selectedDay,   setSelectedDay]   = useState(null);
-  const now = new Date();
-  const [calYear,  setCalYear]  = useState(now.getFullYear());
-  const [calMonth, setCalMonth] = useState(now.getMonth());
 
-  const load = useCallback(async () => {
+
+//  MAIN COMPONENT
+export default function RbotRecruiterDashboard() {
+  const [data,         setData]         = useState(null);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState("");
+  const [search,       setSearch]       = useState("");
+  const [todayEvs,     setTodayEvs]     = useState([]);
+  const [closingJobs,  setClosingJobs]  = useState([]);
+  const [activeJds,    setActiveJds]    = useState([]);
+  const [period,     setPeriod]     = useState("month");
+  const [dateFrom,   setDateFrom]   = useState("");
+  const [dateTo,     setDateTo]     = useState("");
+  const [showCustom, setShowCustom] = useState(false);
+  const [showOnlyActiveInPeriod, setShowOnlyActiveInPeriod] = useState(false);
+  const today = new Date();
+  const todayStr = today.toDateString();
+
+
+  const load = useCallback(async (p = period, df = dateFrom, dt = dateTo) => {
     setLoading(true); setError("");
     try {
-      const [main, recruiter, upcoming] = await Promise.all([
-        authFetch(`${BASE}/dashboard/`),
-        authFetch(`${BASE}/dashboard/recruiter`).catch(() => null),
-        authFetch(`${BASE}/tracking/calendar?year=${now.getFullYear()}&month=${now.getMonth() + 1}`)
-          .catch(() => ({ data: [] })),
+      let rbotUrl = `${BASE}/rbot-dashboard/recruiter?period=${p}`;
+      if (p === "custom" && df) {
+        rbotUrl += `&date_from=${df}&date_to=${dt || new Date().toISOString().split("T")[0]}`;
+      }
+
+      const [rbotRes, calRes, jdsRes] = await Promise.allSettled([
+        authFetch(rbotUrl),
+        authFetch(`${TRACKING_BASE}/calendar?year=${today.getFullYear()}&month=${today.getMonth() + 1}`),
+        authFetch(`${JOBS_BASE}/jd/?per_page=200&is_active=true`),
       ]);
-      if (main.success)       setDash(main.dashboard);
-      if (recruiter?.success) setMyData(recruiter.dashboard);
-      setAllInterviews(upcoming.data || []);
-      const todayStr = new Date().toDateString();
-      const todayHas = (upcoming.data || []).some((ev) =>
-        new Date(ev.scheduled_at).toDateString() === todayStr
-      );
-      setSelectedDay(todayHas ? new Date().getDate() : null);
+
+      if (rbotRes.status === "fulfilled" && rbotRes.value.success) {
+        setData(rbotRes.value);
+      } else {
+        setError(rbotRes.reason?.message || "Failed to load analytics");
+      }
+
+      if (calRes.status === "fulfilled") {
+        const all = calRes.value.data || [];
+        setTodayEvs(
+          all
+            .filter(ev => new Date(ev.scheduled_at).toDateString() === todayStr)
+            .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))
+        );
+      }
+
+      if (jdsRes.status === "fulfilled") {
+        const jds = jdsRes.value.data || [];
+        setActiveJds(jds);
+        const closing = jds
+          .filter(j => {
+            const deadline = j.deadline || j.expiration_time;
+            if (!deadline) return false;
+            const d = daysUntil(deadline);
+            return d !== null && d <= 10 && d >= -1;
+          })
+          .sort((a, b) => {
+            const da = daysUntil(a.deadline || a.expiration_time) ?? 999;
+            const db = daysUntil(b.deadline || b.expiration_time) ?? 999;
+            return da - db;
+          });
+        setClosingJobs(closing);
+      }
     } catch (e) {
-      setError(e?.message || "Failed to load dashboard data");
+      setError(e?.message || "Failed to load dashboard");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [period, dateFrom, dateTo]);
 
-  const loadCalendar = useCallback(async () => {
+  useEffect(() => { load(); }, []); // eslint-disable-line
+
+  const handlePeriod = (p) => {
+    setPeriod(p);
+    setShowCustom(p === "custom");
+    if (p !== "custom") load(p, "", "");
+  };
+
+  const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? "";
+
+
+
+  if (loading) return (
+    <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh" flexDirection="column" gap={2}>
+      <CircularProgress size={36} sx={{ color: "#1d4ed8" }} />
+      <Typography sx={{ color: "#94a3b8", fontSize: 13 }}>Loading your dashboard…</Typography>
+    </Box>
+  );
+
+  const kpis         = data?.kpis          || {};
+  const statusCounts = data?.status_counts || {};
+
+  const allJdBreakdown = data?.jd_breakdown || [];
+
+  const jdBreakdown = allJdBreakdown
+  .filter(jd =>
+    !search ||
+    jd.jobRole?.toLowerCase().includes(search.toLowerCase()) ||
+    jd.jdID?.toLowerCase().includes(search.toLowerCase()) ||
+    jd.companyName?.toLowerCase().includes(search.toLowerCase())
+  )
+  .filter(jd =>
+    !showOnlyActiveInPeriod || (jd.ranged_total ?? 0) > 0
+  )
+  .sort((a, b) => (b.ranged_total ?? 0) - (a.ranged_total ?? 0) || b.total - a.total);
+
+
+
+  const maxCount     = Math.max(...Object.values(statusCounts), 1);
+  const urgentCount  = closingJobs.filter(j => (daysUntil(j.deadline || j.expiration_time) ?? 99) <= 3).length;
+
+  const positiveStatuses = ["Selected", "HiringManager_Accepted", "Recruiter_Accepted",
+    "ScreeningTest_Passed", "Shortlisted", "Interested"];
+  const negativeStatuses = ["Rejected", "Recruiter_Rejected", "HiringManager_Rejected",
+    "ScreeningTest_Failed"];
+  const holdStatuses     = ["Recruiter_Hold", "OnHold_TestPassed", "HiringManager_Hold"];
+
+  const firstName = (() => {
     try {
-      const res = await authFetch(
-        `${BASE}/tracking/calendar?year=${calYear}&month=${calMonth + 1}`
-      ).catch(() => ({ data: [] }));
-      setAllInterviews(res.data || []);
-      setSelectedDay(null);
-    } catch {}
-  }, [calYear, calMonth]);
-
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { loadCalendar(); }, [calMonth, calYear]);
-
-  const prevMonth = () => {
-    if (calMonth === 0) { setCalYear((y) => y - 1); setCalMonth(11); }
-    else setCalMonth((m) => m - 1);
-  };
-  const nextMonth = () => {
-    if (calMonth === 11) { setCalYear((y) => y + 1); setCalMonth(0); }
-    else setCalMonth((m) => m + 1);
-  };
-  const goToday = () => { setCalYear(now.getFullYear()); setCalMonth(now.getMonth()); setSelectedDay(now.getDate()); };
-
-  const selectedDayInterviews = selectedDay
-    ? allInterviews
-        .filter((ev) => {
-          const d = new Date(ev.scheduled_at);
-          return d.getDate() === selectedDay && d.getMonth() === calMonth && d.getFullYear() === calYear;
-        })
-        .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))
-    : allInterviews
-        .filter((ev) => {
-          const d = new Date(ev.scheduled_at);
-          return d.getMonth() === calMonth && d.getFullYear() === calYear;
-        })
-        .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
-
-  const todayCount = allInterviews.filter((ev) =>
-    new Date(ev.scheduled_at).toDateString() === new Date().toDateString()
-  ).length;
-
-  if (loading)
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh" flexDirection="column" gap={2}>
-        <CircularProgress size={40} sx={{ color: COLORS.blue }} />
-        <Typography sx={{ color: "#94a3b8", fontSize: 13 }}>Loading dashboard…</Typography>
-      </Box>
-    );
-
-  const kpis             = dash?.kpis              || {};
-  const stageCountsRaw   = dash?.stage_counts      || [];
-  const pipelineRaw      = dash?.pipeline          || {};
-  const highPriorityJobs = dash?.high_priority_jobs || [];
-  const recruiterPerf    = dash?.recruiter_perf    || [];
-  const clientRevenue    = dash?.client_revenue    || [];
-  const recentActivity   = dash?.recent_activity   || [];
-  const myCandidates     = myData?.my_candidates   || [];
-
-  const pipelineDisplay = stageCountsRaw.length > 0
-    ? stageCountsRaw
-    : Object.entries(pipelineRaw).map(([stage, count]) => ({ stage, count }));
-  const maxPipelineCount = Math.max(...pipelineDisplay.map((p) => p.count), 1);
-
-  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-
-  const firstName = myData?.recruiter_name?.split(" ")[0] || "";
+      return JSON.parse(localStorage.getItem("user") || "{}").first_name || "";
+    } catch { return ""; }
+  })();
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5, pb: 4 }}>
-
+    <Box display="flex" flexDirection="column" gap={2.5} pb={4}>
       {error && (
-        <Alert severity="warning" onClose={() => setError("")} sx={{ borderRadius: "12px" }}>
-          {error}
-        </Alert>
+        <Alert severity="warning" onClose={() => setError("")}
+          sx={{ borderRadius: "12px" }}>{error}</Alert>
       )}
 
-      {/* ── Hero Banner ── */}
-      <Card
-        elevation={0}
-        sx={{
-          borderRadius: "20px",
-          background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #1d4ed8 100%)",
-          overflow: "hidden", position: "relative",
-        }}
-      >
-        {/* Decorative circles */}
-        <Box sx={{
-          position: "absolute", top: -40, right: -40,
-          width: 200, height: 200, borderRadius: "50%",
-          background: "rgba(255,255,255,0.04)",
-        }} />
-        <Box sx={{
-          position: "absolute", bottom: -60, right: 120,
-          width: 160, height: 160, borderRadius: "50%",
-          background: "rgba(255,255,255,0.03)",
-        }} />
+
+
+
+
+{/* ── Hero ── */}
+<Card elevation={0} sx={{
+        borderRadius: "20px",
+        background: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 55%, #1d4ed8 100%)",
+        overflow: "hidden", position: "relative",
+      }}>
+        <Box sx={{ position: "absolute", top: -50, right: -30, width: 220, height: 220,
+          borderRadius: "50%", background: "rgba(255,255,255,0.03)" }} />
         <CardContent sx={{ p: 3 }}>
-          <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+          <Box display="flex" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2}>
             <Box>
-              <Typography sx={{ color: "rgba(255,255,255,0.6)", fontSize: 12, mb: 0.5, letterSpacing: "0.05em" }}>
-                {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+              <Typography sx={{ color: "rgba(255,255,255,0.55)", fontSize: 12, mb: 0.4, letterSpacing: "0.05em" }}>
+                {today.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
               </Typography>
-              <Typography sx={{ color: "#fff", fontWeight: 800, fontSize: "1.5rem", lineHeight: 1.2 }}>
-                {firstName ? `Good to see you, ${firstName} 👋` : "Welcome back 👋"}
+              <Typography sx={{ color: "#fff", fontWeight: 800, fontSize: "1.4rem", lineHeight: 1.25 }}>
+                {firstName ? `Good to see you, ${firstName} 👋` : "Your Recruiting Dashboard"}
               </Typography>
-              <Box display="flex" alignItems="center" gap={1.5} mt={1.2} flexWrap="wrap">
+              <Box display="flex" gap={1} mt={1.2} flexWrap="wrap">
                 {[
-                  { label: `${kpis.open_jobs ?? 0} Open Positions` },
-                  { label: `${kpis.total_candidates ?? 0} Candidates` },
-                  { label: `${kpis.placements_mtd ?? 0} Placements MTD` },
+                  { label: `${kpis.total_jds ?? 0} active JDs` },
+                  { label: `${kpis.total ?? 0} candidates` },
+                  { label: `${kpis.ranged_total ?? 0} in ${periodLabel}` },
+                  { label: `${kpis.selected ?? 0} selected` },
                 ].map(({ label }) => (
-                  <Chip
-                    key={label}
-                    label={label}
-                    size="small"
+                  <Chip key={label} label={label} size="small"
                     sx={{ bgcolor: "rgba(255,255,255,0.1)", color: "#fff",
-                      fontWeight: 600, fontSize: 11, backdropFilter: "blur(4px)",
-                      border: "1px solid rgba(255,255,255,0.15)" }}
-                  />
+                      fontWeight: 600, fontSize: 11,
+                      border: "1px solid rgba(255,255,255,0.15)" }} />
                 ))}
-                {todayCount > 0 && (
+                {todayEvs.length > 0 && (
                   <Chip
-                    label={`🗓 ${todayCount} interview${todayCount > 1 ? "s" : ""} today`}
+                    label={`🗓 ${todayEvs.length} interview${todayEvs.length > 1 ? "s" : ""} today`}
                     size="small"
-                    sx={{ bgcolor: "#fef3c7", color: "#92400e", fontWeight: 700, fontSize: 11 }}
-                  />
+                    sx={{ bgcolor: "#fef3c7", color: "#92400e", fontWeight: 700, fontSize: 11 }} />
+                )}
+                {urgentCount > 0 && (
+                  <Chip
+                    label={`⚠ ${urgentCount} JD${urgentCount > 1 ? "s" : ""} closing soon`}
+                    size="small"
+                    sx={{ bgcolor: "#fef2f2", color: "#dc2626", fontWeight: 700, fontSize: 11 }} />
                 )}
               </Box>
             </Box>
-            <Box display="flex" gap={1.5}>
-              <Button
-                component={Link} to="/jobs" variant="contained" startIcon={<Add />}
-                sx={{
-                  bgcolor: "#fff", color: COLORS.white, fontWeight: 700, fontSize: 13,
-                  borderRadius: "10px", px: 2.5, textTransform: "none",
-                  boxShadow: "none",
-                  "&:hover": { bgcolor: "#f1f5f9", boxShadow: "none" },
-                }}
-              >
-                Post Job
-              </Button>
-              <Button
-                component={Link} to="/resumes" variant="outlined"
-                sx={{
-                  borderColor: "rgba(255,255,255,0.35)", color: "#fff", fontWeight: 600,
-                  fontSize: 13, borderRadius: "10px", px: 2.5, textTransform: "none",
-                  "&:hover": { borderColor: "#fff", bgcolor: "rgba(255,255,255,0.08)" },
-                }}
-              >
-                Resume Bank
-              </Button>
+
+            {/* NEW: Period selector */}
+            <Box display="flex" flexDirection="column" gap={1} alignItems="flex-end">
+              <Box display="flex" gap={0.5} flexWrap="wrap" justifyContent="flex-end">
+                {PERIODS.map((p) => (
+                  <Button key={p.key} size="small" onClick={() => handlePeriod(p.key)}
+                    sx={{ fontSize: 11, fontWeight: 600, textTransform: "none", px: 1.5, py: 0.5, borderRadius: "8px", minWidth: 0,
+                      color: period === p.key ? "#0f172a" : "rgba(255,255,255,0.7)",
+                      bgcolor: period === p.key ? "#fff" : "rgba(255,255,255,0.08)",
+                      border: "1px solid", borderColor: period === p.key ? "#fff" : "rgba(255,255,255,0.15)",
+                      "&:hover": { bgcolor: period === p.key ? "#f1f5f9" : "rgba(255,255,255,0.15)" } }}>
+                    {p.label}
+                  </Button>
+                ))}
+              </Box>
+
+              {showCustom && (
+                <Box display="flex" gap={1} alignItems="center" flexWrap="wrap" justifyContent="flex-end">
+                  <TextField size="small" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                    sx={{ width: 140, "& .MuiInputBase-root": { bgcolor: "rgba(255,255,255,0.08)", color: "#fff", fontSize: 11, borderRadius: "8px" }, "& .MuiOutlinedInput-notchedOutline": { borderColor: "rgba(255,255,255,0.2)" } }} />
+                  <Typography color="rgba(255,255,255,0.5)" fontSize={11}>to</Typography>
+                  <TextField size="small" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                    sx={{ width: 140, "& .MuiInputBase-root": { bgcolor: "rgba(255,255,255,0.08)", color: "#fff", fontSize: 11, borderRadius: "8px" }, "& .MuiOutlinedInput-notchedOutline": { borderColor: "rgba(255,255,255,0.2)" } }} />
+                  <Button size="small" variant="contained" onClick={() => load("custom", dateFrom, dateTo)}
+                    sx={{ bgcolor: "#fff", color: "#fff", fontWeight: 700, fontSize: 11, textTransform: "none", borderRadius: "8px", "&:hover": { bgcolor: "#f1f5f9" } }}>
+                    Apply
+                  </Button>
+                </Box>
+              )}
             </Box>
           </Box>
         </CardContent>
       </Card>
 
-      {/* ── KPI Cards ── */}
+      {/* ── KPI strip ── */}
       <Grid container spacing={2}>
-        <Grid item xs={6} md={3}>
-          <StatCard title="Active Clients" value={kpis.active_clients ?? 0}
-            icon={<Business />} accent={COLORS.indigo}
-            sub={`${kpis.total_clients ?? 0} total clients`}
-            progress={kpis.total_clients ? (kpis.active_clients / kpis.total_clients) * 100 : 0} />
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <StatCard title="Open Positions" value={kpis.open_jobs ?? 0}
-            icon={<Work />} accent={COLORS.blue}
-            sub={`${kpis.total_jobs ?? 0} total posted`}
-            progress={kpis.total_jobs ? (kpis.open_jobs / kpis.total_jobs) * 100 : 0} />
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <StatCard title="Total Candidates" value={kpis.total_candidates ?? 0}
-            icon={<People />} accent={COLORS.teal}
-            sub="in resume bank" progress={70} />
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <StatCard title="Placements MTD" value={kpis.placements_mtd ?? 0}
-            icon={<CheckCircle />} accent={COLORS.green}
-            sub={`Fill rate ${kpis.fill_rate ?? 0}%`}
-            progress={kpis.fill_rate ?? 0} />
-        </Grid>
+        {[
+          { title: "Total Candidates", value: kpis.total,       icon: <People />,      accent: "#1d4ed8" },
+          { title: "Shortlisted",      value: kpis.shortlisted,  icon: <Star />,        accent: "#0369a1" },
+          { title: "In Progress",      value: kpis.in_progress,  icon: <TrendingUp />,  accent: "#d97706",
+            sub: `${kpis.total_jds ?? 0} JDs` },
+          { title: "Selected",         value: kpis.selected,     icon: <CheckCircle />, accent: "#15803d" },
+          { title: "Rejected",         value: kpis.rejected,     icon: <Cancel />,      accent: "#dc2626" },
+        ].map(c => (
+          <Grid item xs={6} sm={4} md={12 / 5} key={c.title}>
+            <KpiCard {...c} />
+          </Grid>
+        ))}
       </Grid>
 
-      {/* ── Metrics Strip ── */}
-      <Card
-        elevation={0}
-        sx={{ borderRadius: "16px", border: "1px solid #e2e8f0", bgcolor: "#fff" }}
-      >
-        <CardContent sx={{ py: 2, px: 3 }}>
-          <Grid container spacing={2} alignItems="center" divider={<Divider orientation="vertical" flexItem />}>
-            {[
-              { icon: <MonetizationOn />, value: fmt(kpis.revenue_mtd),           label: "Revenue MTD",       accent: COLORS.indigo },
-              { icon: <CheckCircle />,    value: `${kpis.fill_rate ?? 0}%`,       label: "Fill Rate",         accent: COLORS.green  },
-              { icon: <AccessTime />,     value: `${kpis.avg_days_to_fill ?? 0}d`,label: "Avg Days to Fill",  accent: COLORS.amber  },
-              { icon: <WorkOutline />,    value: kpis.placements_total ?? 0,      label: "Total Placements",  accent: COLORS.blue   },
-            ].map(({ icon, value, label, accent }, i) => (
-              <Grid item xs={6} md={3} key={label}>
-                <Box display="flex" alignItems="center" gap={1.5}>
-                  <Box sx={{ width: 38, height: 38, borderRadius: "10px", bgcolor: `${accent}12`,
-                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    {React.cloneElement(icon, { sx: { color: accent, fontSize: 18 } })}
-                  </Box>
-                  <Box>
-                    <Typography sx={{ fontWeight: 800, fontSize: "1.05rem", color: COLORS.navy }}>{value}</Typography>
-                    <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>{label}</Typography>
-                  </Box>
-                </Box>
-              </Grid>
-            ))}
-          </Grid>
-        </CardContent>
-      </Card>
-
-      {/* ── Main Row: Calendar + Pipeline + Candidates ── */}
+      {/* ── Main 3-column row: Today's schedule | Status breakdown | Closing JDs ── */}
       <Grid container spacing={2.5}>
 
-        {/* Calendar */}
+        {/* TODAY'S SCHEDULE */}
         <Grid item xs={12} md={4}>
           <Card elevation={0} sx={{ borderRadius: "16px", border: "1px solid #e2e8f0", height: "100%" }}>
             <CardContent sx={{ p: 2.5 }}>
               <Box display="flex" alignItems="center" gap={1} mb={2}>
-                <Box sx={{ width: 32, height: 32, borderRadius: "8px", bgcolor: "#eff6ff",
+                <Box sx={{ width: 30, height: 30, borderRadius: "8px", bgcolor: "#eff6ff",
                   display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <CalendarMonth sx={{ color: COLORS.blue, fontSize: 17 }} />
+                  <Today sx={{ color: "#1d4ed8", fontSize: 16 }} />
                 </Box>
-                <Typography sx={{ fontWeight: 700, fontSize: 14, color: COLORS.navy }}>
-                  Interview Calendar
-                </Typography>
-                {todayCount > 0 && (
-                  <Chip label={`${todayCount} today`} size="small"
-                    sx={{ ml: "auto", bgcolor: "#eff6ff", color: "#1d4ed8", fontWeight: 700, fontSize: 10 }} />
+                <Typography fontWeight={700} fontSize={13} color="#0f172a">Today's Interviews</Typography>
+                {todayEvs.length > 0 && (
+                  <Chip label={todayEvs.length} size="small"
+                    sx={{ ml: "auto", bgcolor: "#eff6ff", color: "#1d4ed8", fontWeight: 800, fontSize: 11 }} />
                 )}
               </Box>
 
-              <MiniCalendar
-                allInterviews={allInterviews}
-                onDaySelect={(d) => setSelectedDay((prev) => prev === d ? null : d)}
-                selectedDay={selectedDay}
-                calYear={calYear}
-                calMonth={calMonth}
-                onPrev={prevMonth}
-                onNext={nextMonth}
-                onToday={goToday}
-              />
+              {todayEvs.length === 0 ? (
+                <Box display="flex" flexDirection="column" alignItems="center" py={4} gap={1.5}>
+                  <Box sx={{ width: 48, height: 48, borderRadius: "12px", bgcolor: "#f8fafc",
+                    display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Schedule sx={{ color: "#cbd5e1", fontSize: 24 }} />
+                  </Box>
+                  <Typography fontSize={13} color="#94a3b8" textAlign="center">
+                    No interviews scheduled for today
+                  </Typography>
+                  <Typography fontSize={11} color="#cbd5e1" textAlign="center">
+                    Enjoy your focus time ✓
+                  </Typography>
+                </Box>
+              ) : (
+                <Box display="flex" flexDirection="column" gap={1}>
+                  {todayEvs.map((ev, i) => <InterviewSlot key={i} ev={ev} />)}
+                </Box>
+              )}
 
               <Divider sx={{ my: 2 }} />
 
-              {/* Interview list */}
-              <Box>
-                <Typography sx={{ fontSize: 11, fontWeight: 700, color: "#94a3b8",
-                  textTransform: "uppercase", letterSpacing: "0.06em", mb: 1.2 }}>
-                  {selectedDay
-                    ? `${selectedDay} ${MONTHS[calMonth]} · ${selectedDayInterviews.length} scheduled`
-                    : `${MONTHS[calMonth]} · ${selectedDayInterviews.length} scheduled`}
-                </Typography>
-
-                {selectedDayInterviews.length === 0 ? (
-                  <Box textAlign="center" py={2.5}>
-                    <CalendarMonth sx={{ fontSize: 32, color: "#e2e8f0", mb: 0.5 }} />
-                    <Typography sx={{ fontSize: 12, color: "#94a3b8" }}>
-                      {selectedDay ? "No interviews this day" : "No interviews this month"}
-                    </Typography>
+              <Box display="flex" justifyContent="space-between">
+                {[
+                  { label: "Scheduled", val: todayEvs.length,
+                    color: "#1d4ed8" },
+                  { label: "Completed", val: todayEvs.filter(e => new Date(e.scheduled_at) < new Date()).length,
+                    color: "#15803d" },
+                  { label: "Upcoming",  val: todayEvs.filter(e => new Date(e.scheduled_at) > new Date()).length,
+                    color: "#d97706" },
+                ].map(s => (
+                  <Box key={s.label} textAlign="center">
+                    <Typography fontWeight={800} fontSize="1.2rem" color={s.color}>{s.val}</Typography>
+                    <Typography fontSize={10} color="#94a3b8">{s.label}</Typography>
                   </Box>
-                ) : (
-                  <Box
-                    display="flex" flexDirection="column" gap={1}
-                    sx={{ maxHeight: 260, overflowY: "auto",
-                      "&::-webkit-scrollbar": { width: 4 },
-                      "&::-webkit-scrollbar-thumb": { bgcolor: "#e2e8f0", borderRadius: 4 } }}
-                  >
-                    {selectedDayInterviews.map((ev, i) => {
-                      const evDate = new Date(ev.scheduled_at);
-                      const isNow  = Math.abs(evDate - new Date()) < 30 * 60 * 1000;
-                      return (
-                        <Box
-                          key={i}
-                          sx={{
-                            p: 1.5, borderRadius: "10px",
-                            bgcolor: isNow ? "#f0fdf4" : "#f8fafc",
-                            border: `1px solid ${isNow ? "#bbf7d0" : "#f1f5f9"}`,
-                          }}
-                        >
-                          <Box display="flex" alignItems="center" gap={1}>
-                            <Box sx={{ width: 3, height: 38, borderRadius: 4, flexShrink: 0,
-                              bgcolor: STAGE_COLORS[ev.current_stage] || COLORS.blue }} />
-                            <Box flex={1} minWidth={0}>
-                              <Typography sx={{ fontSize: 12, fontWeight: 700, color: COLORS.navy }} noWrap>
-                                {ev.candidate_name}
-                              </Typography>
-                              <Typography sx={{ fontSize: 10, color: "#94a3b8" }} noWrap>
-                                {ev.stage} · {ev.interview_type}
-                              </Typography>
-                              <Typography sx={{ fontSize: 11, color: COLORS.blue, fontWeight: 600 }}>
-                                {evDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                                {" · "}{ev.duration_minutes}min
-                              </Typography>
-                            </Box>
-                            {ev.meeting_link && (
-                              <Tooltip title="Join Meeting">
-                                <IconButton
-                                  size="small" component="a"
-                                  href={ev.meeting_link} target="_blank"
-                                  sx={{ color: "#15803d", bgcolor: "#f0fdf4",
-                                    "&:hover": { bgcolor: "#dcfce7" } }}
-                                >
-                                  <VideoCall sx={{ fontSize: 16 }} />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                          </Box>
-                        </Box>
-                      );
-                    })}
-                  </Box>
-                )}
-
-                {selectedDay && (
-                  <Button
-                    size="small" onClick={() => setSelectedDay(null)}
-                    sx={{ mt: 1, fontSize: 10, textTransform: "none", color: "#64748b" }}
-                  >
-                    Show full month
-                  </Button>
-                )}
+                ))}
               </Box>
             </CardContent>
           </Card>
         </Grid>
 
-        {/* Right column */}
-        <Grid item xs={12} md={8}>
-          <Box display="flex" flexDirection="column" gap={2.5} height="100%">
+        {/* STATUS BREAKDOWN */}
+        <Grid item xs={12} md={4}>
+          <Card elevation={0} sx={{ borderRadius: "16px", border: "1px solid #e2e8f0", height: "100%" }}>
+            <CardContent sx={{ p: 2.5 }}>
+              <Box display="flex" alignItems="center" gap={1} mb={2}>
+                <Box sx={{ width: 30, height: 30, borderRadius: "8px", bgcolor: "#f0fdf4",
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Assignment sx={{ color: "#15803d", fontSize: 16 }} />
+                </Box>
+                <Typography fontWeight={700} fontSize={13} color="#0f172a">Candidate Pipeline</Typography>
+              </Box>
 
-            {/* Pipeline */}
-            <Card elevation={0} sx={{ borderRadius: "16px", border: "1px solid #e2e8f0" }}>
-              <CardContent sx={{ p: 2.5 }}>
-                <Box display="flex" alignItems="center" gap={1} mb={2}>
-                  <Box sx={{ width: 32, height: 32, borderRadius: "8px", bgcolor: "#eff6ff",
-                    display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <BarChart sx={{ color: COLORS.blue, fontSize: 17 }} />
+              <Box display="flex" flexDirection="column" gap={1}>
+                {Object.entries(statusCounts)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([status, count]) => {
+                    const meta = getStatusMeta(status);
+                    return (
+                      <Box key={status} display="flex" alignItems="center" gap={1.5}>
+                        <FiberManualRecord sx={{ fontSize: 8, color: meta.color, flexShrink: 0 }} />
+                        <Typography fontSize={11} color="#475569" sx={{ width: 130, flexShrink: 0 }} noWrap>
+                          {meta.label}
+                        </Typography>
+                        <Box flex={1}>
+                          <LinearProgress variant="determinate"
+                            value={(count / maxCount) * 100}
+                            sx={{ height: 6, borderRadius: 4,
+                              bgcolor: `${meta.color}18`,
+                              "& .MuiLinearProgress-bar": { bgcolor: meta.color, borderRadius: 4 } }} />
+                        </Box>
+                        <Typography fontWeight={700} fontSize={12} color="#0f172a"
+                          sx={{ width: 22, textAlign: "right", flexShrink: 0 }}>
+                          {count}
+                        </Typography>
+                      </Box>
+                    );
+                  })}
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+
+              <Box display="flex" gap={1}>
+                {[
+                  {
+                    label: "Positive", color: "#15803d", bg: "#f0fdf4",
+                    val: Object.entries(statusCounts)
+                      .filter(([k]) => positiveStatuses.includes(k))
+                      .reduce((s, [, v]) => s + v, 0),
+                  },
+                  {
+                    label: "Rejected", color: "#dc2626", bg: "#fef2f2",
+                    val: Object.entries(statusCounts)
+                      .filter(([k]) => negativeStatuses.includes(k))
+                      .reduce((s, [, v]) => s + v, 0),
+                  },
+                  {
+                    label: "On Hold", color: "#c2410c", bg: "#fff7ed",
+                    val: Object.entries(statusCounts)
+                      .filter(([k]) => holdStatuses.includes(k))
+                      .reduce((s, [, v]) => s + v, 0),
+                  },
+                ].map(s => (
+                  <Box key={s.label} flex={1} textAlign="center" sx={{
+                    p: 1, borderRadius: "8px", bgcolor: s.bg, border: `1px solid ${s.color}22`,
+                  }}>
+                    <Typography fontWeight={800} fontSize="1.1rem" color={s.color}>{s.val}</Typography>
+                    <Typography fontSize={10} color={s.color} fontWeight={600}>{s.label}</Typography>
                   </Box>
-                  <Typography sx={{ fontWeight: 700, fontSize: 14, color: COLORS.navy }}>
-                    Active Pipeline
-                  </Typography>
+                ))}
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* CLOSING JDs ALERT */}
+        <Grid item xs={12} md={4}>
+          <Card elevation={0} sx={{ borderRadius: "16px", border: "1px solid #e2e8f0", height: "100%" }}>
+            <CardContent sx={{ p: 2.5 }}>
+              <Box display="flex" alignItems="center" gap={1} mb={2}>
+                <Box sx={{ width: 30, height: 30, borderRadius: "8px",
+                  bgcolor: urgentCount > 0 ? "#fef2f2" : "#fff7ed",
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {urgentCount > 0
+                    ? <NotificationsActive sx={{ color: "#dc2626", fontSize: 16 }} />
+                    : <AccessTime sx={{ color: "#c2410c", fontSize: 16 }} />}
+                </Box>
+                <Typography fontWeight={700} fontSize={13} color="#0f172a">Closing Soon</Typography>
+                {closingJobs.length > 0 && (
                   <Chip
-                    label={`${pipelineDisplay.reduce((s, p) => s + p.count, 0)} total`}
+                    label={`${closingJobs.length} JDs`}
                     size="small"
-                    sx={{ ml: "auto", bgcolor: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: 11 }}
-                  />
+                    sx={{ ml: "auto", fontWeight: 700, fontSize: 10,
+                      bgcolor: urgentCount > 0 ? "#fef2f2" : "#fff7ed",
+                      color:   urgentCount > 0 ? "#dc2626" : "#c2410c" }} />
+                )}
+              </Box>
+
+              {closingJobs.length === 0 ? (
+                <Box display="flex" flexDirection="column" alignItems="center" py={4} gap={1.5}>
+                  <Box sx={{ width: 48, height: 48, borderRadius: "12px", bgcolor: "#f0fdf4",
+                    display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <CheckCircle sx={{ color: "#86efac", fontSize: 24 }} />
+                  </Box>
+                  <Typography fontSize={13} color="#94a3b8" textAlign="center">
+                    No JDs closing in the next 10 days
+                  </Typography>
                 </Box>
-
-                {pipelineDisplay.length === 0 ? (
-                  <Box display="flex" alignItems="center" justifyContent="center" py={3} gap={1}>
-                    <PersonOff sx={{ color: "#cbd5e1" }} />
-                    <Typography sx={{ fontSize: 13, color: "#94a3b8" }}>No active candidates</Typography>
-                  </Box>
-                ) : (
-                  <Grid container spacing={1.5}>
-                    {pipelineDisplay.slice(0, 8).map(({ stage, count }) => (
-                      <Grid item xs={6} key={stage}>
-                        <Box>
-                          <Box display="flex" justifyContent="space-between" alignItems="center" mb={0.4}>
-                            <Typography sx={{ fontSize: 11, fontWeight: 600, color: "#475569",
-                              maxWidth: "75%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {stage}
-                            </Typography>
-                            <Typography sx={{ fontSize: 11, fontWeight: 800,
-                              color: STAGE_COLORS[stage] || "#475569" }}>
-                              {count}
-                            </Typography>
-                          </Box>
-                          <LinearProgress
-                            variant="determinate"
-                            value={(count / maxPipelineCount) * 100}
-                            sx={{
-                              height: 6, borderRadius: 8,
-                              bgcolor: `${STAGE_COLORS[stage] || "#64748b"}15`,
-                              "& .MuiLinearProgress-bar": {
-                                bgcolor: STAGE_COLORS[stage] || "#64748b", borderRadius: 8,
-                              },
-                            }}
-                          />
-                        </Box>
-                      </Grid>
-                    ))}
-                  </Grid>
-                )}
-
-                {kpis.fill_rate !== undefined && (
-                  <Box sx={{ mt: 2, p: 1.5, bgcolor: "#f0fdf4", borderRadius: "10px",
-                    border: "1px solid #bbf7d0", display: "flex",
-                    alignItems: "center", justifyContent: "space-between" }}>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Star sx={{ color: COLORS.amber, fontSize: 16 }} />
-                      <Typography sx={{ fontWeight: 700, fontSize: 12, color: "#166534" }}>
-                        Overall Fill Rate
-                      </Typography>
-                    </Box>
-                    <Typography sx={{ fontWeight: 800, fontSize: "1.3rem", color: COLORS.green }}>
-                      {kpis.fill_rate}%
-                    </Typography>
-                  </Box>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Recent Candidates */}
-            <Card elevation={0} sx={{ borderRadius: "16px", border: "1px solid #e2e8f0", flex: 1 }}>
-              <CardContent sx={{ p: 2.5 }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <Box sx={{ width: 32, height: 32, borderRadius: "8px", bgcolor: "#f0fdf4",
-                      display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <People sx={{ color: COLORS.green, fontSize: 17 }} />
-                    </Box>
-                    <Typography sx={{ fontWeight: 700, fontSize: 14, color: COLORS.navy }}>
-                      My Recent Candidates
-                    </Typography>
-                  </Box>
-                  <Button
-                    component={Link} to="/resumes" size="small" endIcon={<ArrowForward sx={{ fontSize: 14 }} />}
-                    sx={{ fontSize: 11, textTransform: "none", color: COLORS.blue,
-                      "&:hover": { bgcolor: "#eff6ff" }, borderRadius: "8px" }}
-                  >
-                    View All
-                  </Button>
+              ) : (
+                <Box display="flex" flexDirection="column" gap={1}
+                  sx={{ maxHeight: 320, overflowY: "auto",
+                    "&::-webkit-scrollbar": { width: 3 },
+                    "&::-webkit-scrollbar-thumb": { bgcolor: "#e2e8f0", borderRadius: 4 } }}>
+                  {closingJobs.map((job, i) => <ClosingJobCard key={i} job={job} />)}
                 </Box>
+              )}
 
-                {myCandidates.length === 0 ? (
-                  <Box display="flex" alignItems="center" justifyContent="center" py={3} gap={1}>
-                    <People sx={{ color: "#cbd5e1" }} />
-                    <Typography sx={{ fontSize: 13, color: "#94a3b8" }}>No candidates linked yet</Typography>
+              <Divider sx={{ my: 2 }} />
+
+              <Box display="flex" justifyContent="space-between">
+                {[
+                  { label: "Active JDs",  val: activeJds.length, color: "#1d4ed8" },
+                  { label: "Closing ≤3d", val: urgentCount,       color: "#dc2626" },
+                  { label: "Closing ≤7d", val: closingJobs.filter(j =>
+                      (daysUntil(j.deadline || j.expiration_time) ?? 99) <= 7).length, color: "#c2410c" },
+                ].map(s => (
+                  <Box key={s.label} textAlign="center">
+                    <Typography fontWeight={800} fontSize="1.2rem" color={s.color}>{s.val}</Typography>
+                    <Typography fontSize={10} color="#94a3b8">{s.label}</Typography>
                   </Box>
-                ) : (
-                  <Box>
-                    {myCandidates.slice(0, 5).map((c, i) => (
-                      <React.Fragment key={c._id || i}>
-                        <Box display="flex" alignItems="center" gap={1.5} py={1.2}>
-                          <Avatar
-                            sx={{ bgcolor: COLORS.indigo, fontWeight: 700, fontSize: 12, width: 34, height: 34 }}
-                          >
-                            {nameInitials(c.name)}
-                          </Avatar>
-                          <Box flex={1} minWidth={0}>
-                            <Typography sx={{ fontWeight: 600, fontSize: 13, color: COLORS.navy }} noWrap>
-                              {c.name}
-                            </Typography>
-                            <Typography sx={{ fontSize: 11, color: "#94a3b8" }} noWrap>
-                              {c.linked_job_title || "No job linked"}
-                            </Typography>
-                          </Box>
-                          <Chip
-                            label={c.status || "New"}
-                            size="small"
-                            sx={{
-                              fontSize: 10, fontWeight: 700, flexShrink: 0,
-                              bgcolor: `${STAGE_COLORS[c.status] || "#64748b"}12`,
-                              color: STAGE_COLORS[c.status] || "#475569",
-                            }}
-                          />
-                        </Box>
-                        {i < Math.min(myCandidates.length, 5) - 1 && (
-                          <Divider sx={{ opacity: 0.5 }} />
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </Box>
-                )}
-              </CardContent>
-            </Card>
-          </Box>
+                ))}
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
 
-      {/* ── High Priority Jobs ── */}
-      {highPriorityJobs.length > 0 && (
-        <Card elevation={0} sx={{ borderRadius: "16px", border: "1px solid #e2e8f0" }}>
-          <CardContent sx={{ p: 2.5 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Box display="flex" alignItems="center" gap={1}>
-                <Box sx={{ width: 32, height: 32, borderRadius: "8px", bgcolor: "#fef9c3",
-                  display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <Star sx={{ color: COLORS.amber, fontSize: 17 }} />
-                </Box>
-                <Typography sx={{ fontWeight: 700, fontSize: 14, color: COLORS.navy }}>
-                  High Priority Jobs
-                </Typography>
-              </Box>
-              <Button
-                component={Link} to="/jobs" size="small" endIcon={<ArrowForward sx={{ fontSize: 14 }} />}
-                sx={{ fontSize: 11, textTransform: "none", color: COLORS.blue,
-                  "&:hover": { bgcolor: "#eff6ff" }, borderRadius: "8px" }}
-              >
-                View All
-              </Button>
+
+
+      {/* ── JD-wise candidate accordion (existing) ── */}
+      <Box>
+<Box display="flex" alignItems="center" justifyContent="space-between" mb={1.5} flexWrap="wrap" gap={1.5}>
+          <Box>
+            <Typography fontWeight={800} fontSize={16} color="#0f172a">JD-wise Candidate Details</Typography>
+            <Typography fontSize={12} color="#94a3b8">
+              {jdBreakdown.length} JD{jdBreakdown.length !== 1 ? "s" : ""}
+              {showOnlyActiveInPeriod ? ` with new candidates in ${periodLabel}` : ` · ${kpis.total ?? 0} total candidates`}
+            </Typography>
+          </Box>
+          <Box display="flex" gap={1} alignItems="center" flexWrap="wrap">
+            <Chip
+              label={showOnlyActiveInPeriod ? `Showing: Active in ${periodLabel}` : "Showing: All JDs"}
+              onClick={() => setShowOnlyActiveInPeriod(o => !o)}
+              size="small"
+              clickable
+              sx={{
+                fontWeight: 700, fontSize: 11, cursor: "pointer",
+                bgcolor: showOnlyActiveInPeriod ? "#eff6ff" : "#f1f5f9",
+                color: showOnlyActiveInPeriod ? "#2563eb" : "#475569",
+                border: `1px solid ${showOnlyActiveInPeriod ? "#bfdbfe" : "#e2e8f0"}`,
+              }}
+            />
+            <TextField size="small" placeholder="Search by role, JD ID or company…"
+              value={search} onChange={e => setSearch(e.target.value)}
+              sx={{ width: 260 }}
+              InputProps={{ startAdornment:
+                <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> }} />
+          </Box>
+        </Box>
+
+
+        {jdBreakdown.length === 0 ? (
+          <Card elevation={0} sx={{ borderRadius: "14px", border: "1px solid #e2e8f0" }}>
+            <Box display="flex" flexDirection="column" alignItems="center" py={8} gap={2}>
+              <PersonSearch sx={{ fontSize: 48, color: "#e2e8f0" }} />
+              <Typography color="text.secondary">
+                {search ? "No JDs match your search" : "No candidates assigned yet"}
+              </Typography>
             </Box>
-            <Paper variant="outlined" sx={{ borderRadius: "12px", overflow: "hidden", border: "1px solid #f1f5f9" }}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                    {["Job ID", "Position", "Client", "Openings", "Priority", "Status"].map((h) => (
-                      <TableCell key={h} sx={{ fontWeight: 700, fontSize: 11, color: "#94a3b8",
-                        textTransform: "uppercase", letterSpacing: "0.05em", py: 1.2 }}>
-                        {h}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {highPriorityJobs.map((job) => (
-                    <TableRow
-                      key={job._id}
-                      sx={{ "&:hover": { bgcolor: "#f8fafc" }, transition: "background 0.15s" }}
-                    >
-                      <TableCell sx={{ fontWeight: 700, color: COLORS.blue, fontSize: 12 }}>
-                        {job.job_id}
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 600, fontSize: 13, color: COLORS.navy }}>
-                        {job.title}
-                      </TableCell>
-                      <TableCell sx={{ fontSize: 12, color: "#475569" }}>
-                        <Box display="flex" alignItems="center" gap={0.5}>
-                          <Business sx={{ fontSize: 12, color: "#94a3b8" }} />
-                          {job.client_name}
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ fontSize: 12, color: "#475569" }}>{job.openings}</TableCell>
-                      <TableCell>
-                        <Chip label={job.priority} color={PRIORITY_COLOR[job.priority] || "default"}
-                          size="small" sx={{ fontWeight: 700, fontSize: 11 }} />
-                      </TableCell>
-                      <TableCell>
-                        <Chip label={job.status || "Open"} size="small"
-                          sx={{ fontWeight: 700, fontSize: 11, bgcolor: "#f0fdf4", color: "#15803d" }} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Paper>
-          </CardContent>
-        </Card>
-      )}
+          </Card>
+        ) : jdBreakdown.map((jd) => {
+          const topStatuses = Object.entries(jd.status_counts || {})
+            .sort((a, b) => b[1] - a[1]).slice(0, 3);
 
-      {/* ── Recruiter Perf + Recent Activity ── */}
-      <Grid container spacing={2.5}>
-        <Grid item xs={12} md={7}>
-          <Card elevation={0} sx={{ borderRadius: "16px", border: "1px solid #e2e8f0" }}>
-            <CardContent sx={{ p: 2.5 }}>
-              <Box display="flex" alignItems="center" gap={1} mb={2}>
-                <Box sx={{ width: 32, height: 32, borderRadius: "8px", bgcolor: "#eff6ff",
-                  display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <TrendingUp sx={{ color: COLORS.blue, fontSize: 17 }} />
-                </Box>
-                <Typography sx={{ fontWeight: 700, fontSize: 14, color: COLORS.navy }}>
-                  Recruiter Performance
-                </Typography>
-              </Box>
+          return (
+            <Accordion key={jd.jdID} elevation={0}
+              sx={{ mb: 1.5, borderRadius: "14px !important",
+                border: "1px solid #e2e8f0", "&:before": { display: "none" } }}>
+              <AccordionSummary expandIcon={<ExpandMore />}
+                sx={{ px: 2.5, py: 1,
+                  borderRadius: "14px",
+                  "&.Mui-expanded": { borderRadius: "14px 14px 0 0" } }}>
+                <Box display="flex" alignItems="center" gap={2} flex={1} flexWrap="wrap" pr={1}>
+                  <Box sx={{ width: 38, height: 38, borderRadius: "10px", bgcolor: "#eff6ff",
+                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Work sx={{ color: "#1d4ed8", fontSize: 18 }} />
+                  </Box>
 
-              {recruiterPerf.length === 0 ? (
-                <Box display="flex" alignItems="center" justifyContent="center" py={4} gap={1}>
-                  <People sx={{ color: "#cbd5e1" }} />
-                  <Typography sx={{ fontSize: 13, color: "#94a3b8" }}>No placement data yet</Typography>
+                  <Box flex={1} minWidth={120}>
+                    <Typography fontWeight={700} fontSize={13} color="#0f172a">{jd.jobRole || "—"}</Typography>
+                    <Box display="flex" alignItems="center" gap={0.5}>
+                      <Business sx={{ fontSize: 11, color: "#94a3b8" }} />
+                      <Typography fontSize={11} color="#64748b">{jd.companyName}</Typography>
+                      <Typography fontSize={11} color="#94a3b8">·</Typography>
+                      <Typography fontSize={11} color="#0369a1" fontWeight={700}>{jd.jdID}</Typography>
+                    </Box>
+                  </Box>
+                  <Box display="flex" gap={0.8} flexWrap="wrap" alignItems="center">
+                    <Chip label={`${jd.total} candidates`} size="small"
+                      sx={{ fontWeight: 700, fontSize: 10, bgcolor: "#f1f5f9", color: "#475569" }} />
+                    {(jd.ranged_total ?? 0) > 0 && (
+                      <Chip label={`+${jd.ranged_total} in ${periodLabel}`} size="small"
+                        sx={{ fontWeight: 700, fontSize: 10, bgcolor: "#eff6ff", color: "#2563eb" }} />
+                    )}
+                    {topStatuses.map(([s, c]) => {
+                      const meta = getStatusMeta(s);
+                      return (
+                        <Chip key={s} label={`${meta.label} · ${c}`} size="small"
+                          sx={{ fontWeight: 600, fontSize: 10,
+                            bgcolor: meta.bg, color: meta.color }} />
+                      );
+                    })}
+                  </Box>
                 </Box>
-              ) : (
-                <Paper variant="outlined" sx={{ borderRadius: "10px", overflow: "hidden", border: "1px solid #f1f5f9" }}>
-                  <Table size="small">
+              </AccordionSummary>
+
+              <AccordionDetails sx={{ p: 0 }}>
+                <Box sx={{ px: 2.5, py: 1.5, bgcolor: "#f8fafc",
+                  borderTop: "1px solid #f1f5f9", display: "flex", gap: 2, flexWrap: "wrap" }}>
+                  {Object.entries(jd.status_counts || {}).map(([s, c]) => {
+                    const meta = getStatusMeta(s);
+                    return (
+                      <Box key={s} display="flex" alignItems="center" gap={0.6}>
+                        <FiberManualRecord sx={{ fontSize: 7, color: meta.color }} />
+                        <Typography fontSize={11} color="#475569">
+                          {meta.label}: <strong>{c}</strong>
+                        </Typography>
+                      </Box>
+                    );
+                  })}
+                </Box>
+
+                <Paper variant="outlined"
+                  sx={{ borderRadius: 0, border: "none", borderTop: "1px solid #f1f5f9",
+                    overflow: "auto" }}>
+                  <Table size="small" sx={{ minWidth: 700 }}>
                     <TableHead>
                       <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                        {["Recruiter", "Jobs", "Interviews", "Placements", "Revenue", "Rate"].map((h) => (
-                          <TableCell key={h} sx={{ fontWeight: 700, fontSize: 11, color: "#94a3b8",
-                            textTransform: "uppercase", letterSpacing: "0.05em", py: 1.2 }}>
-                            {h}
-                          </TableCell>
+                        {["Candidate", "Status", "Match", "Test Score",
+                          "Recruiter Feedback", "HM Feedback","Interview Feedback"].map(h => (
+                          <TableCell key={h} sx={{ fontWeight: 700, fontSize: 10,
+                            color: "#94a3b8", textTransform: "uppercase",
+                            letterSpacing: "0.05em", py: 1.2, whiteSpace: "nowrap" }}>{h}</TableCell>
                         ))}
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {recruiterPerf.slice(0, 6).map((r, i) => {
-                        const avatarColors = [COLORS.indigo, COLORS.blue, COLORS.green, COLORS.amber, "#7e22ce", COLORS.teal];
+                      {(jd.candidates || []).map((c) => {
+                        const meta = getStatusMeta(c.overallStatus);
                         return (
-                          <TableRow key={i} sx={{ "&:hover": { bgcolor: "#f8fafc" }, transition: "background 0.15s" }}>
+                          <TableRow key={c._id} hover sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
                             <TableCell>
                               <Box display="flex" alignItems="center" gap={1.2}>
-                                <Avatar sx={{ width: 28, height: 28, fontSize: 10, fontWeight: 700,
-                                  bgcolor: avatarColors[i % avatarColors.length] }}>
-                                  {nameInitials(r.name)}
+                                <Avatar sx={{ width: 28, height: 28, fontSize: 10,
+                                  fontWeight: 700, bgcolor: "#1d4ed8", flexShrink: 0 }}>
+                                  {nameInitials(c.candidatename)}
                                 </Avatar>
-                                <Typography sx={{ fontSize: 12, fontWeight: 600, color: COLORS.navy }}>{r.name}</Typography>
+                                <Box>
+                                  <Typography fontWeight={600} fontSize={12} color="#0f172a">
+                                    {c.candidatename}
+                                  </Typography>
+                                  <Typography fontSize={10} color="#94a3b8">{c.candidateEmail}</Typography>
+                                </Box>
                               </Box>
                             </TableCell>
-                            <TableCell sx={{ fontSize: 12, color: "#475569" }}>{r.jobs_posted ?? 0}</TableCell>
-                            <TableCell sx={{ fontSize: 12, color: "#475569" }}>{r.interviews ?? 0}</TableCell>
                             <TableCell>
-                              <Chip label={r.placements} size="small" color="success"
-                                sx={{ fontWeight: 700, fontSize: 10 }} />
-                            </TableCell>
-                            <TableCell sx={{ fontSize: 12, fontWeight: 600, color: COLORS.navy }}>
-                              {fmt(r.revenue)}
+                              <Chip label={meta.label} size="small"
+                                sx={{ fontWeight: 700, fontSize: 10,
+                                  bgcolor: meta.bg, color: meta.color,
+                                  height: 20, borderRadius: "6px" }} />
                             </TableCell>
                             <TableCell>
                               <Box display="flex" alignItems="center" gap={0.8}>
-                                <LinearProgress
-                                  variant="determinate"
-                                  value={Math.min(r.conversion_rate || 0, 100)}
-                                  sx={{
-                                    width: 50, height: 5, borderRadius: 4,
-                                    "& .MuiLinearProgress-bar": {
-                                      bgcolor: (r.conversion_rate || 0) >= 30 ? COLORS.green : COLORS.blue,
-                                      borderRadius: 4,
-                                    },
-                                  }}
-                                />
-                                <Typography sx={{ fontSize: 10, color: "#94a3b8" }}>
-                                  {r.conversion_rate ?? 0}%
+                                <LinearProgress variant="determinate"
+                                  value={Math.min(c.match_score || 0, 100)}
+                                  sx={{ width: 52, height: 5, borderRadius: 4,
+                                    bgcolor: "#e0f2fe",
+                                    "& .MuiLinearProgress-bar": { bgcolor: "#0369a1", borderRadius: 4 } }} />
+                                <Typography fontSize={11} fontWeight={700} color="#0369a1">
+                                  {(c.match_score || 0).toFixed(0)}%
                                 </Typography>
                               </Box>
                             </TableCell>
+                            <TableCell>
+                              <Typography fontSize={12} fontWeight={700}
+                                color={c.ScreeningTestScore > 0 ? "#15803d" : "#94a3b8"}>
+                                {c.ScreeningTestScore > 0 ? `${c.ScreeningTestScore}%` : "—"}
+                              </Typography>
+                            </TableCell>
+                            <TableCell sx={{ maxWidth: 180 }}>
+                              <Tooltip title={c.recruiterFeedback || ""} arrow>
+                                <Typography fontSize={11} color="#475569"
+                                  sx={{ overflow: "hidden", textOverflow: "ellipsis",
+                                    display: "-webkit-box", WebkitLineClamp: 2,
+                                    WebkitBoxOrient: "vertical",
+                                    cursor: c.recruiterFeedback ? "help" : "default" }}>
+                                  {c.recruiterFeedback || <span style={{ color: "#cbd5e1" }}>No feedback yet</span>}
+                                </Typography>
+                              </Tooltip>
+                            </TableCell>
+                            <TableCell sx={{ maxWidth: 180 }}>
+                              <Tooltip title={c.hiringManagerFeedback || ""} arrow>
+                                <Typography fontSize={11} color="#475569"
+                                  sx={{ overflow: "hidden", textOverflow: "ellipsis",
+                                    display: "-webkit-box", WebkitLineClamp: 2,
+                                    WebkitBoxOrient: "vertical",
+                                    cursor: c.hiringManagerFeedback ? "help" : "default" }}>
+                                  {c.hiringManagerFeedback || (
+                                    <span style={{ color: "#cbd5e1" }}>Awaiting HM review</span>
+                                  )}
+                                </Typography>
+                              </Tooltip>
+                            </TableCell>
+
+
+                            <TableCell sx={{ maxWidth: 220 }}>
+                              {(c.interviewFeedback || []).length === 0 ? (
+                                <Typography fontSize={11} color="#cbd5e1">No interview feedback</Typography>
+                              ) : (
+                                <Box display="flex" flexDirection="column" gap={0.6}>
+                                  {c.interviewFeedback.map((fb, idx) => (
+                                    <Box key={idx} sx={{
+                                      p: 1, borderRadius: "8px", bgcolor: "#f8fafc",
+                                      border: "1px solid #f1f5f9",
+                                    }}>
+                                      {fb.reviewRating && (
+                                        <Chip
+                                          label={fb.reviewRating.replace(/_/g, " ")}
+                                          size="small"
+                                          sx={{
+                                            mb: 0.6, fontWeight: 700, fontSize: 9, height: 18,
+                                            bgcolor: getStatusMeta(fb.reviewRating).bg,
+                                            color: getStatusMeta(fb.reviewRating).color,
+                                          }}
+                                        />
+                                      )}
+                                      {fb.feedbackText && (
+                                        <Typography fontSize={11} color="#374151" mb={0.6}
+                                          sx={{ whiteSpace: "pre-wrap" }}>
+                                          {fb.feedbackText}
+                                        </Typography>
+                                      )}
+                                      <Box component="ul" sx={{ m: 0, pl: 2, display: "flex", flexDirection: "column", gap: 0.2 }}>
+                                        {fb.technicalSkills != null && (
+                                          <Typography component="li" fontSize={10} color="#64748b">
+                                            Technical: <strong style={{ color: "#0f172a" }}>{fb.technicalSkills}/10</strong>
+                                          </Typography>
+                                        )}
+                                        {fb.programmingRating != null && (
+                                          <Typography component="li" fontSize={10} color="#64748b">
+                                            Programming: <strong style={{ color: "#0f172a" }}>{fb.programmingRating}/10</strong>
+                                          </Typography>
+                                        )}
+                                        {fb.problemSolvingSkills != null && (
+                                          <Typography component="li" fontSize={10} color="#64748b">
+                                            Problem Solving: <strong style={{ color: "#0f172a" }}>{fb.problemSolvingSkills}/10</strong>
+                                          </Typography>
+                                        )}
+                                        {fb.communicationSkills != null && (
+                                          <Typography component="li" fontSize={10} color="#64748b">
+                                            Communication: <strong style={{ color: "#0f172a" }}>{fb.communicationSkills}/10</strong>
+                                          </Typography>
+                                        )}
+                                      </Box>
+                                    </Box>
+                                  ))}
+                                </Box>
+                              )}
+                            </TableCell>
+
                           </TableRow>
                         );
                       })}
                     </TableBody>
                   </Table>
                 </Paper>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Recent Activity */}
-        <Grid item xs={12} md={5}>
-          <Card elevation={0} sx={{ borderRadius: "16px", border: "1px solid #e2e8f0", height: "100%" }}>
-            <CardContent sx={{ p: 2.5 }}>
-              <Box display="flex" alignItems="center" gap={1} mb={2}>
-                <Box sx={{ width: 32, height: 32, borderRadius: "8px", bgcolor: "#fff7ed",
-                  display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <AccessTime sx={{ color: COLORS.amber, fontSize: 17 }} />
-                </Box>
-                <Typography sx={{ fontWeight: 700, fontSize: 14, color: COLORS.navy }}>
-                  Recent Activity
-                </Typography>
-              </Box>
-
-              {recentActivity.length === 0 ? (
-                <Box display="flex" alignItems="center" justifyContent="center" py={4} gap={1}>
-                  <AccessTime sx={{ color: "#cbd5e1" }} />
-                  <Typography sx={{ fontSize: 13, color: "#94a3b8" }}>No recent activity</Typography>
-                </Box>
-              ) : (
-                <Box display="flex" flexDirection="column" gap={1.5}>
-                  {recentActivity.slice(0, 7).map((a, i) => {
-                    const s = ACTIVITY_ICON[a.type] || ACTIVITY_ICON.candidate;
-                    return (
-                      <Box key={i} display="flex" gap={1.5} alignItems="flex-start">
-                        <Box
-                          sx={{
-                            width: 32, height: 32, borderRadius: "8px",
-                            bgcolor: s.bg, border: `1px solid ${s.border}`,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            flexShrink: 0, fontSize: 14,
-                          }}
-                        >
-                          {s.emoji}
-                        </Box>
-                        <Box flex={1} minWidth={0}>
-                          <Typography sx={{ fontSize: 12, color: "#334155", lineHeight: 1.5 }}>
-                            {a.message}
-                          </Typography>
-                          <Typography sx={{ fontSize: 10, color: "#94a3b8", mt: 0.2 }}>
-                            {a.time ? timeAgo(a.time) : ""}
-                          </Typography>
-                        </Box>
-                      </Box>
-                    );
-                  })}
-                </Box>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* ── Client Revenue ── */}
-      {clientRevenue.length > 0 && (
-        <Card elevation={0} sx={{ borderRadius: "16px", border: "1px solid #e2e8f0" }}>
-          <CardContent sx={{ p: 2.5 }}>
-            <Box display="flex" alignItems="center" gap={1} mb={2}>
-              <Box sx={{ width: 32, height: 32, borderRadius: "8px", bgcolor: "#faf5ff",
-                display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <MonetizationOn sx={{ color: COLORS.indigo, fontSize: 17 }} />
-              </Box>
-              <Typography sx={{ fontWeight: 700, fontSize: 14, color: COLORS.navy }}>
-                Client Revenue Overview
-              </Typography>
-            </Box>
-            <Grid container spacing={2}>
-              {clientRevenue.map((c, i) => {
-                const maxRev = Math.max(...clientRevenue.map((x) => x.revenue), 1);
-                const accents = [COLORS.indigo, COLORS.blue, COLORS.green, COLORS.amber, "#7e22ce", COLORS.teal];
-                const accent  = accents[i % accents.length];
-                return (
-                  <Grid item xs={12} sm={6} md={4} key={i}>
-                    <Box
-                      sx={{
-                        p: 2, borderRadius: "12px",
-                        border: "1px solid #f1f5f9", bgcolor: "#f8fafc",
-                        transition: "box-shadow 0.2s",
-                        "&:hover": { boxShadow: "0 4px 16px rgba(15,23,42,0.08)" },
-                      }}
-                    >
-                      <Box display="flex" alignItems="center" gap={1} mb={0.8}>
-                        <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: accent, flexShrink: 0 }} />
-                        <Typography sx={{ fontSize: 12, fontWeight: 700, color: COLORS.navy }} noWrap>
-                          {c.client}
-                        </Typography>
-                      </Box>
-                      <Typography sx={{ fontWeight: 800, fontSize: "1.3rem", color: accent }}>
-                        {fmt(c.revenue)}
-                      </Typography>
-                      {c.placements !== undefined && (
-                        <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>
-                          {c.placements} placement{c.placements !== 1 ? "s" : ""}
-                        </Typography>
-                      )}
-                      <LinearProgress
-                        variant="determinate"
-                        value={(c.revenue / maxRev) * 100}
-                        sx={{
-                          mt: 1.2, height: 4, borderRadius: 8,
-                          bgcolor: `${accent}15`,
-                          "& .MuiLinearProgress-bar": { bgcolor: accent, borderRadius: 8 },
-                        }}
-                      />
-                    </Box>
-                  </Grid>
-                );
-              })}
-            </Grid>
-          </CardContent>
-        </Card>
-      )}
-
+              </AccordionDetails>
+            </Accordion>
+          );
+        })}
+      </Box>
     </Box>
   );
 }
-
-
-
-
-
-
-
