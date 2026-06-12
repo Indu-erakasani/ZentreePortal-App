@@ -2,265 +2,393 @@
 import React, { useEffect, useState } from "react";
 import {
   Box, Grid, Card, CardContent, Typography, Chip, CircularProgress,
-  Alert, Avatar, LinearProgress, List, ListItem, ListItemText,
-  Divider, Table, TableHead, TableBody, TableRow, TableCell,
-  TableContainer, Paper,
+  Alert, Avatar,
 } from "@mui/material";
 import {
-  Work, CheckCircle, AttachMoney, Schedule, Person, TrendingUp,
-  FiberManualRecord, Circle,
+  Work, CheckCircle, TrendingUp,NewReleases,
+  FiberManualRecord, Business, AssignmentInd, Groups,
+  Engineering, AccessTime, Domain, SupervisorAccount,
+  ArrowUpward, ArrowDownward,
 } from "@mui/icons-material";
 
-const API_URL = process.env.REACT_APP_API_BASE_URL;
+const API_URL  = process.env.REACT_APP_API_BASE_URL;
+const getToken = () => localStorage.getItem("access_token") || "";
 
-const authFetch = async (url, opts = {}) => {
-  const token = localStorage.getItem("access_token");
+const authFetch = async (url) => {
   const res = await fetch(url, {
-    ...opts,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...opts.headers },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
   });
   if (res.status === 401) { localStorage.clear(); window.location.href = "/login"; }
   return res;
 };
 
-const fmtCurrency = (v = 0) => {
-  if (v >= 10000000) return `₹${(v / 10000000).toFixed(1)}Cr`;
-  if (v >= 100000)   return `₹${(v / 100000).toFixed(1)}L`;
-  if (v >= 1000)     return `₹${(v / 1000).toFixed(1)}K`;
-  return `₹${v.toLocaleString()}`;
-};
-
 const fmtDate = (iso) => {
-  if (!iso) return "";
-  return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-IN", {
+    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+  });
 };
 
-const PALETTE = ["#4f46e5","#0891b2","#059669","#d97706","#dc2626","#7c3aed","#0284c7","#65a30d"];
-const aColor  = (i) => PALETTE[i % PALETTE.length];
+const statusCount = (arr = [], key) =>
+  arr.find((s) => s._id === key)?.count ?? 0;
 
-const PRIORITY_CONFIG = {
-  Critical: { bg: "#fef2f2", color: "#b91c1c", dotColor: "#ef4444" },
-  High:     { bg: "#fff7ed", color: "#c2410c", dotColor: "#f97316" },
-  Medium:   { bg: "#eff6ff", color: "#1d4ed8", dotColor: "#3b82f6" },
+const DEPT_COLORS = [
+  "#185FA5","#0F6E56","#854F0B","#534AB7",
+  "#993C1D","#993556","#3B6D11","#5F5E5A",
+];
+const DEPT_BGS = [
+  "#E6F1FB","#E1F5EE","#FAEEDA","#EEEDFE",
+  "#FAECE7","#FBEAF0","#EAF3DE","#F1EFE8",
+];
+const deptColor = (i) => DEPT_COLORS[i % DEPT_COLORS.length];
+const deptBg    = (i) => DEPT_BGS[i % DEPT_BGS.length];
+
+const BENCH_STATUS_CONFIG = {
+  "Available":      { color: "#0F6E56", bg: "#E1F5EE" },
+  "On Project":     { color: "#185FA5", bg: "#E6F1FB" },
+  "Notice Period":  { color: "#854F0B", bg: "#FAEEDA" },
+  "Pending Review": { color: "#534AB7", bg: "#EEEDFE" },
+  "Inactive":       { color: "#5F5E5A", bg: "#F1EFE8" },
 };
 
-// ── KPI Card ─────────────────────────────────────────────────────────────────
-const KPICard = ({ label, value, sub, icon, accent }) => (
-  <Card
-    elevation={0}
-    sx={{
-      border: "1px solid #f1f5f9",
-      borderRadius: 3,
-      position: "relative",
-      overflow: "hidden",
-      transition: "transform .15s, box-shadow .15s",
-      "&:hover": { transform: "translateY(-2px)", boxShadow: "0 8px 24px rgba(0,0,0,.07)" },
-    }}
-  >
-    <CardContent sx={{ p: 2.5 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1.5}>
-        <Typography
-          sx={{ fontSize: 11, fontWeight: 700, color: "#64748b",
-                textTransform: "uppercase", letterSpacing: ".04em" }}
-        >
-          {label}
-        </Typography>
-        <Box
-          sx={{ width: 36, height: 36, borderRadius: 2, display: "flex",
-                alignItems: "center", justifyContent: "center",
-                bgcolor: `${accent}1a`, color: accent, flexShrink: 0 }}
-        >
-          {React.cloneElement(icon, { sx: { fontSize: 20 } })}
+const PRIORITY_META = {
+  Critical: { bg: "#FCEBEB", color: "#791F1F", dot: "#E24B4A", border: "#F09595" },
+  High:     { bg: "#FAEEDA", color: "#633806", dot: "#EF9F27", border: "#FAC775" },
+  Medium:   { bg: "#E6F1FB", color: "#0C447C", dot: "#378ADD", border: "#B5D4F4" },
+};
+
+// Section divider label
+const SectionLabel = ({ children }) => (
+  <Typography sx={{
+    fontSize: 11, fontWeight: 700, color: "#888780",
+    textTransform: "uppercase", letterSpacing: "0.08em",
+    mb: 1.5, mt: 0.5,
+  }}>
+    {children}
+  </Typography>
+);
+
+// KPI stat card
+const StatCard = ({ label, value, sub, icon, accentColor, accentBg, trend, trendLabel }) => (
+  <Card elevation={0} sx={{
+    border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: "12px",
+    background: "#fff", height: "100%",
+    transition: "box-shadow 0.15s, transform 0.15s",
+    "&:hover": { boxShadow: "0 4px 16px rgba(0,0,0,0.07)", transform: "translateY(-1px)" },
+  }}>
+    <CardContent sx={{ p: "20px !important" }}>
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+        <Box sx={{
+          width: 36, height: 36, borderRadius: "10px", bgcolor: accentBg,
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+        }}>
+          {React.cloneElement(icon, { sx: { fontSize: 18, color: accentColor } })}
         </Box>
+        {trend && trendLabel && (
+          <Box display="flex" alignItems="center" gap={0.5} sx={{
+            bgcolor: trend === "up" ? "#E1F5EE" : "#FCEBEB",
+            px: 1, py: 0.4, borderRadius: "20px",
+          }}>
+            {trend === "up"
+              ? <ArrowUpward sx={{ fontSize: 10, color: "#0F6E56" }} />
+              : <ArrowDownward sx={{ fontSize: 10, color: "#A32D2D" }} />}
+            <Typography sx={{
+              fontSize: 11, fontWeight: 600,
+              color: trend === "up" ? "#0F6E56" : "#A32D2D",
+            }}>
+              {trendLabel}
+            </Typography>
+          </Box>
+        )}
       </Box>
-      <Typography sx={{ fontSize: 30, fontWeight: 800, color: "#0f172a", lineHeight: 1, mb: .75 }}>
+      <Typography sx={{
+        fontSize: 28, fontWeight: 700, color: "#1a1a1a",
+        lineHeight: 1, mb: 0.5, fontVariantNumeric: "tabular-nums",
+      }}>
         {value ?? "—"}
       </Typography>
-      {sub && <Typography sx={{ fontSize: 12, color: "#94a3b8" }}>{sub}</Typography>}
+      <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#444441", mb: sub ? 0.4 : 0 }}>
+        {label}
+      </Typography>
+      {sub && (
+        <Typography sx={{ fontSize: 12, color: "#888780", lineHeight: 1.4 }}>
+          {sub}
+        </Typography>
+      )}
     </CardContent>
-    <Box sx={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 3, bgcolor: accent, opacity: .7 }} />
   </Card>
 );
 
-// ── Section wrapper ────────────────────────────────────────────────────────
-const SectionCard = ({ title, badge, children, sx = {} }) => (
-  <Card elevation={0} sx={{ border: "1px solid #f1f5f9", borderRadius: 3, ...sx }}>
-    <CardContent sx={{ p: 3 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="center"
-           mb={2} pb={1.5} sx={{ borderBottom: "1px solid #f1f5f9" }}>
-        <Typography sx={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>{title}</Typography>
-        {badge != null && (
-          <Chip label={badge} size="small"
-                sx={{ bgcolor: "#f1f5f9", color: "#475569", fontWeight: 700, fontSize: 11 }} />
-        )}
-      </Box>
+// Section card wrapper
+const SectionCard = ({ title, badge, badgeColor = "default", children, sx = {} }) => (
+  <Card elevation={0} sx={{
+    border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: "12px",
+    background: "#fff", height: "100%", ...sx,
+  }}>
+    <Box sx={{
+      px: 2.5, pt: 2.5, pb: 1.5,
+      borderBottom: "0.5px solid rgba(0,0,0,0.06)",
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+    }}>
+      <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#1a1a1a" }}>
+        {title}
+      </Typography>
+      {badge != null && (
+        <Chip label={badge} size="small" sx={{
+          fontSize: 11, fontWeight: 600, height: 22, border: "none",
+          bgcolor: badgeColor === "green" ? "#E1F5EE" : badgeColor === "red" ? "#FCEBEB" : "#F1EFE8",
+          color:   badgeColor === "green" ? "#0F6E56" : badgeColor === "red" ? "#A32D2D" : "#5F5E5A",
+        }} />
+      )}
+    </Box>
+    <CardContent sx={{ p: "16px 20px !important" }}>
       {children}
     </CardContent>
   </Card>
 );
 
-// ── Empty state ────────────────────────────────────────────────────────────
 const Empty = ({ msg }) => (
-  <Box textAlign="center" py={4}>
-    <CheckCircle sx={{ fontSize: 40, color: "#cbd5e1", mb: 1 }} />
-    <Typography sx={{ fontSize: 13, color: "#94a3b8" }}>{msg}</Typography>
+  <Box py={4} textAlign="center">
+    <Typography sx={{ fontSize: 13, color: "#B4B2A9" }}>{msg}</Typography>
   </Box>
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-const ManagerDashboard = () => {
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+// Reusable horizontal bar row
+const BarRow = ({ label, count, maxCount, color, colorBg, pct }) => (
+  <Box>
+    <Box display="flex" justifyContent="space-between" alignItems="center" mb={0.6}>
+      <Box display="flex" alignItems="center" gap={1}>
+        <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: color, flexShrink: 0 }} />
+        <Typography sx={{ fontSize: 13, color: "#2C2C2A" }}>{label}</Typography>
+      </Box>
+      <Box display="flex" alignItems="center" gap={1.5}>
+        {pct !== undefined && (
+          <Typography sx={{ fontSize: 12, color: "#B4B2A9", fontVariantNumeric: "tabular-nums" }}>
+            {pct}%
+          </Typography>
+        )}
+        <Typography sx={{
+          fontSize: 13, fontWeight: 600, color: "#1a1a1a",
+          minWidth: 28, textAlign: "right", fontVariantNumeric: "tabular-nums",
+        }}>
+          {count}
+        </Typography>
+      </Box>
+    </Box>
+    <Box sx={{ height: 6, borderRadius: 99, bgcolor: colorBg, overflow: "hidden" }}>
+      <Box sx={{
+        width: `${maxCount > 0 ? (count / maxCount) * 100 : 0}%`,
+        height: "100%", bgcolor: color, borderRadius: 99,
+        transition: "width 0.4s ease",
+      }} />
+    </Box>
+  </Box>
+);
 
-  const [kpis, setKpis]                    = useState(null);
-  const [stageCounts, setStageCounts]      = useState([]);
-  const [highJobs, setHighJobs]            = useState([]);
-  const [recruiterPerf, setRecruiterPerf]  = useState([]);
-  const [clientRevenue, setClientRevenue]  = useState([]);
-  const [recentActivity, setRecentActivity] = useState([]);
-  const [loading, setLoading]              = useState(true);
-  const [error, setError]                  = useState("");
+export default function ManagerDashboard() {
+  const user = (() => {
+    try { return JSON.parse(localStorage.getItem("user") || "{}"); }
+    catch { return {}; }
+  })();
+
+  const [portal,     setPortal]     = useState(null);
+  const [rbot,       setRbot]       = useState(null);
+  const [benchStats, setBenchStats] = useState(null);
+  const [benchTotal, setBenchTotal] = useState(null);
+  const [empStats,   setEmpStats]   = useState(null);
+  const [empTotal,   setEmpTotal]   = useState(null);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState("");
 
   useEffect(() => {
     (async () => {
       try {
-        const res  = await authFetch(`${API_URL}/dashboard/`);
-        const json = await res.json();
-        if (!json.success) { setError(json.message || "Failed to load"); return; }
-        const d = json.dashboard;
-        setKpis(d.kpis               ?? {});
-        setStageCounts(d.stage_counts       ?? []);
-        setHighJobs(d.high_priority_jobs  ?? []);
-        setRecruiterPerf(d.recruiter_perf     ?? []);
-        setClientRevenue(d.client_revenue     ?? []);
-        setRecentActivity(d.recent_activity    ?? []);
-      } catch { setError("Network error — could not load dashboard."); }
-      finally   { setLoading(false); }
+        const [pR, rR, bsR, blR, esR, elR] = await Promise.all([
+          authFetch(`${API_URL}/dashboard/`),
+          authFetch(`${API_URL}/rbot-dashboard/manager?period=month`),
+          authFetch(`${API_URL}/bench/stats`),
+          authFetch(`${API_URL}/bench/?page=1&per_page=1`),
+          authFetch(`${API_URL}/employees/stats`),
+          authFetch(`${API_URL}/employees/?page=1&per_page=1`),
+        ]);
+        const [pJ, rJ, bsJ, blJ, esJ, elJ] = await Promise.all([
+          pR.json(), rR.json(), bsR.json(), blR.json(), esR.json(), elR.json(),
+        ]);
+        if (pJ.success)  setPortal(pJ.dashboard ?? {});
+        if (rJ.success)  setRbot(rJ);
+        if (bsJ.success) setBenchStats(bsJ.data ?? {});
+        if (blJ.success) setBenchTotal(blJ.total ?? 0);
+        if (esJ.success) setEmpStats(esJ.data ?? {});
+        if (elJ.success) setEmpTotal(elJ.total ?? 0);
+      } catch {
+        setError("Unable to load dashboard data. Please refresh.");
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
-  const maxPlacements = Math.max(1, ...recruiterPerf.map(r => r.placements));
-  const maxRevenue    = Math.max(1, ...clientRevenue.map(c => c.revenue));
-  const maxStage      = Math.max(1, ...stageCounts.map(s => s.count));
-  const fillColor     = (kpis?.fill_rate ?? 0) >= 70 ? "#059669"
-                      : (kpis?.fill_rate ?? 0) >= 40 ? "#d97706" : "#dc2626";
-
   if (loading) return (
-    <Box display="flex" alignItems="center" justifyContent="center" minHeight="60vh">
-      <CircularProgress size={48} />
+    <Box display="flex" flexDirection="column" justifyContent="center"
+      alignItems="center" minHeight="60vh" gap={2}>
+      <CircularProgress size={36} thickness={4} sx={{ color: "#185FA5" }} />
+      <Typography sx={{ fontSize: 13, color: "#888780" }}>Loading dashboard…</Typography>
     </Box>
   );
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  // Derived values
+  const stageCounts    = portal?.stage_counts         ?? [];
+  const highJobs       = portal?.high_priority_jobs   ?? [];
+
+
+  const rbKpis       = rbot?.kpis              ?? {};
+  const rbRecruiters = (rbot?.recruiter_breakdown ?? [])
+    .filter(r => r.recruiter_id !== "Other" && r.recruiter_name !== "Other").slice(0, 6);
+  const rbJdOverall  = (rbot?.jd_overall ?? []).slice(0, 6);
+
+  const benchByStatus  = benchStats?.by_status ?? [];
+  const benchAvailable = statusCount(benchByStatus, "Available");
+  const benchOnProject = statusCount(benchByStatus, "On Project");
+  const benchNotice    = statusCount(benchByStatus, "Notice Period");
+  const benchOther     = Math.max(0, (benchTotal ?? 0) - benchAvailable - benchOnProject - benchNotice);
+  const benchMaxCount  = Math.max(1, ...benchByStatus.map(s => s.count));
+
+  const empByStatus      = empStats?.by_status     ?? [];
+  const empByDept        = empStats?.by_department ?? [];
+  const empActive        = statusCount(empByStatus, "Active");
+  const empActiveClients = empStats?.active_clients ?? 0;
+  const empMaxDept       = Math.max(1, ...empByDept.map(d => d.count));
+
+  const maxStage = Math.max(1, ...stageCounts.map(s => s.count));
+  const maxRbRec = Math.max(1, ...rbRecruiters.map(r => r.selected));
+
+  const hour     = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  const STAGE_COLORS = ["#185FA5","#0F6E56","#534AB7","#854F0B","#A32D2D","#993556"];
+  const STAGE_BGS    = ["#E6F1FB","#E1F5EE","#EEEDFE","#FAEEDA","#FCEBEB","#FBEAF0"];
+  const stageTotal   = stageCounts.reduce((s, x) => s + x.count, 0);
 
   return (
-    <Box sx={{ bgcolor: "#f8fafc", minHeight: "100vh", p: { xs: 2, md: 3 } }}>
+    <Box sx={{ bgcolor: "#F7F6F3", minHeight: "100vh", p: { xs: 2, md: 3 } }}>
 
-      {/* ── Page header ── */}
-      <Box mb={3}>
-        <Typography variant="h5" fontWeight={800} color="#0f172a">
-          Good {greeting}, {user.first_name}! 👋
-        </Typography>
-        <Typography sx={{ fontSize: 14, color: "#64748b", mt: .5 }}>
-          Here's what's happening across your recruitment pipeline today.
+      {/* Header */}
+      <Box mb={3} display="flex" justifyContent="space-between" alignItems="flex-end" flexWrap="wrap" gap={1}>
+        <Box>
+          <Typography sx={{ fontSize: 22, fontWeight: 700, color: "#1a1a1a", lineHeight: 1.2 }}>
+            {greeting}{user.first_name ? `, ${user.first_name}` : ""}
+          </Typography>
+          <Typography sx={{ fontSize: 14, color: "#888780", mt: 0.5 }}>
+            Here's your recruitment overview for today
+          </Typography>
+        </Box>
+        <Typography sx={{ fontSize: 12, color: "#B4B2A9", display: { xs: "none", sm: "block" } }}>
+          {new Date().toLocaleDateString("en-IN", {
+            weekday: "long", day: "numeric", month: "long", year: "numeric",
+          })}
         </Typography>
       </Box>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError("")}>
+        <Alert severity="error" sx={{ mb: 3, borderRadius: "10px", fontSize: 13 }}
+          onClose={() => setError("")}>
           {error}
         </Alert>
       )}
 
-      {/* ── KPI row ── */}
+
+
+      {/* ── ResourcingBot KPIs ── */}
+      <SectionLabel>ResourcingBot · last 30 days</SectionLabel>
       <Grid container spacing={2} mb={3}>
         {[
-          { label: "Open Jobs",          value: kpis?.open_jobs,       sub: `of ${kpis?.total_jobs ?? 0} total`,          icon: <Work />,         accent: "#4f46e5" },
-          { label: "Placements (MTD)",   value: kpis?.placements_mtd,  sub: `${kpis?.placements_total ?? 0} all-time`,    icon: <CheckCircle />,  accent: "#059669" },
-          { label: "Revenue (MTD)",      value: fmtCurrency(kpis?.revenue_mtd), sub: "Billing this month",                icon: <AttachMoney />,  accent: "#0891b2" },
-          { label: "Avg. Days to Fill",  value: kpis?.avg_days_to_fill != null ? `${kpis.avg_days_to_fill}d` : "—",
-                                         sub: `Fill rate: ${kpis?.fill_rate ?? 0}%`,                                      icon: <Schedule />,     accent: fillColor  },
-          { label: "Active Candidates",  value: kpis?.total_candidates, sub: "In resume bank",                            icon: <Person />,       accent: "#7c3aed" },
-          { label: "Active Clients",     value: kpis?.active_clients,   sub: `of ${kpis?.total_clients ?? 0} total`,      icon: <TrendingUp />,   accent: "#d97706" },
-        ].map((c) => (
-          <Grid item xs={6} sm={4} md={2} key={c.label}>
-            <KPICard {...c} />
-          </Grid>
+          { label: "Total candidates",  value: rbKpis.total,            sub: "All time in RBot",    icon: <Groups />,        accentColor: "#185FA5", accentBg: "#E6F1FB" },
+          { label: "Added this month",  value: rbKpis.ranged_total,     sub: "Last 30 days",        icon: <NewReleases />,   accentColor: "#534AB7", accentBg: "#EEEDFE" },
+          { label: "Selected",          value: rbKpis.selected,         sub: rbKpis.total > 0 ? `${Math.round((rbKpis.selected / rbKpis.total) * 100)}% rate` : "No data", icon: <CheckCircle />, accentColor: "#0F6E56", accentBg: "#E1F5EE", trend: "up" },
+          { label: "Rejected",          value: rbKpis.rejected,         sub: rbKpis.total > 0 ? `${Math.round((rbKpis.rejected / rbKpis.total) * 100)}% rate` : "No data", icon: <TrendingUp />,  accentColor: "#A32D2D", accentBg: "#FCEBEB" },
+          { label: "Active recruiters", value: rbKpis.total_recruiters, sub: "Working on JDs",      icon: <AssignmentInd />, accentColor: "#854F0B", accentBg: "#FAEEDA" },
+        ].map(c => (
+          <Grid item xs={6} sm={4} md key={c.label}><StatCard {...c} /></Grid>
         ))}
       </Grid>
 
-      {/* ── Row 2: Pipeline + High Priority Jobs ── */}
-      <Grid container spacing={2.5} mb={2.5}>
-        <Grid item xs={12} md={5}>
-          <SectionCard
-            title="Candidate Pipeline"
-            badge={stageCounts.reduce((s, x) => s + x.count, 0)}
-            sx={{ height: "100%" }}
-          >
+      {/* ── Bench people KPIs ── */}
+      <SectionLabel>Bench people</SectionLabel>
+      <Grid container spacing={2} mb={3}>
+        {[
+          { label: "Total on bench",      value: benchTotal,      sub: "All bench records",           icon: <Engineering />,     accentColor: "#185FA5", accentBg: "#E6F1FB" },
+          { label: "Available",           value: benchAvailable,  sub: benchTotal > 0 ? `${Math.round((benchAvailable / benchTotal) * 100)}% of bench` : "Ready to deploy", icon: <CheckCircle />, accentColor: "#0F6E56", accentBg: "#E1F5EE", trend: benchAvailable > 0 ? "up" : undefined, trendLabel: benchAvailable > 0 ? `${benchAvailable}` : undefined },
+          { label: "On project",          value: benchOnProject,  sub: "Currently placed",            icon: <Work />,            accentColor: "#534AB7", accentBg: "#EEEDFE" },
+          { label: "On notice / other",   value: benchNotice + benchOther, sub: "Notice period or pending", icon: <AccessTime />, accentColor: "#854F0B", accentBg: "#FAEEDA" },
+        ].map(c => (
+          <Grid item xs={6} sm={3} md={3} key={c.label}><StatCard {...c} /></Grid>
+        ))}
+      </Grid>
+
+      {/* ── Employee KPIs ── */}
+      <SectionLabel>Employees</SectionLabel>
+      <Grid container spacing={2} mb={3}>
+        {[
+          { label: "Total employees",         value: empTotal,         sub: "All employee records",     icon: <SupervisorAccount />, accentColor: "#534AB7", accentBg: "#EEEDFE" },
+          { label: "Active",                  value: empActive,        sub: empTotal > 0 ? `${Math.round((empActive / empTotal) * 100)}% of workforce` : `of ${empTotal ?? 0} total`, icon: <CheckCircle />, accentColor: "#0F6E56", accentBg: "#E1F5EE" },
+          { label: "Live client engagements", value: empActiveClients, sub: "Unique active clients",    icon: <Domain />,            accentColor: "#185FA5", accentBg: "#E6F1FB" },
+          { label: "Departments",             value: empByDept.length || "—", sub: empByDept.map(d => d._id).filter(Boolean).slice(0, 2).join(", ") || "No data", icon: <Business />, accentColor: "#854F0B", accentBg: "#FAEEDA" },
+        ].map(c => (
+          <Grid item xs={6} sm={3} md={3} key={c.label}><StatCard {...c} /></Grid>
+        ))}
+      </Grid>
+
+      {/* ── Pipeline + High priority jobs ── */}
+      <Grid container spacing={2} mb={2}>
+        <Grid item xs={12} md={4}>
+          <SectionCard title="Candidate pipeline" badge={stageTotal}>
             {stageCounts.length === 0 ? <Empty msg="No active pipeline data." /> : (
-              <Box display="flex" flexDirection="column" gap={1.5}>
+              <Box display="flex" flexDirection="column" gap={1.8}>
                 {stageCounts.map((item, i) => (
-                  <Box key={item.stage}>
-                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={.5}>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: aColor(i), flexShrink: 0 }} />
-                        <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#334155" }}>
-                          {item.stage}
-                        </Typography>
-                      </Box>
-                      <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{item.count}</Typography>
-                    </Box>
-                    <LinearProgress
-                      variant="determinate"
-                      value={(item.count / maxStage) * 100}
-                      sx={{
-                        height: 7, borderRadius: 99,
-                        bgcolor: `${aColor(i)}22`,
-                        "& .MuiLinearProgress-bar": { bgcolor: aColor(i), borderRadius: 99 },
-                      }}
-                    />
-                  </Box>
+                  <BarRow key={item.stage} label={item.stage} count={item.count}
+                    maxCount={maxStage} color={STAGE_COLORS[i % STAGE_COLORS.length]}
+                    colorBg={STAGE_BGS[i % STAGE_BGS.length]}
+                    pct={stageTotal > 0 ? Math.round((item.count / stageTotal) * 100) : 0} />
                 ))}
               </Box>
             )}
           </SectionCard>
         </Grid>
 
-        <Grid item xs={12} md={7}>
-          <SectionCard
-            title="High Priority Open Jobs"
-            badge={`${highJobs.length} open`}
-            sx={{ height: "100%" }}
-          >
+        <Grid item xs={12} md={8}>
+          <SectionCard title="High priority open jobs"
+            badge={highJobs.length > 0 ? `${highJobs.length} open` : "None"}
+            badgeColor={highJobs.some(j => j.priority === "Critical") ? "red" : "default"}>
             {highJobs.length === 0 ? <Empty msg="No critical or high-priority jobs open." /> : (
               <Box display="flex" flexDirection="column" gap={1}>
                 {highJobs.map((job, i) => {
-                  const cfg = PRIORITY_CONFIG[job.priority] ?? PRIORITY_CONFIG.Medium;
+                  const cfg = PRIORITY_META[job.priority] ?? PRIORITY_META.Medium;
                   return (
-                    <Box key={job._id ?? i}
-                      sx={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                            gap: 1.5, p: 1.5, borderRadius: 2, bgcolor: "#f8fafc",
-                            border: "1px solid #f1f5f9",
-                            "&:hover": { bgcolor: "#f1f5f9" }, transition: "background .15s" }}
-                    >
+                    <Box key={job._id ?? i} sx={{
+                      display: "flex", alignItems: "center", gap: 1.5,
+                      p: "10px 14px", borderRadius: "8px",
+                      border: `0.5px solid ${cfg.border}`, bgcolor: cfg.bg,
+                      "&:hover": { opacity: 0.85 }, transition: "opacity 0.12s",
+                    }}>
+                      <FiberManualRecord sx={{ fontSize: 9, color: cfg.dot, flexShrink: 0 }} />
                       <Box flex={1} overflow="hidden">
-                        <Typography sx={{ fontSize: 13.5, fontWeight: 600, color: "#0f172a",
-                                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <Typography sx={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a",
+                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {job.title}
                         </Typography>
-                        <Typography sx={{ fontSize: 12, color: "#64748b", mt: .25 }}>
+                        <Typography sx={{ fontSize: 11, color: "#888780", mt: 0.2 }}>
                           {job.client_name}{job.location ? ` · ${job.location}` : ""}
                         </Typography>
                       </Box>
                       <Box display="flex" alignItems="center" gap={1} flexShrink={0}>
-                        <Chip label={`${job.openings} open`} size="small"
-                              sx={{ fontSize: 11, fontWeight: 600, bgcolor: "#fff",
-                                    border: "1px solid #e2e8f0", color: "#475569" }} />
-                        <Chip
-                          icon={<FiberManualRecord sx={{ fontSize: "8px !important", color: `${cfg.dotColor} !important` }} />}
-                          label={job.priority} size="small"
-                          sx={{ fontSize: 11, fontWeight: 700, bgcolor: cfg.bg, color: cfg.color, border: "none" }}
-                        />
+                        <Typography sx={{ fontSize: 12, color: cfg.color, fontWeight: 600 }}>
+                          {job.openings} opening{job.openings !== 1 ? "s" : ""}
+                        </Typography>
+                        <Chip label={job.priority} size="small" sx={{
+                          fontSize: 11, fontWeight: 700, height: 20,
+                          bgcolor: "transparent", color: cfg.color,
+                          border: `0.5px solid ${cfg.dot}`,
+                        }} />
                       </Box>
                     </Box>
                   );
@@ -271,173 +399,145 @@ const ManagerDashboard = () => {
         </Grid>
       </Grid>
 
-      {/* ── Row 3: Recruiter Performance table ── */}
-      <SectionCard title="Recruiter Performance" sx={{ mb: 2.5 }}>
-        {recruiterPerf.length === 0 ? <Empty msg="No recruiter data yet." /> : (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                  {["Recruiter","Jobs Posted","Interviews","Offers","Placements","Conversion","Revenue"].map(h => (
-                    <TableCell key={h}
-                      sx={{ fontSize: 11, fontWeight: 700, color: "#64748b",
-                            textTransform: "uppercase", letterSpacing: ".04em",
-                            borderBottom: "1px solid #e2e8f0", py: 1.25 }}>
-                      {h}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {recruiterPerf.map((r, i) => (
-                  <TableRow key={r.name ?? i}
-                    sx={{ "&:hover": { bgcolor: "#f8fafc" }, "&:last-child td": { border: 0 },
-                          transition: "background .12s" }}>
-                    <TableCell sx={{ py: 1.5 }}>
-                      <Box display="flex" alignItems="center" gap={1.25}>
-                        <Avatar sx={{ bgcolor: aColor(i), width: 32, height: 32, fontSize: 12, fontWeight: 700 }}>
-                          {(r.name || "?")[0].toUpperCase()}
-                        </Avatar>
-                        <Typography sx={{ fontWeight: 600, fontSize: 13.5, color: "#0f172a" }}>{r.name}</Typography>
-                        {i === 0 && (
-                          <Chip label="TOP" size="small"
-                                sx={{ fontSize: 9, fontWeight: 800, bgcolor: "#fef3c7", color: "#d97706",
-                                      height: 18, ".MuiChip-label": { px: .75 } }} />
-                        )}
-                      </Box>
-                    </TableCell>
-                    <TableCell sx={{ fontSize: 14, fontWeight: 600, color: "#334155" }}>{r.jobs_posted}</TableCell>
-                    <TableCell sx={{ fontSize: 14, fontWeight: 600, color: "#334155" }}>{r.interviews}</TableCell>
-                    <TableCell sx={{ fontSize: 14, fontWeight: 600, color: "#334155" }}>{r.offers}</TableCell>
-                    <TableCell>
-                      <Box>
-                        <Typography sx={{ fontSize: 14, fontWeight: 700, color: "#059669", mb: .5 }}>
-                          {r.placements}
-                        </Typography>
-                        <LinearProgress
-                          variant="determinate"
-                          value={(r.placements / maxPlacements) * 100}
-                          sx={{ height: 4, borderRadius: 99, width: 80,
-                                bgcolor: "#e2e8f0",
-                                "& .MuiLinearProgress-bar": { bgcolor: aColor(i), borderRadius: 99 } }}
-                        />
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Chip label={`${r.conversion_rate}%`} size="small"
-                            sx={{
-                              fontSize: 12, fontWeight: 700,
-                              bgcolor: r.conversion_rate >= 50 ? "#f0fdf4" : r.conversion_rate >= 25 ? "#fff7ed" : "#fef2f2",
-                              color:   r.conversion_rate >= 50 ? "#15803d" : r.conversion_rate >= 25 ? "#c2410c" : "#b91c1c",
-                            }} />
-                    </TableCell>
-                    <TableCell>
-                      <Typography sx={{ fontSize: 14, fontWeight: 700, color: "#7c3aed" }}>
-                        {fmtCurrency(r.revenue)}
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-      </SectionCard>
-
-      {/* ── Row 4: Client Revenue + Recent Activity ── */}
-      <Grid container spacing={2.5}>
+      {/* ── Bench breakdown + Employee department breakdown ── */}
+      <Grid container spacing={2} mb={2}>
         <Grid item xs={12} md={6}>
-          <SectionCard title="Top Clients by Revenue">
-            {clientRevenue.length === 0 ? <Empty msg="No client revenue data yet." /> : (
-              <Box display="flex" flexDirection="column" gap={2}>
-                {clientRevenue.map((c, i) => (
-                  <Box key={c.client ?? i} display="flex" alignItems="flex-start" gap={1.5}>
-                    <Typography sx={{ fontSize: 12, fontWeight: 800, color: "#94a3b8", width: 22, pt: .25 }}>
-                      #{i + 1}
-                    </Typography>
-                    <Box flex={1}>
-                      <Box display="flex" justifyContent="space-between" alignItems="baseline" mb={.75}>
-                        <Typography sx={{ fontSize: 13.5, fontWeight: 600, color: "#0f172a",
-                                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "55%" }}>
-                          {c.client}
-                        </Typography>
-                        <Box textAlign="right">
-                          <Typography sx={{ fontSize: 14, fontWeight: 800, color: "#7c3aed" }}>
-                            {fmtCurrency(c.revenue)}
-                          </Typography>
-                          <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>
-                            {c.placements} placement{c.placements !== 1 ? "s" : ""}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      <LinearProgress
-                        variant="determinate"
-                        value={(c.revenue / maxRevenue) * 100}
-                        sx={{ height: 6, borderRadius: 99,
-                              bgcolor: `${aColor(i)}22`,
-                              "& .MuiLinearProgress-bar": { bgcolor: aColor(i), borderRadius: 99 } }}
-                      />
-                    </Box>
-                  </Box>
-                ))}
+          <SectionCard title="Bench · status breakdown" badge={`${benchTotal ?? 0} total`}>
+            {benchByStatus.length === 0 ? <Empty msg="No bench data yet." /> : (
+              <Box display="flex" flexDirection="column" gap={1.8}>
+                {[...benchByStatus].sort((a, b) => b.count - a.count).map((item) => {
+                  const cfg = BENCH_STATUS_CONFIG[item._id] ?? { color: "#5F5E5A", bg: "#F1EFE8" };
+                  return (
+                    <BarRow key={item._id} label={item._id || "Unknown"}
+                      count={item.count} maxCount={benchMaxCount}
+                      color={cfg.color} colorBg={cfg.bg}
+                      pct={benchTotal > 0 ? Math.round((item.count / benchTotal) * 100) : 0} />
+                  );
+                })}
               </Box>
             )}
           </SectionCard>
         </Grid>
 
         <Grid item xs={12} md={6}>
-          <SectionCard title="Recent Activity" badge={recentActivity.length}>
-            {recentActivity.length === 0 ? <Empty msg="No recent activity." /> : (
-              <List disablePadding>
-                {recentActivity.map((item, i) => (
-                  <React.Fragment key={i}>
-                    <ListItem
-                      alignItems="flex-start"
-                      sx={{ px: 1, py: 1.25, borderRadius: 2,
-                            "&:hover": { bgcolor: "#f8fafc" }, transition: "background .12s" }}
-                    >
-                      <Box
-                        sx={{ width: 34, height: 34, borderRadius: 2, mr: 1.5, flexShrink: 0,
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              bgcolor: item.type === "placement" ? "#f0fdf4" : "#eff6ff",
-                              color:   item.type === "placement" ? "#059669"  : "#4f46e5" }}
-                      >
-                        {item.type === "placement"
-                          ? <CheckCircle sx={{ fontSize: 18 }} />
-                          : <Person      sx={{ fontSize: 18 }} />}
-                      </Box>
-                      <ListItemText
-                        primary={
-                          <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#0f172a", lineHeight: 1.4 }}>
-                            {item.message}
-                          </Typography>
-                        }
-                        secondary={
-                          <Typography sx={{ fontSize: 11, color: "#94a3b8", mt: .25 }}>
-                            {fmtDate(item.time)}
-                          </Typography>
-                        }
-                      />
-                      <Chip
-                        label={item.type === "placement" ? "Placed" : "New"}
-                        size="small"
-                        sx={{
-                          fontSize: 11, fontWeight: 700, ml: 1, mt: .5, flexShrink: 0,
-                          bgcolor: item.type === "placement" ? "#f0fdf4" : "#eff6ff",
-                          color:   item.type === "placement" ? "#15803d"  : "#4338ca",
-                        }}
-                      />
-                    </ListItem>
-                    {i < recentActivity.length - 1 && <Divider sx={{ mx: 1 }} />}
-                  </React.Fragment>
+          <SectionCard title="Employees · by department" badge={`${empTotal ?? 0} total`}>
+            {empByDept.length === 0 ? <Empty msg="No employee data yet." /> : (
+              <Box display="flex" flexDirection="column" gap={1.8}>
+                {[...empByDept].sort((a, b) => b.count - a.count).map((item, i) => (
+                  <BarRow key={item._id ?? i} label={item._id || "Unassigned"}
+                    count={item.count} maxCount={empMaxDept}
+                    color={deptColor(i)} colorBg={deptBg(i)}
+                    pct={empTotal > 0 ? Math.round((item.count / empTotal) * 100) : 0} />
                 ))}
-              </List>
+              </Box>
             )}
           </SectionCard>
         </Grid>
       </Grid>
+
+      {/* ── RBot recruiter + JD summary ── */}
+      <Grid container spacing={2} mb={2}>
+        <Grid item xs={12} md={5}>
+          <SectionCard title="Recruiter performance · RBot" badge="This month">
+            {rbRecruiters.length === 0 ? <Empty msg="No recruiter data." /> : (
+              <Box display="flex" flexDirection="column" gap={1.8}>
+                {rbRecruiters.map((r, i) => {
+                  const selPct = r.total > 0 ? Math.round((r.selected / r.total) * 100) : 0;
+                  return (
+                    <Box key={r.recruiter_id}>
+                      <Box display="flex" alignItems="center" gap={1.5} mb={0.6}>
+                        <Avatar sx={{
+                          width: 28, height: 28, fontSize: 11, fontWeight: 700,
+                          bgcolor: STAGE_BGS[i % STAGE_BGS.length],
+                          color: STAGE_COLORS[i % STAGE_COLORS.length],
+                        }}>
+                          {(r.recruiter_name || "?")[0].toUpperCase()}
+                        </Avatar>
+                        <Box flex={1} minWidth={0}>
+                          <Box display="flex" justifyContent="space-between" alignItems="center">
+                            <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#1a1a1a" }} noWrap>
+                              {r.recruiter_name}
+                            </Typography>
+                            <Box display="flex" gap={1} alignItems="center" flexShrink={0}>
+                              <Typography sx={{ fontSize: 12, color: "#0F6E56", fontWeight: 600 }}>
+                                {r.selected} sel
+                              </Typography>
+                              <Typography sx={{ fontSize: 12, color: "#B4B2A9" }}>/ {r.total}</Typography>
+                              <Chip label={`${selPct}%`} size="small" sx={{
+                                fontSize: 10, fontWeight: 700, height: 18, border: "none",
+                                bgcolor: selPct >= 50 ? "#E1F5EE" : selPct >= 25 ? "#FAEEDA" : "#FCEBEB",
+                                color:   selPct >= 50 ? "#0F6E56" : selPct >= 25 ? "#633806" : "#791F1F",
+                              }} />
+                            </Box>
+                          </Box>
+                        </Box>
+                      </Box>
+                      <Box sx={{ height: 5, borderRadius: 99, bgcolor: STAGE_BGS[i % STAGE_BGS.length], overflow: "hidden" }}>
+                        <Box sx={{
+                          width: `${maxRbRec > 0 ? (r.selected / maxRbRec) * 100 : 0}%`,
+                          height: "100%", bgcolor: STAGE_COLORS[i % STAGE_COLORS.length],
+                          borderRadius: 99, transition: "width 0.4s ease",
+                        }} />
+                      </Box>
+                    </Box>
+                  );
+                })}
+              </Box>
+            )}
+          </SectionCard>
+        </Grid>
+
+        <Grid item xs={12} md={7}>
+          <SectionCard title="Top active JDs · RBot" badge={`${rbJdOverall.length} shown`}>
+            {rbJdOverall.length === 0 ? <Empty msg="No JD data." /> : (
+              <Box display="flex" flexDirection="column" gap={0.8}>
+                {rbJdOverall.map((jd, i) => {
+                  const selPct = jd.total > 0 ? Math.round((jd.selected / jd.total) * 100) : 0;
+                  return (
+                    <Box key={jd.jdID} sx={{
+                      display: "flex", alignItems: "center", gap: 1.5,
+                      p: "10px 12px", borderRadius: "8px",
+                      border: "0.5px solid rgba(0,0,0,0.06)", bgcolor: "#FAFAF9",
+                      "&:hover": { bgcolor: "#F1EFE8" }, transition: "background 0.12s",
+                    }}>
+                      <Box sx={{
+                        width: 28, height: 28, borderRadius: "8px",
+                        bgcolor: STAGE_BGS[i % STAGE_BGS.length],
+                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                      }}>
+                        <Work sx={{ fontSize: 14, color: STAGE_COLORS[i % STAGE_COLORS.length] }} />
+                      </Box>
+                      <Box flex={1} minWidth={0}>
+                        <Box display="flex" alignItems="baseline" gap={1}>
+                          <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#1a1a1a" }} noWrap>
+                            {jd.jobRole || "—"}
+                          </Typography>
+                          <Typography sx={{ fontSize: 11, color: "#B4B2A9", fontFamily: "monospace", flexShrink: 0 }}>
+                            {jd.jdID}
+                          </Typography>
+                        </Box>
+                        <Typography sx={{ fontSize: 11, color: "#888780" }}>{jd.companyName}</Typography>
+                      </Box>
+                      <Box display="flex" gap={0.8} alignItems="center" flexShrink={0}>
+                        <Chip label={`${jd.total} cand.`} size="small" sx={{ fontSize: 10, fontWeight: 500, height: 20, bgcolor: "#E6F1FB", color: "#0C447C", border: "none" }} />
+                        <Chip label={`${jd.selected} sel.`} size="small" sx={{ fontSize: 10, fontWeight: 600, height: 20, bgcolor: "#E1F5EE", color: "#085041", border: "none" }} />
+                        {selPct > 0 && (
+                          <Typography sx={{ fontSize: 11, fontWeight: 600, color: "#888780", minWidth: 30, textAlign: "right" }}>
+                            {selPct}%
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  );
+                })}
+              </Box>
+            )}
+          </SectionCard>
+        </Grid>
+      </Grid>
+
+
+
     </Box>
   );
-};
-
-export default ManagerDashboard;
+}

@@ -184,12 +184,12 @@ const ClientCard = ({ client, jobCnt, candidateCnt, placedCnt, isSelected, onSel
             borderRadius: 1.5, "&:hover": { bgcolor: "#dbeafe", borderColor: "#1e40af" } }}>
           View Jobs
         </Button>
-        <Button size="small" onClick={(e) => { e.stopPropagation(); onViewJDs(client); }}
+        {/* <Button size="small" onClick={(e) => { e.stopPropagation(); onViewJDs(client); }}
           sx={{ flex: 1, fontSize: 11, py: 0.4, textTransform: "none", fontWeight: 600,
             color: "#7b1fa2", borderColor: "rgba(123,31,162,0.25)", border: "0.5px solid",
             borderRadius: 1.5, "&:hover": { bgcolor: "#f3e5f5", borderColor: "#7b1fa2" } }}>
           JD Details
-        </Button>
+        </Button> */}
         <Button size="small" onClick={(e) => { e.stopPropagation(); onViewCandidates(client); }}
           sx={{ flex: 1, fontSize: 11, py: 0.4, textTransform: "none", fontWeight: 600,
             color: "#059669", borderColor: "rgba(5,150,105,0.25)", border: "0.5px solid",
@@ -340,7 +340,8 @@ export default function Clients() {
   const [formTarget, setFormTarget]= useState(null);
   const [formData,   setFormData]  = useState(EMPTY_FORM);
   const [saving,     setSaving]    = useState(false);
-
+  const [analyticsMap, setAnalyticsMap] = useState({}); // client_id → { total_jds, total_candidates, total_hired }
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
 const getUser = () => {
   try { return JSON.parse(localStorage.getItem("user") || "{}"); }
@@ -355,7 +356,23 @@ const isManager = (getUser()?.role || "").toLowerCase() === "manager";
   }, []);
   const loadJobs    = useCallback(async () => { try { const r = await getAllJobs();    setJobs(r.data || []);    } catch { setJobs([]); } }, []);
   const loadResumes = useCallback(async () => { try { const r = await getAllResumes(); setResumes(r.data || []); } catch { setResumes([]); } }, []);
-  useEffect(() => { load(); loadJobs(); loadResumes(); }, [load, loadJobs, loadResumes]);
+  const loadAnalytics = useCallback(async () => {
+    try {
+      setAnalyticsLoading(true);
+      const res = await fetch(`${CLIENT_BASE}/analytics/all`, { headers: getHeaders() });
+      const data = await handle(res);
+      const map = {};
+      (data.data?.clients || []).forEach(c => {
+        // key by both _id and client_ref_id so we can look up either way
+        map[c.client_id]     = c;
+        map[c.client_ref_id] = c;
+      });
+      setAnalyticsMap(map);
+    } catch { setAnalyticsMap({}); }
+    finally { setAnalyticsLoading(false); }
+  }, []);
+  useEffect(() => { load(); loadJobs(); loadResumes(); loadAnalytics(); }, [load, loadJobs, loadResumes, loadAnalytics]);
+
 
   // ── Count helpers (all computed live from actual data) ─────────────────────
   // Gets all jobs belonging to this client
@@ -363,25 +380,32 @@ const isManager = (getUser()?.role || "").toLowerCase() === "manager";
     j.client_id === c.client_id || j.client_id === c._id
   );
 
-  // Count of job postings
-  const jobCount = (c) => clientJobs(c).length;
 
-  // Count of candidates linked to any of this client's jobs
+
+  const jobCount = (c) => {
+    const a = analyticsMap[String(c._id)] || analyticsMap[c.client_id];
+    if (a) return a.total_jds;
+    return clientJobs(c).length;
+  };
+  
   const candidateCount = (c) => {
+    const a = analyticsMap[String(c._id)] || analyticsMap[c.client_id];
+    if (a) return a.total_candidates;
     const jobIds = clientJobs(c).map(j => j.job_id);
     return resumes.filter(r => r.linked_job_id && jobIds.includes(r.linked_job_id)).length;
   };
-
-  // Count of candidates with status "Hired" linked to this client's jobs
-  // This is the real "placed" count based on actual candidate status
+  
   const placedCount = (c) => {
+    const a = analyticsMap[String(c._id)] || analyticsMap[c.client_id];
+    if (a) return a.total_hired;
     const jobIds = clientJobs(c).map(j => j.job_id);
     return resumes.filter(r =>
-      r.status === "Hired" &&
-      r.linked_job_id &&
-      jobIds.includes(r.linked_job_id)
+      r.status === "Hired" && r.linked_job_id && jobIds.includes(r.linked_job_id)
     ).length;
   };
+
+
+
 
   const filtered = clients.filter(c => {
     const q = search.toLowerCase();
@@ -390,13 +414,26 @@ const isManager = (getUser()?.role || "").toLowerCase() === "manager";
       && (!industryF || c.industry === industryF);
   });
 
+  // const stats = {
+  //   total:       clients.length,
+  //   active:      clients.filter(c => c.relationship_status === "Active").length,
+  //   activeJobs:  jobs.length,
+  //   placements:  resumes.filter(r => r.status === "Hired").length,
+  // };
+  const allAnalytics = Object.values(analyticsMap).filter(a => a.client_id); // dedupe
   const stats = {
-    total:       clients.length,
-    active:      clients.filter(c => c.relationship_status === "Active").length,
-    activeJobs:  jobs.length,
-    // Sum of hired candidates across all clients — single source of truth
-    placements:  resumes.filter(r => r.status === "Hired").length,
+    total:      clients.length,
+    active:     clients.filter(c => c.relationship_status === "Active").length,
+    activeJobs: allAnalytics.length > 0
+      ? allAnalytics.reduce((s, a) => s + (a.total_jds || 0), 0)
+      : jobs.length,
+    placements: allAnalytics.length > 0
+      ? allAnalytics.reduce((s, a) => s + (a.total_hired || 0), 0)
+      : resumes.filter(r => r.status === "Hired").length,
   };
+
+
+
 
   const handleSelect  = (c) => setSelected(prev => prev?._id === c._id ? null : c);
   const goJobs        = (c) => navigate(`/jobs?client=${c._id}&client_name=${encodeURIComponent(c.company_name)}`);

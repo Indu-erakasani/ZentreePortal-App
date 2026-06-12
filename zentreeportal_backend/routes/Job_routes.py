@@ -7,7 +7,7 @@ from bson.errors import InvalidId
 from datetime import datetime
 from extensions import mongo, resourcing_db
 from models.Job_model import serialize_job, PRIORITIES, STATUSES, JOB_TYPES, WORK_MODES
-
+import re
 job_bp = Blueprint("jobs", __name__)
 
 
@@ -459,6 +459,7 @@ def get_jds():
 
     q         = request.args.get("q", "").strip()
     is_active = request.args.get("is_active", "")
+    company = request.args.get("company", "").strip()
     page      = max(1, _int(request.args.get("page",     1)))
     per_page  = max(1, _int(request.args.get("per_page", 20)))
 
@@ -470,7 +471,12 @@ def get_jds():
     user_email   = current_user.get("email", "") if current_user else ""
 
     query = {}
-
+    
+    
+    if company:
+            query["companyName"] = {"$regex": re.escape(company), "$options": "i"}
+            
+            
     if user_role == "recruiter":
         # Find this recruiter's record in ResourcingBot DB by email
         rb_user = resourcing_db["users"].find_one({

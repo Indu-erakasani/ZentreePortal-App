@@ -275,7 +275,9 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
   const load = useCallback(async () => {
     try {
       setLoading(true); setError("");
-      const res = await getAllJDs({ per_page: 200 });
+      const params = { per_page: 200 };
+      if (initialClientName) params.company = initialClientName;
+      const res = await getAllJDs(params);
       setJDs(res.data || []);
     } catch (err) {
       setError(err?.message || "Failed to load JD details.");
@@ -283,7 +285,7 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [initialClientName]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -299,22 +301,36 @@ const QuestionSection = ({ icon, title, color, count, bankCount, children }) => 
       || j.jobRole?.toLowerCase().includes(q)
       || j.skills?.some(s => s.toLowerCase().includes(q));
     const mA  = activeF === "" ? true : activeF === "active" ? j.is_active : !j.is_active;
-    const mCo = !companyF || j.companyName === companyF;
+    // const mCo = !companyF || j.companyName === companyF;
+    const mCo = !companyF || 
+      j.companyName?.toLowerCase().includes(companyF.toLowerCase()) ||
+      companyF.toLowerCase().includes(j.companyName?.toLowerCase());
     const mSk = !skillF   || (j.skills || []).includes(skillF);
     return mQ && mA && mCo && mSk;
   });
 
   const now   = new Date();
+  const statsSource = isLocked ? filtered : jds;
   const stats = {
-    total:     jds.length,
-    active:    jds.filter(j => j.is_active).length,
-    expired:   jds.filter(j => j.expiration_time && new Date(j.expiration_time) < now).length,
-    withQs:    jds.filter(j =>
+    total:     statsSource.length,
+    active:    statsSource.filter(j => j.is_active).length,
+    expired:   statsSource.filter(j => j.expiration_time && new Date(j.expiration_time) < now).length,
+    withQs:    statsSource.filter(j =>
       (j.mcq_questions?.length || 0) +
       (j.subjective_questions?.length || 0) +
       (j.coding_questions?.length || 0) > 0
     ).length,
   };
+  // const stats = {
+  //   total:     jds.length,
+  //   active:    jds.filter(j => j.is_active).length,
+  //   expired:   jds.filter(j => j.expiration_time && new Date(j.expiration_time) < now).length,
+  //   withQs:    jds.filter(j =>
+  //     (j.mcq_questions?.length || 0) +
+  //     (j.subjective_questions?.length || 0) +
+  //     (j.coding_questions?.length || 0) > 0
+  //   ).length,
+  // };
 
   const openDetail = (j) => {
     setSelected(j);

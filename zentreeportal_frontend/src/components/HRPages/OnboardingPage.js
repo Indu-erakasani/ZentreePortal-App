@@ -114,10 +114,8 @@ function SaveBar({ onSave, saving, success }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 //  TAB 0 — OVERVIEW
-// ══════════════════════════════════════════════════════════════════════════════
-function OverviewTab({ employeeId, data, employee, onRefresh }) {
+function OverviewTab({ employeeId, data, employee, onRefresh , onSaveSuccess}) {
   const [form,    setForm]    = useState({});
   const [saving,  setSaving]  = useState(false);
   const [success, setSuccess] = useState(false);
@@ -141,6 +139,7 @@ function OverviewTab({ employeeId, data, employee, onRefresh }) {
       await updateOnboarding(employeeId, form);
       setSuccess(true);
       onRefresh();
+      onSaveSuccess?.("Overview details saved successfully");
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) { console.error(err); }
     finally { setSaving(false); }
@@ -151,44 +150,44 @@ function OverviewTab({ employeeId, data, employee, onRefresh }) {
       <SectionHeader title="Personal & Joining Details" subtitle="Basic onboarding information for this employee" />
       <Grid container spacing={2.5}>
         <Grid item xs={12} sm={6} md={4}>
-          <Typography sx={{ fontSize: 11, color: SLATE, fontWeight: 600, textTransform: "uppercase", mb: 0.5 }}>Employee ID</Typography>
-          <Typography sx={{ fontSize: 13, fontWeight: 700, color: NAVY }}>{employee?.emp_id || "—"}</Typography>
+          <Typography sx={{ width:300,fontSize: 11, color: SLATE, fontWeight: 600, textTransform: "uppercase", mb: 0.5 }}>Employee ID</Typography>
+          <Typography sx={{ width:300,fontSize: 13, fontWeight: 700, color: NAVY }}>{employee?.emp_id || "—"}</Typography>
         </Grid>
         <Grid item xs={12} sm={6} md={4}>
-          <Typography sx={{ fontSize: 11, color: SLATE, fontWeight: 600, textTransform: "uppercase", mb: 0.5 }}>Name</Typography>
-          <Typography sx={{ fontSize: 13, fontWeight: 700, color: NAVY }}>{employee?.name || "—"}</Typography>
+          <Typography sx={{width:300, fontSize: 11, color: SLATE, fontWeight: 600, textTransform: "uppercase", mb: 0.5 }}>Name</Typography>
+          <Typography sx={{width:300, fontSize: 13, fontWeight: 700, color: NAVY }}>{employee?.name || "—"}</Typography>
         </Grid>
         <Grid item xs={12} sm={6} md={4}>
-          <Typography sx={{ fontSize: 11, color: SLATE, fontWeight: 600, textTransform: "uppercase", mb: 0.5 }}>Joining Date</Typography>
-          <Typography sx={{ fontSize: 13, fontWeight: 700, color: NAVY }}>
+          <Typography sx={{ width:300,fontSize: 11, color: SLATE, fontWeight: 600, textTransform: "uppercase", mb: 0.5 }}>Joining Date</Typography>
+          <Typography sx={{ width:300,fontSize: 13, fontWeight: 700, color: NAVY }}>
             {fmtDate(data?.joining_date || employee?.date_of_joining)}
           </Typography>
         </Grid>
 
         <Grid item xs={12} sm={6} md={4}>
-          <TextField fullWidth size="small" label="Blood Group" name="blood_group"
+          <TextField sx={{width:300}} size="small" label="Blood Group" name="blood_group"
             value={form.blood_group || ""} onChange={handleChange} placeholder="e.g. O+" />
         </Grid>
         <Grid item xs={12} sm={6} md={4}>
-          <TextField fullWidth size="small" label="Personal Email" name="personal_email"
+          <TextField sx={{width:300}} size="small" label="Personal Email" name="personal_email"
             type="email" value={form.personal_email || ""} onChange={handleChange} />
         </Grid>
         <Grid item xs={12} sm={6} md={4}>
-          <TextField fullWidth size="small" label="Referred By" name="referred_by"
+          <TextField sx={{width:300}} size="small" label="Referred By" name="referred_by"
             value={form.referred_by || ""} onChange={handleChange} />
         </Grid>
         <Grid item xs={12} sm={6} md={4}>
-          <TextField fullWidth size="small" label="Probation End Date" name="probation_end_date"
+          <TextField sx={{width:300}} size="small" label="Probation End Date" name="probation_end_date"
             type="date" value={form.probation_end_date || ""} onChange={handleChange}
             InputLabelProps={{ shrink: true }} />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth multiline rows={3} size="small" label="HR Notes"
+          <TextField sx={{width:620}} multiline rows={3} size="small" label="HR Notes"
             name="hr_notes" value={form.hr_notes || ""} onChange={handleChange}
             placeholder="Internal HR notes…" />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth multiline rows={3} size="small" label="IT Notes"
+          <TextField sx={{width:620}} multiline rows={3} size="small" label="IT Notes"
             name="it_notes" value={form.it_notes || ""} onChange={handleChange}
             placeholder="IT setup notes…" />
         </Grid>
@@ -198,10 +197,8 @@ function OverviewTab({ employeeId, data, employee, onRefresh }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 //  TAB 1 — CHECKLIST
-// ══════════════════════════════════════════════════════════════════════════════
-function ChecklistTab({ employeeId, data, onRefresh }) {
+function ChecklistTab({ employeeId, data, onRefresh , onSaveSuccess}) {
   const [items,  setItems]  = useState([]);
   const [saving, setSaving] = useState(null);
 
@@ -218,6 +215,7 @@ function ChecklistTab({ employeeId, data, onRefresh }) {
     setSaving(idx);
     try {
       await updateChecklist(employeeId, idx, { done: next[idx].done, remarks: next[idx].remarks || "" });
+      onSaveSuccess?.("Checklist updated");
       onRefresh();
     } catch (err) {
       console.error(err);
@@ -232,6 +230,7 @@ function ChecklistTab({ employeeId, data, onRefresh }) {
     setSaving(idx);
     try {
       await updateChecklist(employeeId, idx, { done: items[idx].done, remarks: items[idx].remarks || "" });
+      onSaveSuccess?.("Checklist updated");
       onRefresh();
     } catch (err) { console.error(err); }
     finally { setSaving(null); }
@@ -315,34 +314,46 @@ function ChecklistTab({ employeeId, data, onRefresh }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 //  TAB 2 — DOCUMENTS
-// ══════════════════════════════════════════════════════════════════════════════
-function DocumentsTab({ employeeId, data, onRefresh }) {
+function DocumentsTab({ employeeId, data, onRefresh, onSaveSuccess }) {
   const [addOpen,   setAddOpen]   = useState(false);
-  const [addForm,   setAddForm]   = useState({ name: "", category: "Identity", status: "Pending", remarks: "" });
+  const [addForm,   setAddForm]   = useState({ name: "", category: "Identity", status: "Pending", remarks: "",file: null  });
   const [addSaving, setAddSaving] = useState(false);
   const [uploadIdx, setUploadIdx] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error,     setError]     = useState("");
   const fileRefs = useRef({});
-
+  const [addFile, setAddFile] = useState(null);
+  const addFileRef = useRef(null);
   const docs = data?.documents || [];
+
 
   const handleAddDoc = async () => {
     if (!addForm.name) { setError("Document name is required"); return; }
     setAddSaving(true); setError("");
     try {
-      await addDocument(employeeId, addForm);
+      const res = await addDocument(employeeId, {
+        name: addForm.name, category: addForm.category,
+        status: addForm.status, remarks: addForm.remarks,
+      });
+      // if a file was selected, upload it to the newly created doc index
+      if (addFile) {
+        const newIdx = (res.data?.documents?.length ?? 1) - 1;
+        await uploadDocFile(employeeId, newIdx, addFile);
+      }
       setAddOpen(false);
-      setAddForm({ name: "", category: "Identity", status: "Pending", remarks: "" });
+      setAddForm({ name: "", category: "Identity", status: "Pending", remarks: "", file: null });
+      setAddFile(null);
+      onSaveSuccess?.("Document added successfully");
       onRefresh();
     } catch (err) { setError(err?.message || "Failed to add document"); }
     finally { setAddSaving(false); }
   };
 
   const handleStatusChange = async (idx, status) => {
-    try { await updateDocument(employeeId, idx, { status }); onRefresh(); }
+    try { await updateDocument(employeeId, idx, { status }); 
+    onSaveSuccess?.("Document status updated");
+    onRefresh(); }
     catch (err) { console.error(err); }
   };
 
@@ -353,7 +364,9 @@ function DocumentsTab({ employeeId, data, onRefresh }) {
 
   const handleDelete = async (idx) => {
     if (!window.confirm("Delete this document?")) return;
-    try { await deleteDocument(employeeId, idx); onRefresh(); }
+    try { await deleteDocument(employeeId, idx); 
+      onSaveSuccess?.("Document deleted");
+      onRefresh(); }
     catch (err) { console.error(err); }
   };
 
@@ -528,14 +541,14 @@ function DocumentsTab({ employeeId, data, onRefresh }) {
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           <Grid container spacing={2}>
             <Grid item xs={12}>
-              <TextField select fullWidth size="small" label="Category *"
+              <TextField select sx={{width:200,marginTop:2}} size="small" label="Category *"
                 value={addForm.category}
                 onChange={e => setAddForm(p => ({ ...p, category: e.target.value, name: "" }))}>
                 {Object.keys(DOC_CATEGORIES).map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
               </TextField>
             </Grid>
             <Grid item xs={12}>
-              <TextField select fullWidth size="small" label="Document Name *"
+              <TextField select sx={{width:200,marginTop:2}} size="small" label="Document Name *"
                 value={addForm.name}
                 onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))}>
                 <MenuItem value="">— Select document —</MenuItem>
@@ -545,17 +558,56 @@ function DocumentsTab({ employeeId, data, onRefresh }) {
               </TextField>
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField select fullWidth size="small" label="Initial Status"
+              <TextField select sx={{width:200,marginTop:2}} size="small" label="Initial Status"
                 value={addForm.status}
                 onChange={e => setAddForm(p => ({ ...p, status: e.target.value }))}>
                 {DOC_STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
               </TextField>
             </Grid>
             <Grid item xs={12}>
-              <TextField fullWidth size="small" multiline rows={2} label="Remarks"
+              <TextField sx={{width:500,marginTop:2}} size="small" multiline rows={2} label="Remarks"
                 value={addForm.remarks}
                 onChange={e => setAddForm(p => ({ ...p, remarks: e.target.value }))} />
             </Grid>
+            <Grid item xs={12}>
+            <Typography sx={{ fontSize: 12, color: SLATE, fontWeight: 600, mb: 0.8 }}>
+              Attach File <Typography component="span" sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}>(optional)</Typography>
+            </Typography>
+            <Box
+              onClick={() => addFileRef.current?.click()}
+              sx={{
+                border: `2px dashed ${addFile ? INDIGO : "#e2e8f0"}`,
+                borderRadius: "10px", p: 2, textAlign: "center",
+                cursor: "pointer", bgcolor: addFile ? "#f0f4ff" : "#f8fafc",
+                transition: "all 0.15s",
+                "&:hover": { borderColor: INDIGO, bgcolor: "#f0f4ff" },
+              }}
+            >
+              {addFile ? (
+                <Box display="flex" alignItems="center" justifyContent="center" gap={1}>
+                  <Description sx={{ fontSize: 18, color: INDIGO }} />
+                  <Typography sx={{ fontSize: 12, color: INDIGO, fontWeight: 600 }}>
+                    {addFile.name}
+                  </Typography>
+                  <IconButton size="small" onClick={e => { e.stopPropagation(); setAddFile(null); }}
+                    sx={{ color: "#dc2626", p: 0.3 }}>
+                    <Delete sx={{ fontSize: 14 }} />
+                  </IconButton>
+                </Box>
+              ) : (
+                <Box display="flex" alignItems="center" justifyContent="center" gap={1}>
+                  <CloudUpload sx={{ fontSize: 20, color: SLATE }} />
+                  <Typography sx={{ fontSize: 12, color: SLATE }}>
+                    Click to attach a file
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+            <input
+              type="file" hidden ref={addFileRef}
+              onChange={e => { const f = e.target.files?.[0]; if (f) setAddFile(f); e.target.value = ""; }}
+            />
+          </Grid>
           </Grid>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, borderTop: "1px solid #e2e8f0" }}>
@@ -572,10 +624,8 @@ function DocumentsTab({ employeeId, data, onRefresh }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 //  TAB 3 — BGV
-// ══════════════════════════════════════════════════════════════════════════════
-function BgvTab({ employeeId, data, onRefresh }) {
+function BgvTab({ employeeId, data, onRefresh ,onSaveSuccess}) {
   const [form,    setForm]    = useState({});
   const [saving,  setSaving]  = useState(false);
   const [success, setSuccess] = useState(false);
@@ -592,6 +642,7 @@ function BgvTab({ employeeId, data, onRefresh }) {
     setSaving(true); setSuccess(false);
     try {
       await updateOnboarding(employeeId, form);
+      onSaveSuccess?.("BGV details saved successfully");
       setSuccess(true); onRefresh();
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) { console.error(err); }
@@ -618,20 +669,20 @@ function BgvTab({ employeeId, data, onRefresh }) {
       </Box>
       <Grid container spacing={2.5}>
         <Grid item xs={12} sm={6}>
-          <TextField select fullWidth size="small" label="BGV Status"
+          <TextField select sx={{width:200}} size="small" label="BGV Status"
             value={form.bgv_status || ""}
             onChange={e => setForm(p => ({ ...p, bgv_status: e.target.value }))}>
             {BGV_STATUSES.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
           </TextField>
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="BGV Agency"
+          <TextField sx={{width:200}} size="small" label="BGV Agency"
             value={form.bgv_agency || ""}
             onChange={e => setForm(p => ({ ...p, bgv_agency: e.target.value }))}
             placeholder="e.g. AuthBridge, First Advantage" />
         </Grid>
         <Grid item xs={12}>
-          <TextField fullWidth multiline rows={4} size="small" label="BGV Remarks"
+          <TextField sx={{width:420}} multiline rows={4} size="small" label="BGV Remarks"
             value={form.bgv_remarks || ""}
             onChange={e => setForm(p => ({ ...p, bgv_remarks: e.target.value }))}
             placeholder="Notes about the verification process, discrepancies, etc." />
@@ -642,10 +693,8 @@ function BgvTab({ employeeId, data, onRefresh }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 //  TAB 4 — IT & ASSETS
-// ══════════════════════════════════════════════════════════════════════════════
-function ITAssetsTab({ employeeId, data, onRefresh }) {
+function ITAssetsTab({ employeeId, data, onRefresh ,onSaveSuccess}) {
   const [form,    setForm]    = useState({});
   const [saving,  setSaving]  = useState(false);
   const [success, setSuccess] = useState(false);
@@ -665,6 +714,7 @@ function ITAssetsTab({ employeeId, data, onRefresh }) {
     try {
       await updateOnboarding(employeeId, form);
       setSuccess(true); onRefresh();
+      onSaveSuccess?.("IT & Asset details saved successfully");
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) { console.error(err); }
     finally { setSaving(false); }
@@ -675,30 +725,30 @@ function ITAssetsTab({ employeeId, data, onRefresh }) {
       <SectionHeader title="IT & Asset Assignment" subtitle="Track hardware, access cards and system access" />
       <Grid container spacing={2.5}>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Laptop Serial Number"
+          <TextField sx={{width:300}} size="small" label="Laptop Serial Number"
             value={form.laptop_serial || ""}
             onChange={e => setForm(p => ({ ...p, laptop_serial: e.target.value }))}
             placeholder="e.g. C02X123456" />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Laptop Make & Model"
+          <TextField sx={{width:300}} size="small" label="Laptop Make & Model"
             value={form.laptop_make_model || ""}
             onChange={e => setForm(p => ({ ...p, laptop_make_model: e.target.value }))}
             placeholder="e.g. Apple MacBook Pro 14 M3" />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Access Card Number"
+          <TextField sx={{width:300}} size="small" label="Access Card Number"
             value={form.access_card_number || ""}
             onChange={e => setForm(p => ({ ...p, access_card_number: e.target.value }))} />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Corporate Email ID"
+          <TextField sx={{width:300}} size="small" label="Corporate Email ID"
             value={form.email_id_created || ""}
             onChange={e => setForm(p => ({ ...p, email_id_created: e.target.value }))}
             placeholder="e.g. name@zentreelabs.com" />
         </Grid>
         <Grid item xs={12}>
-          <TextField fullWidth multiline rows={3} size="small" label="IT Notes"
+          <TextField sx={{width:620}} multiline rows={3} size="small" label="IT Notes"
             value={form.it_notes || ""}
             onChange={e => setForm(p => ({ ...p, it_notes: e.target.value }))}
             placeholder="System access, tools configured, pending items…" />
@@ -709,10 +759,8 @@ function ITAssetsTab({ employeeId, data, onRefresh }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 //  TAB 5 — BANK & EMERGENCY CONTACT
-// ══════════════════════════════════════════════════════════════════════════════
-function BankEmergencyTab({ employeeId, data, onRefresh }) {
+function BankEmergencyTab({ employeeId, data, onRefresh,onSaveSuccess }) {
   const [bank,    setBank]    = useState({});
   const [emg,     setEmg]     = useState({});
   const [saving,  setSaving]  = useState(false);
@@ -741,6 +789,7 @@ function BankEmergencyTab({ employeeId, data, onRefresh }) {
     try {
       await updateOnboarding(employeeId, { bank_details: bank, emergency_contact: emg });
       setSuccess(true); onRefresh();
+      onSaveSuccess?.("Bank & emergency contact saved successfully");
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) { console.error(err); }
     finally { setSaving(false); }
@@ -751,33 +800,33 @@ function BankEmergencyTab({ employeeId, data, onRefresh }) {
       <SectionHeader title="Bank Account Details" subtitle="For payroll processing" />
       <Grid container spacing={2.5} mb={4}>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Account Holder Name"
+          <TextField sx={{width:300}} size="small" label="Account Holder Name"
             value={bank.account_holder_name || ""}
             onChange={e => setBank(p => ({ ...p, account_holder_name: e.target.value }))} />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Account Number"
+          <TextField sx={{width:300}} size="small" label="Account Number"
             value={bank.account_number || ""}
             onChange={e => setBank(p => ({ ...p, account_number: e.target.value }))} />
         </Grid>
         <Grid item xs={12} sm={4}>
-          <TextField fullWidth size="small" label="IFSC Code"
+          <TextField sx={{width:300}} size="small" label="IFSC Code"
             value={bank.ifsc_code || ""}
             onChange={e => setBank(p => ({ ...p, ifsc_code: e.target.value.toUpperCase() }))}
             placeholder="e.g. HDFC0001234" />
         </Grid>
         <Grid item xs={12} sm={4}>
-          <TextField fullWidth size="small" label="Bank Name"
+          <TextField sx={{width:300}} size="small" label="Bank Name"
             value={bank.bank_name || ""}
             onChange={e => setBank(p => ({ ...p, bank_name: e.target.value }))} />
         </Grid>
         <Grid item xs={12} sm={4}>
-          <TextField fullWidth size="small" label="Branch"
+          <TextField sx={{width:300}} size="small" label="Branch"
             value={bank.branch || ""}
             onChange={e => setBank(p => ({ ...p, branch: e.target.value }))} />
         </Grid>
         <Grid item xs={12} sm={4}>
-          <TextField select fullWidth size="small" label="Account Type"
+          <TextField select sx={{width:300}} size="small" label="Account Type"
             value={bank.account_type || "Savings"}
             onChange={e => setBank(p => ({ ...p, account_type: e.target.value }))}>
             {ACCOUNT_TYPES.map(t => <MenuItem key={t} value={t}>{t}</MenuItem>)}
@@ -790,28 +839,28 @@ function BankEmergencyTab({ employeeId, data, onRefresh }) {
       <SectionHeader title="Emergency Contact" subtitle="Person to contact in case of emergency" />
       <Grid container spacing={2.5}>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Contact Name"
+          <TextField sx={{width:300}} size="small" label="Contact Name"
             value={emg.name || ""}
             onChange={e => setEmg(p => ({ ...p, name: e.target.value }))} />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Relationship"
+          <TextField sx={{width:300}} size="small" label="Relationship"
             value={emg.relationship || ""}
             onChange={e => setEmg(p => ({ ...p, relationship: e.target.value }))}
             placeholder="e.g. Spouse, Parent, Sibling" />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Phone"
+          <TextField sx={{width:300}} size="small" label="Phone"
             value={emg.phone || ""}
             onChange={e => setEmg(p => ({ ...p, phone: e.target.value }))} />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField fullWidth size="small" label="Email" type="email"
+          <TextField sx={{width:300}} size="small" label="Email" type="email"
             value={emg.email || ""}
             onChange={e => setEmg(p => ({ ...p, email: e.target.value }))} />
         </Grid>
         <Grid item xs={12}>
-          <TextField fullWidth size="small" multiline rows={2} label="Address"
+          <TextField sx={{width:620}} size="small" multiline rows={2} label="Address"
             value={emg.address || ""}
             onChange={e => setEmg(p => ({ ...p, address: e.target.value }))} />
         </Grid>
@@ -821,10 +870,8 @@ function BankEmergencyTab({ employeeId, data, onRefresh }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 //  DETAIL DIALOG
-// ══════════════════════════════════════════════════════════════════════════════
-export function OnboardingDetail({ open, onClose, employee }) {
+export function OnboardingDetail({ open, onClose, employee, onSaveSuccess }) {
   const [tab,     setTab]     = useState(0);
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
@@ -928,12 +975,12 @@ export function OnboardingDetail({ open, onClose, employee }) {
         {!loading && error && <Alert severity="error">{error}</Alert>}
         {!loading && !error && data && (
           <Box sx={{ bgcolor: "#fff", borderRadius: "12px", border: "1px solid #e2e8f0", p: 3 }}>
-            {tab === 0 && <OverviewTab      employeeId={employeeId} data={data} employee={employee} onRefresh={loadData} />}
-            {tab === 1 && <ChecklistTab     employeeId={employeeId} data={data} onRefresh={loadData} />}
-            {tab === 2 && <DocumentsTab     employeeId={employeeId} data={data} onRefresh={loadData} />}
-            {tab === 3 && <BgvTab           employeeId={employeeId} data={data} onRefresh={loadData} />}
-            {tab === 4 && <ITAssetsTab      employeeId={employeeId} data={data} onRefresh={loadData} />}
-            {tab === 5 && <BankEmergencyTab employeeId={employeeId} data={data} onRefresh={loadData} />}
+            {tab === 0 && <OverviewTab      employeeId={employeeId} data={data} employee={employee} onRefresh={loadData} onSaveSuccess={onSaveSuccess} />}
+            {tab === 1 && <ChecklistTab     employeeId={employeeId} data={data} onRefresh={loadData} onSaveSuccess={onSaveSuccess} />}
+            {tab === 2 && <DocumentsTab     employeeId={employeeId} data={data} onRefresh={loadData} onSaveSuccess={onSaveSuccess} />}
+            {tab === 3 && <BgvTab           employeeId={employeeId} data={data} onRefresh={loadData} onSaveSuccess={onSaveSuccess} />}
+            {tab === 4 && <ITAssetsTab      employeeId={employeeId} data={data} onRefresh={loadData} onSaveSuccess={onSaveSuccess} />}
+            {tab === 5 && <BankEmergencyTab employeeId={employeeId} data={data} onRefresh={loadData} onSaveSuccess={onSaveSuccess} />}
           </Box>
         )}
       </DialogContent>
@@ -941,9 +988,7 @@ export function OnboardingDetail({ open, onClose, employee }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 //  MAIN PAGE
-// ══════════════════════════════════════════════════════════════════════════════
 export default function OnboardingPage() {
   const [employees,  setEmployees]  = useState([]);
   const [loading,    setLoading]    = useState(true);

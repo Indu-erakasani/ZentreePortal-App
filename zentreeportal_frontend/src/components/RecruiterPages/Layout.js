@@ -72,12 +72,7 @@ const NAV_ITEMS = [
     // HR can access /resumes but the backend returns only "Hired" records for them
     roles: ["admin", "recruiter", "manager", "hr"],
   },
-  {
-    label: "Placements",
-    icon:  <Stars />,
-    paths: ["/placements"],
-    roles: ["admin", "recruiter", "manager"],
-  },
+
   {
     label: "Skills",
     icon:  <Psychology />,

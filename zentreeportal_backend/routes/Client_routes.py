@@ -441,11 +441,18 @@ def all_clients_analytics():
         client_id_str = str(client["_id"])
 
         r = _process_client_entry(company_name, client, client_id_str)
-
+        
+        # ── Count RB JDs for this portal client too ──────────────────────────
+        rb_jd_count_for_portal = resourcing_db["jd_details"].count_documents(
+            {"companyName": {"$regex": f"^{re.escape(company_name.strip())}$", "$options": "i"}}
+        )
+        total_jds_combined = len(r["client_jobs"]) + rb_jd_count_for_portal
+    
+    
         grand_billing    += r["total_billing"]
         grand_salary     += r["total_salary"]
         grand_active_emp += r["active_count"]
-        grand_jds        += len(r["client_jobs"])
+        grand_jds        += total_jds_combined
         grand_candidates += len(r["client_resumes"])
         grand_hired      += r["hired_count"]
 
@@ -459,7 +466,7 @@ def all_clients_analytics():
             "agreement_start":       client.get("agreement_start").isoformat() if isinstance(client.get("agreement_start"), datetime) else None,
             "agreement_end":         client.get("agreement_end").isoformat() if isinstance(client.get("agreement_end"), datetime) else None,
             "total_active_employees": r["active_count"],
-            "total_jds":             len(r["client_jobs"]),
+            "total_jds":             total_jds_combined,
             "total_candidates":      len(r["client_resumes"]),
             "total_hired":           r["hired_count"],
             "conversion_rate":       round((r["hired_count"] / len(r["client_resumes"]) * 100), 1) if r["client_resumes"] else 0,

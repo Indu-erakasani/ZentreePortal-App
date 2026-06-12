@@ -21,6 +21,7 @@ import {
 
 import CandidateDetailContent, { nameInitials, fmtSalary, STATUS_COLOR, STAGE_COLOR } from "./Candidatedetailcontent";
 import ExamResultsDialog from "./Examresultsview";
+import { OnboardingDetail } from "../HRPages/OnboardingPage";
 // ── API helpers ───────────────────────────────────────────────────────────────
 const BASE = process.env.REACT_APP_API_BASE_URL;
 const RESUMES_BASE = process.env.REACT_APP_API_RESUMES_URL;
@@ -99,6 +100,14 @@ const getResourcingCandidates = (p = {}) => {
       headers: getHeaders()
     }).then(handle);
   };
+
+
+  const startOnboarding = (candidateId) =>
+    fetch(`${process.env.REACT_APP_API_ONBOARDING_URL}/selected-candidates/${candidateId}/start`, {
+      method: "POST",
+      headers: getHeaders(),
+    }).then(handle);
+
 
 // ── Exam Apis ────────────────────────────────────────────────────────────
 
@@ -1468,10 +1477,16 @@ export default function Resumes() {
   const [urlJobTitle,    setUrlJobTitle]    = useState(_qp.get("job_title")   || "");
   const [isJobLocked,    setIsJobLocked]    = useState(!!_qp.get("job"));
 
-
+  const [hrOnboardOpen,  setHrOnboardOpen]  = useState(false);
+  const [hrActiveEmp,    setHrActiveEmp]    = useState(null);
+  const [hrStarting,     setHrStarting]     = useState(null);
+  const [rbCompanyFilter, setRbCompanyFilter] = useState("");
 
   useEffect(() => {
     const p      = new URLSearchParams(location.search);
+    const company = p.get("company") || "";
+    setRbCompanyFilter(company);
+    if (company) setMainTab(2);
     const cid    = p.get("client")      || "";
     const cname  = p.get("client_name") || "";
     const jid    = p.get("job")         || "";
@@ -1504,7 +1519,8 @@ export default function Resumes() {
   };
 
   // ── Tabs & core state ──────────────────────────────────────────────────────
-  const [mainTab, setMainTab] = useState(0);
+  // const [mainTab, setMainTab] = useState(0);
+  const [mainTab, setMainTab] = useState(isHR ? 2 : 0);
 
   const [resumes,     setResumes]     = useState([]);
   const [jobs,        setJobs]        = useState([]);
@@ -1552,7 +1568,10 @@ export default function Resumes() {
 const [rbCandidates,   setRbCandidates]   = useState([]);
 const [rbLoading,      setRbLoading]      = useState(false);
 const [rbSearch,       setRbSearch]       = useState("");
-const [rbStatusF,      setRbStatusF]      = useState("");
+
+// const [rbStatusF,      setRbStatusF]      = useState("");
+const [rbStatusF, setRbStatusF] = useState(isHR ? "Selected" : "");
+
 const [rbSelected,     setRbSelected]     = useState(null);
 const [rbDetailOpen,   setRbDetailOpen]   = useState(false);
 const [rbPage,     setRbPage]     = useState(1);
@@ -1675,7 +1694,18 @@ const [rbPerPage]                 = useState(50);
   //   finally { setRbLoading(false); }
   // }, []);
 
-
+  const handleHRViewCandidate = async (candidate) => {
+    setHrStarting(candidate._id);
+    try {
+      const res = await startOnboarding(candidate._id);
+      setHrActiveEmp(res.employee);
+      setHrOnboardOpen(true);
+    } catch (err) {
+      setError(err?.message || "Could not open onboarding for this candidate");
+    } finally {
+      setHrStarting(null);
+    }
+  };
 
   const loadRB = useCallback(async (page = 1) => {
     try {
@@ -1686,13 +1716,14 @@ const [rbPerPage]                 = useState(50);
         ...(rbSearch  ? { q: rbSearch }           : {}),
         ...(rbStatusF ? { status: rbStatusF }      : {}),
         ...(rbJdFilter  ? { jd_id: rbJdFilter }   : {}),
+        ...(rbCompanyFilter ? { company: rbCompanyFilter } : {}),
       });
       setRbCandidates(res.data || []);
       setRbTotal(res.total || 0);
       setRbPage(page);
     } catch { setRbCandidates([]); }
     finally { setRbLoading(false); }
-  }, [rbSearch, rbStatusF, rbPerPage,rbJdFilter]);
+  }, [rbSearch, rbStatusF, rbPerPage,rbJdFilter,rbCompanyFilter]);
 
 
 
@@ -1706,7 +1737,7 @@ const [rbPerPage]                 = useState(50);
 
   useEffect(() => {
     if (mainTab === 2) loadRB(1);
-  }, [rbSearch, rbStatusF, rbJdFilter]);
+  }, [rbSearch, rbStatusF, rbJdFilter, rbCompanyFilter]);
   useEffect(() => {
     load(); loadRaw(); loadJobs(); loadClients(); loadRecruiters(); loadAllTracking(); loadRB(); loadAllJobsCombined();
   }, [load, loadRaw, loadJobs, loadClients, loadRecruiters, loadAllTracking, loadRB ,loadAllJobsCombined]);
@@ -2311,7 +2342,10 @@ const handleTrackingIvSave = async (e) => {
 
         <Box>
           <Typography variant="h4" color="primary.dark">Candidates</Typography>
-          <Typography color="text.secondary" mt={0.5}>Manage candidate profiles and track applications</Typography>
+          {/* <Typography color="text.secondary" mt={0.5}>Manage candidate profiles and track applications</Typography> */}
+          <Typography color="text.secondary" mt={0.5}>
+            {isHR ? "Selected candidates onboarding pipeline" : "Manage candidate profiles and track applications"}
+          </Typography>
         </Box>
         <Box display="flex" gap={1.5}>
           {!isHR && mainTab === 0 && (
@@ -2347,9 +2381,14 @@ const handleTrackingIvSave = async (e) => {
         </Alert>
       )}
       {/* ── HR view banner ───────────────────────────────────────────────── */}
-{isHR && (
+{/* {isHR && (
   <Alert severity="info" icon={<People fontSize="small" />} sx={{ py: 0.5 }}>
     Showing <strong>Hired candidates</strong> only. Contact a recruiter to modify candidate records.
+  </Alert>
+)} */}
+{isHR && (
+  <Alert severity="info" icon={<People fontSize="small" />} sx={{ py: 0.5 }}>
+    Showing <strong>Selected candidates</strong> from Resourcing Bot only.
   </Alert>
 )}
 
@@ -2378,7 +2417,9 @@ const handleTrackingIvSave = async (e) => {
       <Grid item xs={6} md={3}><StatCard title="Converted" value={rawResumes.filter(r=>r.status==="Converted").length} icon={<CheckCircle />} color="#2e7d32" /></Grid>
     </>
   )}
-  {mainTab === 2 && (
+  {/* {mainTab === 2 && ( */}
+  {(mainTab === 2 || isHR) && (
+
     <>
       <Grid item xs={6} md={3}><StatCard title="Total (All Pages)" value={rbTotal} icon={<People />} color="#1a237e" /></Grid>
       <Grid item xs={6} md={3}><StatCard title="New Candidates" value={rbCandidates.filter(c=>c.overallStatus==="New"||c.overallStatus==="NewCandidate").length} icon={<NewReleases />} color="#0277bd" /></Grid>
@@ -2389,23 +2430,25 @@ const handleTrackingIvSave = async (e) => {
 </Grid>
 
       {/* ── Main tabs ──────────────────────────────────────────────────────── */}
+      {!isHR && (
         <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
           <Tabs value={mainTab} onChange={(_, v) => setMainTab(v)}>
-            <Tab
-              label={
-                <Badge
-                badgeContent={filtered.length}
-                color="secondary"
-              >
-                <Box display="flex" alignItems="center" gap={1}>
-                  <People fontSize="small" />
-                  {isHR ? "Hired Candidates" : "Candidates"}
-                  {isClientLocked && <Chip label={urlClientName} size="small" color="info" sx={{ fontSize: 10, height: 18 }} />}
-                </Box>
-                </Badge>
-              }
-              iconPosition="start"
-            />
+            {!isHR && (
+              <Tab
+                label={
+                  <Badge
+                      badgeContent={filtered.length}
+                      color="secondary"
+                     >
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <People fontSize="small" />
+                      Candidates
+                    </Box>
+                  </Badge>
+                }
+                iconPosition="start"
+              />
+            )}
 
             {/* Stored Resumes tab — recruiters/managers/admins only */}
             {!isHR && (
@@ -2438,6 +2481,7 @@ const handleTrackingIvSave = async (e) => {
           />
           </Tabs>
         </Box>
+        )}
 
       {/* ══════════════════════════════════════════════════════════════════════
           TAB 0 — Resume Bank
@@ -2847,13 +2891,7 @@ const handleTrackingIvSave = async (e) => {
                             </Tooltip>
 
                             {/* Convert — only for non-converted */}
-                            {/* {r.status !== "Converted" && (
-                              <Tooltip title="Convert to full candidate">
-                                <IconButton size="small" sx={{ color: "#2e7d32" }} onClick={() => openConvert(r)}>
-                                  <PersonAdd fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                            )} */}
+                    
                               {r.status !== "Converted" && (
                                 <RawActionMenu
                                   r={r}
@@ -2912,9 +2950,6 @@ const handleTrackingIvSave = async (e) => {
       <People fontSize="small" sx={{ color: "#1a237e" }} />
       <Typography fontSize={13} color="#1a237e">
         Candidates from the <strong>Resourcing Bot</strong> system
-        (resourcing_bot_db · candidate_profiles). These include candidates
-        sourced via the old screening flow and candidates converted from
-        stored resumes.
       </Typography>
     </Box>
 
@@ -2949,20 +2984,21 @@ const handleTrackingIvSave = async (e) => {
           </InputAdornment>
         }}
       />
-      <TextField select value={rbStatusF}
-        onChange={e => setRbStatusF(e.target.value)}
-        size="small" sx={{ minWidth: 180 }} label="Overall Status">
-        <MenuItem value="">All Statuses</MenuItem>
-        {[
-          "New","ScreeningTest_Sent","ScreeningTest_Resent",
-          "ScreeningTest_Completed","Shortlisted","Interviewed",
-          "Offered","Hired","Rejected","Interested","Not Interested"
-        ].map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-      </TextField>
-      {/* <Button variant="outlined" size="small"
-        startIcon={<FilterList />} onClick={loadRB}>
-        Refresh
-      </Button> */}
+
+
+{!isHR && (
+  <TextField select value={rbStatusF}
+    onChange={e => setRbStatusF(e.target.value)}
+    size="small" sx={{ minWidth: 180 }} label="Overall Status">
+    <MenuItem value="">All Statuses</MenuItem>
+    {[
+      "New","ScreeningTest_Sent","ScreeningTest_Resent",
+      "ScreeningTest_Completed","Shortlisted","Interviewed",
+      "Offered","Hired","Rejected","Interested","Not Interested"
+    ].map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+  </TextField>
+)}
+
       <Button variant="outlined" size="small" startIcon={<FilterList />} onClick={() => loadRB(1)}>
   Refresh
 </Button>
@@ -3019,7 +3055,13 @@ const handleTrackingIvSave = async (e) => {
                     ?? c.ScreeningTestScore ?? null;
 
                   return (
-                    <TableRow key={c._id} hover>
+                    // <TableRow key={c._id} hover>
+                    <TableRow
+                      key={c._id}
+                      hover
+                      onClick={isHR ? () => handleHRViewCandidate(c) : undefined}
+                      sx={{ cursor: isHR ? "pointer" : "default" }}
+                    >
                       <TableCell>
                         <Box display="flex" alignItems="center" gap={1.5}>
                           <Avatar sx={{ width: 34, height: 34, fontSize: 12,
@@ -3090,7 +3132,7 @@ const handleTrackingIvSave = async (e) => {
                               .toLocaleDateString("en-IN")
                           : "—"}
                       </TableCell>
-                      <TableCell>
+                      {/* <TableCell>
                         <Tooltip title="View Details">
                           <IconButton size="small"
                             onClick={() => {
@@ -3100,7 +3142,33 @@ const handleTrackingIvSave = async (e) => {
                             <Visibility fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                      </TableCell>
+                      </TableCell> */}
+                      <TableCell>
+                          {isHR ? (
+                            <Tooltip title="Manage Onboarding">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  disabled={hrStarting === c._id}
+                                  onClick={() => handleHRViewCandidate(c)}
+                                  sx={{ color: "#1a237e", bgcolor: "#e8eaf6",
+                                    "&:hover": { bgcolor: "#c5cae9" }, borderRadius: "8px" }}
+                                >
+                                  {hrStarting === c._id
+                                    ? <CircularProgress size={14} />
+                                    : <Visibility fontSize="small" />}
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title="View Details">
+                              <IconButton size="small"
+                                onClick={() => { setRbSelected(c); setRbDetailOpen(true); }}>
+                                <Visibility fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </TableCell>
                     </TableRow>
                   );
                 });
@@ -4659,6 +4727,18 @@ const handleTrackingIvSave = async (e) => {
   onClose={() => setExamResultsOpen(false)}
   candidateId={examResultsTarget?._id}
   candidateName={examResultsTarget?.name}
+/>
+
+
+{/* ── HR Onboarding Detail Dialog ── */}
+<OnboardingDetail
+  open={hrOnboardOpen}
+  onClose={() => {
+    setHrOnboardOpen(false);
+    setHrActiveEmp(null);
+    loadRB(rbPage);   // refresh list after edits
+  }}
+  employee={hrActiveEmp}
 />
     </Box>
   );

@@ -5,7 +5,7 @@ import {
   Box, Grid, Card, CardContent, Typography, Avatar, Chip,
   CircularProgress, Divider, LinearProgress, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper, IconButton,
-  Tooltip, Alert, TextField, InputAdornment,
+  Tooltip, Alert, TextField, InputAdornment, Snackbar,
 } from "@mui/material";
 import {
   AssignmentInd, 
@@ -140,7 +140,7 @@ export default function HRDashboard() {
   const [starting,    setStarting]    = useState(null); // candidate _id being processed
   const [detailOpen,  setDetailOpen]  = useState(false);
   const [activeEmp,   setActiveEmp]   = useState(null);
-
+  const [snack, setSnack] = useState({ open: false, message: "" });
   // ── Fetch selected candidates from ResourcingBot ────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true); setError("");
@@ -173,6 +173,9 @@ export default function HRDashboard() {
     } finally {
       setStarting(null);
     }
+  };
+  const handleSaveSuccess = (msg = "Successfully updated") => {
+    setSnack({ open: true, message: msg });
   };
 
   const handleDetailClose = () => {
@@ -270,7 +273,7 @@ export default function HRDashboard() {
         <CardContent sx={{ p: 2.5 }}>
           <SectionHeader
             title="Selected Candidates — Onboarding Queue"
-            subtitle='Candidates marked "Selected" in ResourcingBot · click a row to fill onboarding details · new candidates appear first, completed ones move to the bottom'
+            subtitle='Interview-selected candidates are listed below. Click a candidate row to complete the onboarding details.'
           />
 
           <Box mb={2}>
@@ -298,8 +301,10 @@ export default function HRDashboard() {
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    {["Candidate", "Role / Company", "JD ID", "Match Score", "Test Score",
-                      "Uploaded", "Onboarding Status", "Progress", "Action"].map((h) => (
+                    {["Candidate", "Role / Company",  
+                    // "JD ID","Match Score", "Test Score", "Uploaded",
+                    "BGV Status",
+                     "Onboarding Status", "Progress", "Action"].map((h) => (
                       <TableCell
                         key={h}
                         sx={{ fontSize: 11, fontWeight: 700, color: SLATE,
@@ -351,7 +356,7 @@ export default function HRDashboard() {
                           </Typography>
                         </TableCell>
 
-                        <TableCell sx={{ py: 1.2, px: 1.5, fontSize: 11, color: BLUE, fontWeight: 700, fontFamily: "monospace", borderBottom: "1px solid #f8fafc" }}>
+                        {/* <TableCell sx={{ py: 1.2, px: 1.5, fontSize: 11, color: BLUE, fontWeight: 700, fontFamily: "monospace", borderBottom: "1px solid #f8fafc" }}>
                           {c.jdID || "—"}
                         </TableCell>
 
@@ -378,7 +383,29 @@ export default function HRDashboard() {
 
                         <TableCell sx={{ py: 1.2, px: 1.5, fontSize: 12, color: "#334155", borderBottom: "1px solid #f8fafc" }}>
                           {fmtDate(c.uploadedAt)}
-                        </TableCell>
+                        </TableCell> */}
+
+                    <TableCell sx={{ py: 1.2, px: 1.5, borderBottom: "1px solid #f8fafc" }}>
+                      {(() => {
+                        const BGV_COLORS = {
+                          "Not Initiated": { bg: "#f1f5f9", color: "#64748b" },
+                          "Initiated":     { bg: "#eff6ff", color: "#1d4ed8" },
+                          "In Progress":   { bg: "#fef9c3", color: "#854d0e" },
+                          "Completed":     { bg: "#dcfce7", color: "#166534" },
+                          "Failed":        { bg: "#fee2e2", color: "#991b1b" },
+                        };
+                        const status = c.bgv_status || "Not Initiated";
+                        const sc = BGV_COLORS[status] || BGV_COLORS["Not Initiated"];
+                        return (
+                          <Chip
+                            label={status}
+                            size="small"
+                            sx={{ bgcolor: sc.bg, color: sc.color, fontWeight: 700,
+                              fontSize: 10, height: 20, borderRadius: "5px" }}
+                          />
+                        );
+                      })()}
+                    </TableCell>
 
                         <TableCell sx={{ py: 1.2, px: 1.5, borderBottom: "1px solid #f8fafc" }}>
                           <OnboardingStatusChip status={c.onboarding_status} />
@@ -467,7 +494,24 @@ export default function HRDashboard() {
         open={detailOpen}
         onClose={handleDetailClose}
         employee={activeEmp}
+        onSaveSuccess={handleSaveSuccess}
       />
+
+<Snackbar
+  open={snack.open}
+  autoHideDuration={3000}
+  onClose={() => setSnack({ open: false, message: "" })}
+  anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+>
+  <Alert
+    onClose={() => setSnack({ open: false, message: "" })}
+    severity="success"
+    variant="filled"
+    sx={{ borderRadius: "10px", fontWeight: 600 }}
+  >
+    {snack.message}
+  </Alert>
+</Snackbar>
     </Box>
   );
 }

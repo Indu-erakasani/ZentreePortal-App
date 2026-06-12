@@ -205,15 +205,28 @@ def raw_upload():
     return jsonify(success=True, message="Resume stored", parse_status=parse_status, data=_serialize_raw(doc)), 201
 
 
+
 @resume_bp.route("/raw/", methods=["GET"])
 @jwt_required()
 def get_raw_all():
+    from flask_jwt_extended import get_jwt_identity
+    identity  = get_jwt_identity()
+    caller_id = str(identity)
+    try:
+        caller_doc  = mongo.db.users.find_one({"_id": ObjectId(caller_id)})
+        caller_role = caller_doc.get("role", "") if caller_doc else ""
+    except Exception:
+        caller_role = ""
+    if caller_role == "hr":
+        return jsonify(success=False, message="Access denied"), 403
+
     status   = request.args.get("status", "")
     job_id   = request.args.get("job_id", "")
     q        = request.args.get("q", "").strip()
     page     = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 50))
-
+    
+    
     query = {}
     if status: query["status"]        = status
     if job_id: query["linked_job_id"] = job_id
@@ -725,8 +738,11 @@ def get_all():
         caller_role = ""
 
     query = {}
+    
+    # if caller_role == "hr":
+    #     query["status"] = "Hired"          # HR locked to Hired only
     if caller_role == "hr":
-        query["status"] = "Hired"          # HR locked to Hired only
+         return jsonify(success=False, message="Access denied"), 403
     else:
         if status:
             query["status"] = status       # Recruiter/admin can filter freely
@@ -1647,10 +1663,6 @@ def get_screening_status(raw_id):
 
 
 # ── GET /api/resumes/resourcing-candidates ────────────────────────────────────
-
-
-
-
 @resume_bp.route("/resourcing-candidates", methods=["GET"])
 @jwt_required()
 def get_resourcing_candidates():
@@ -1662,6 +1674,7 @@ def get_resourcing_candidates():
     q        = request.args.get("q", "").strip()
     status   = request.args.get("status", "")
     jd_id    = request.args.get("jd_id", "")
+    company = request.args.get("company", "").strip()
     page     = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 50))
 
@@ -1677,6 +1690,24 @@ def get_resourcing_candidates():
         caller_role = ""
 
     query = {}
+    
+    if company:
+        query["$or"] = query.get("$or", [])
+        # Get all jdIDs for this company from jd_details
+        jd_ids_for_company = [
+            str(d["jdID"]) for d in resourcing_db["jd_details"].find(
+                {"companyName": {"$regex": f"^{re.escape(company)}$", "$options": "i"}},
+                {"jdID": 1}
+            ) if d.get("jdID")
+        ]
+        if jd_ids_for_company:
+            query["jdID"] = {"$in": jd_ids_for_company}
+    
+    if caller_role == "hr":
+        query["overallStatus"] = "Selected"   # HR always sees only Selected
+        # ignore any ?status= param from frontend for HR
+    else:
+        if status: query["overallStatus"] = status
 
     # ── Recruiter gate: only show candidates assigned to them ─────────────────
     if caller_role == "recruiter":
