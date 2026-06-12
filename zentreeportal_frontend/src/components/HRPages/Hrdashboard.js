@@ -10,7 +10,7 @@ import {
 import {
   AssignmentInd, 
   TrendingUp,  ArrowForward, Refresh, Star, Email,
-  Search, RocketLaunch, CheckCircle,
+  Search, RocketLaunch, CheckCircle,Send as SendIcon, HourglassEmpty
 } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
 import { OnboardingDetail } from "./OnboardingPage";
@@ -121,10 +121,32 @@ function OnboardingStatusChip({ status }) {
   );
 }
 
-const fmtDate = (iso) => {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+
+const OFFER_STATUS_COLORS = {
+  "Not Sent":  { bg: "#f1f5f9", color: "#64748b" },
+  "Sent":      { bg: "#eff6ff", color: "#1d4ed8" },
+  "Accepted":  { bg: "#dcfce7", color: "#166534" },
+  "Declined":  { bg: "#fee2e2", color: "#991b1b" },
 };
+
+function OfferStatusChip({ status }) {
+  const c = OFFER_STATUS_COLORS[status] || OFFER_STATUS_COLORS["Not Sent"];
+  return (
+    <Chip
+      label={status || "Not Sent"}
+      size="small"
+      sx={{ bgcolor: c.bg, color: c.color, fontWeight: 700, fontSize: 10,
+        height: 20, borderRadius: "5px" }}
+    />
+  );
+}
+
+
+
+
+
+
 
 // ════════════════════════════════════════════════════════════════════════════════
 export default function HRDashboard() {
@@ -141,6 +163,7 @@ export default function HRDashboard() {
   const [detailOpen,  setDetailOpen]  = useState(false);
   const [activeEmp,   setActiveEmp]   = useState(null);
   const [snack, setSnack] = useState({ open: false, message: "" });
+  const [releasing, setReleasing] = useState(null); 
   // ── Fetch selected candidates from ResourcingBot ────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true); setError("");
@@ -158,6 +181,15 @@ export default function HRDashboard() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+
+  const releaseOffer = (candidateId) =>
+    fetch(`${ONBOARDING_BASE}/selected-candidates/${candidateId}/release-offer`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then(handle);
+
+
 
   // ── Click handler: start / open onboarding for a candidate ──────────────
   const handleOpenOnboarding = async (candidate) => {
@@ -182,6 +214,24 @@ export default function HRDashboard() {
     setDetailOpen(false);
     setActiveEmp(null);
     fetchData(); // refresh statuses/order after edits
+  };
+
+  const handleReleaseOffer = async (e, candidate) => {
+    e.stopPropagation(); // prevent row click opening onboarding dialog
+    if (!window.confirm(
+      `Release offer to ${candidate.candidatename} (${candidate.candidateEmail})?`
+    )) return;
+  
+    setReleasing(candidate._id);
+    try {
+      await releaseOffer(candidate._id);
+      handleSaveSuccess(`Offer sent to ${candidate.candidatename}`);
+      fetchData(); // refresh statuses
+    } catch (err) {
+      setError(err?.message || "Failed to release offer");
+    } finally {
+      setReleasing(null);
+    }
   };
 
   // ── Search filter ─────────────────────────────────────────────────────────
@@ -303,7 +353,7 @@ export default function HRDashboard() {
                   <TableRow>
                     {["Candidate", "Role / Company",  
                     // "JD ID","Match Score", "Test Score", "Uploaded",
-                    "BGV Status",
+                    "BGV Status","Offer Status",
                      "Onboarding Status", "Progress", "Action"].map((h) => (
                       <TableCell
                         key={h}
@@ -406,6 +456,9 @@ export default function HRDashboard() {
                         );
                       })()}
                     </TableCell>
+                      <TableCell sx={{ py: 1.2, px: 1.5, borderBottom: "1px solid #f8fafc" }}>
+                        <OfferStatusChip status={c.offer_status} />
+                      </TableCell>
 
                         <TableCell sx={{ py: 1.2, px: 1.5, borderBottom: "1px solid #f8fafc" }}>
                           <OnboardingStatusChip status={c.onboarding_status} />
@@ -457,6 +510,82 @@ export default function HRDashboard() {
                             </span>
                           </Tooltip>
                         </TableCell>
+                        <TableCell
+  sx={{ py: 1.2, px: 1.5, borderBottom: "1px solid #f8fafc" }}
+  onClick={(e) => e.stopPropagation()}
+>
+  <Box display="flex" gap={0.75} alignItems="center">
+
+    {/* ── Release Offer button ── show only if offer not yet sent/accepted/declined */}
+    {(!c.offer_status || c.offer_status === "Not Sent") && (
+      <Tooltip title="Release offer to candidate">
+        <span>
+          <IconButton
+            size="small"
+            disabled={releasing === c._id}
+            onClick={(e) => handleReleaseOffer(e, c)}
+            sx={{
+              color: "#7c3aed",
+              bgcolor: "#ede9fe",
+              "&:hover": { bgcolor: "#ddd6fe" },
+              borderRadius: "8px",
+            }}
+          >
+            {releasing === c._id
+              ? <CircularProgress size={14} />
+              : <SendIcon sx={{ fontSize: 15 }} />}
+          </IconButton>
+        </span>
+      </Tooltip>
+    )}
+
+    {/* ── Offer Sent — waiting for candidate ── */}
+    {c.offer_status === "Sent" && (
+      <Tooltip title="Waiting for candidate response">
+        <Box sx={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 30, height: 30, borderRadius: "8px",
+          bgcolor: "#eff6ff",
+        }}>
+          <HourglassEmpty sx={{ fontSize: 15, color: "#1d4ed8" }} />
+        </Box>
+      </Tooltip>
+    )}
+
+    {/* ── Offer Declined chip ── */}
+    {c.offer_status === "Declined" && (
+      <Chip label="Declined" size="small"
+        sx={{ bgcolor: "#fee2e2", color: "#991b1b", fontSize: 10,
+          fontWeight: 700, height: 20, borderRadius: "5px" }} />
+    )}
+
+    {/* ── Start / view onboarding button (existing logic, unchanged) ── */}
+    {c.offer_status === "Accepted" && (
+      <Tooltip title={isCompleted ? "View / edit onboarding" : "Start onboarding"}>
+        <span>
+          <IconButton
+            size="small"
+            disabled={starting === c._id}
+            onClick={() => handleOpenOnboarding(c)}
+            sx={{
+              color: isCompleted ? "#059669" : "#1a237e",
+              bgcolor: isCompleted ? "#dcfce7" : "#e8eaf6",
+              "&:hover": { bgcolor: isCompleted ? "#bbf7d0" : "#c5cae9" },
+              borderRadius: "8px",
+            }}
+          >
+            {starting === c._id
+              ? <CircularProgress size={14} />
+              : isCompleted
+                ? <CheckCircle sx={{ fontSize: 16 }} />
+                : <RocketLaunch sx={{ fontSize: 16 }} />}
+          </IconButton>
+        </span>
+      </Tooltip>
+    )}
+
+  </Box>
+</TableCell>
                       </TableRow>
                     );
                   })}
