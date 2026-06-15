@@ -1,14 +1,15 @@
-"""
-Client routes: /api/clients/...
-"""
+
+
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from bson import ObjectId
 from bson.errors import InvalidId
-from datetime import datetime
+from datetime import datetime,timezone
 from extensions import mongo
 from models.Client_model import client_schema, serialize_client, INDUSTRIES, RELATIONSHIP_STATUSES
 import re
+
 client_bp = Blueprint("clients", __name__)
 
 
@@ -23,6 +24,7 @@ def _find_client(client_id_str: str):
         return None, (jsonify(success=False, message="Client not found"), 404)
     return client, None
 
+
 def _parse_date(value):
     """Parse an ISO date string into a datetime, or return None."""
     if not value:
@@ -33,10 +35,92 @@ def _parse_date(value):
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except Exception:
         return None
+def _to_dt(value):
+    dt = _parse_date(value)
+    if dt and dt.tzinfo:
+        dt = dt.replace(tzinfo=None)
+    return dt
+def _compute_period_totals(company_name, all_employees, period_start, period_end):
+    """
+    Revenue/salary totals + engagements that overlapped [period_start, period_end],
+    prorated by how many of the period's days each engagement was active.
+    """
+    period_days = max((period_end - period_start).days, 1)
+    company_lower = company_name.lower().strip()
+
+    engagements, total_billing, total_salary, active_count = [], 0.0, 0.0, 0
+
+    for e in all_employees:
+        for eng in e.get("client_history", []):
+            if (eng.get("client_name", "") or "").strip().lower() != company_lower:
+                continue
+
+            eng_start = _to_dt(eng.get("start_date")) or period_start
+            eng_end   = _to_dt(eng.get("end_date"))   or period_end
+
+            lo, hi = max(eng_start, period_start), min(eng_end, period_end)
+            overlap_days = (hi - lo).days
+            if overlap_days <= 0:
+                continue
+
+            fraction = overlap_days / period_days
+            monthly_billing = round((eng.get("billing_rate", 0) or 0) / 12, 2)
+            monthly_salary  = round((e.get("salary", 0) or 0) / 12, 2)
+
+            period_billing = round(monthly_billing * (period_days / 30) * fraction, 2)
+            period_salary  = round(monthly_salary  * (period_days / 30) * fraction, 2)
+
+            total_billing += period_billing
+            total_salary  += period_salary
+            active_count  += 1
+
+            engagements.append({
+                "employee_id":         str(e["_id"]),
+                "emp_id":              e.get("emp_id", ""),
+                "name":                e.get("name", ""),
+                "designation":         e.get("designation", ""),
+                "department":          e.get("department", ""),
+                "project_name":        eng.get("project_name", ""),
+                "role":                eng.get("role", ""),
+                "client_billing_rate": period_billing,
+                "billing_currency":    eng.get("billing_currency", "INR"),
+                "employee_salary":     period_salary,
+                "is_active":           _is_active_now(eng),
+                "start_date":          eng_start.isoformat(),
+                "end_date":            (_to_dt(eng.get("end_date")).isoformat() if eng.get("end_date") else None),
+                "billing_history":     eng.get("billing_history", []),
+            })
+
+    return {"engagements": engagements, "total_billing": total_billing,
+            "total_salary": total_salary, "active_count": active_count}
     
+def _is_active_now(eng):
+    """Active = started in past/now AND (no end_date OR end_date is future)."""
+    now = datetime.utcnow()
+    
+    end = eng.get("end_date")
+    if end:
+        if isinstance(end, str):
+            try: end = datetime.fromisoformat(end.replace("Z", "+00:00"))
+            except: return False
+        # Remove timezone info for comparison if present
+        if hasattr(end, 'tzinfo') and end.tzinfo:
+            end = end.replace(tzinfo=None)
+        if end <= now:
+            return False  # ← engagement has ended, exclude
 
+    start = eng.get("start_date")
+    if start:
+        if isinstance(start, str):
+            try: start = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            except: return True
+        if hasattr(start, 'tzinfo') and start.tzinfo:
+            start = start.replace(tzinfo=None)
+        if start > now:
+            return False  # ← engagement hasn't started yet, exclude
 
-# ── POST /api/clients  (create) ────────────────────────────────────────────
+    return True
+# ── POST /api/clients  (create) ───────────────────────────────────────────────
 @client_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_client():
@@ -47,7 +131,6 @@ def create_client():
         if not data.get(field):
             return jsonify(success=False, message=f"'{field}' is required"), 400
 
-    # Duplicate check
     if mongo.db.clients.find_one({"client_id": data["client_id"].upper().strip()}):
         return jsonify(success=False, message="Client ID already exists"), 409
     if mongo.db.clients.find_one({"email": data["email"].lower().strip()}):
@@ -69,17 +152,13 @@ def create_client():
             country         = data.get("country", "India"),
             address         = data.get("address", ""),
             website         = data.get("website", ""),
-            # agreement_type  = data.get("agreement_type", ""),
-            # agreement_start = data.get("agreement_start"),
-            # agreement_end   = data.get("agreement_end"),
             agreement_type  = data.get("agreement_type", ""),
             agreement_start = _parse_date(data.get("agreement_start")),
             agreement_end   = _parse_date(data.get("agreement_end")),
             payment_terms   = data.get("payment_terms", "Net 30"),
             relationship_status = data.get("relationship_status", "Active"),
             account_manager = data.get("account_manager", ""),
-            # billing_rate    = float(data.get("billing_rate", 0)),
-            billing_rate = float(data.get("billing_rate") or 0),
+            billing_rate    = float(data.get("billing_rate") or 0),
             notes           = data.get("notes", ""),
         )
         result = mongo.db.clients.insert_one(doc)
@@ -91,19 +170,13 @@ def create_client():
         return jsonify(success=False, message="Failed to create client", error=str(e)), 500
 
 
-# ── GET /api/clients/meta/options ─────────────────────────────────────────
+# ── GET /api/clients/meta/options ─────────────────────────────────────────────
 @client_bp.route("/meta/options", methods=["GET"])
 @jwt_required()
 def get_options():
-    return jsonify(
-        success=True,
-        industries=INDUSTRIES,
-        statuses=RELATIONSHIP_STATUSES,
-    ), 200
-    
-    
-    
-    
+    return jsonify(success=True, industries=INDUSTRIES, statuses=RELATIONSHIP_STATUSES), 200
+
+
 @client_bp.route("/names/list", methods=["GET"])
 @jwt_required()
 def get_client_names():
@@ -112,19 +185,18 @@ def get_client_names():
     internal = "ZentreeLabs Pvt Ltd"
     if not any(n.lower() == internal.lower() for n in names):
         names.insert(0, internal)
-    return jsonify(success=True, data=names), 200   
+    return jsonify(success=True, data=names), 200
 
 
-
-# ── GET /api/clients  (list + search + filter) ─────────────────────────────
+# ── GET /api/clients  (list + search + filter) ────────────────────────────────
 @client_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_clients():
-    q          = request.args.get("q", "").strip()
-    industry   = request.args.get("industry", "")
-    status     = request.args.get("status", "")
-    page       = int(request.args.get("page", 1))
-    per_page   = int(request.args.get("per_page", 20))
+    q        = request.args.get("q", "").strip()
+    industry = request.args.get("industry", "")
+    status   = request.args.get("status", "")
+    page     = int(request.args.get("page", 1))
+    per_page = int(request.args.get("per_page", 20))
 
     query = {}
     if q:
@@ -133,10 +205,8 @@ def get_clients():
             {"primary_contact": {"$regex": q, "$options": "i"}},
             {"client_id":       {"$regex": q, "$options": "i"}},
         ]
-    if industry:
-        query["industry"] = industry
-    if status:
-        query["relationship_status"] = status
+    if industry: query["industry"]             = industry
+    if status:   query["relationship_status"]  = status
 
     total   = mongo.db.clients.count_documents(query)
     clients = list(
@@ -148,13 +218,12 @@ def get_clients():
     return jsonify(
         success=True,
         data=[serialize_client(c) for c in clients],
-        total=total,
-        page=page,
-        per_page=per_page,
+        total=total, page=page, per_page=per_page,
         pages=(total + per_page - 1) // per_page,
     ), 200
 
-# ── GET /api/clients/<id> ──────────────────────────────────────────────────
+
+# ── GET /api/clients/<id> ─────────────────────────────────────────────────────
 @client_bp.route("/<client_id>", methods=["GET"])
 @jwt_required()
 def get_client(client_id):
@@ -164,7 +233,7 @@ def get_client(client_id):
     return jsonify(success=True, data=serialize_client(client)), 200
 
 
-# ── PUT /api/clients/<id> ──────────────────────────────────────────────────
+# ── PUT /api/clients/<id> ─────────────────────────────────────────────────────
 @client_bp.route("/<client_id>", methods=["PUT"])
 @jwt_required()
 def update_client(client_id):
@@ -184,18 +253,14 @@ def update_client(client_id):
     update = {k: data[k] for k in allowed_fields if k in data}
     if not update:
         return jsonify(success=False, message="No valid fields to update"), 400
-    # Parse contract dates
     if "agreement_start" in update:
         update["agreement_start"] = _parse_date(update["agreement_start"])
     if "agreement_end" in update:
         update["agreement_end"] = _parse_date(update["agreement_end"])
-        
-        
-    # Validate enum fields
     if "industry" in update and update["industry"] not in INDUSTRIES:
-        return jsonify(success=False, message=f"Invalid industry"), 400
+        return jsonify(success=False, message="Invalid industry"), 400
     if "relationship_status" in update and update["relationship_status"] not in RELATIONSHIP_STATUSES:
-        return jsonify(success=False, message=f"Invalid relationship_status"), 400
+        return jsonify(success=False, message="Invalid relationship_status"), 400
 
     update["updated_at"] = datetime.utcnow()
     mongo.db.clients.update_one({"_id": client["_id"]}, {"$set": update})
@@ -203,7 +268,7 @@ def update_client(client_id):
     return jsonify(success=True, message="Client updated successfully", data=serialize_client(updated)), 200
 
 
-# ── DELETE /api/clients/<id> ───────────────────────────────────────────────
+# ── DELETE /api/clients/<id> ──────────────────────────────────────────────────
 @client_bp.route("/<client_id>", methods=["DELETE"])
 @jwt_required()
 def delete_client(client_id):
@@ -214,40 +279,60 @@ def delete_client(client_id):
     return jsonify(success=True, message="Client deleted successfully"), 200
 
 
-    
-# -------------------------------- Client Analytics Part Routes-------------------------------
-    
-    
-    
+#  CLIENT ANALYTICS
+
 @client_bp.route("/analytics/all", methods=["GET"])
 @jwt_required()
 def all_clients_analytics():
-    from flask_jwt_extended import get_jwt
-    from extensions import resourcing_db  # ← make sure this is imported
+    from extensions import resourcing_db
 
-    clients = list(mongo.db.clients.find({}))
-    all_jobs = list(mongo.db.jobs.find({}))
-    all_resumes = list(mongo.db.resumes.find({}))
+    clients      = list(mongo.db.clients.find({}))
+    all_jobs     = list(mongo.db.jobs.find({}))
+    all_resumes  = list(mongo.db.resumes.find({}))
     all_employees = list(mongo.db.employees.find({}))
-
-    result = []
-    grand_billing = 0.0
-    grand_salary = 0.0
+    period_start = _to_dt(request.args.get("start"))
+    period_end   = _to_dt(request.args.get("end"))
+    custom_period = bool(period_start and period_end and period_end > period_start)
+    
+    result       = []
+    grand_billing    = 0.0
+    grand_salary     = 0.0
     grand_active_emp = 0
-    grand_jds = 0
+    grand_jds        = 0
     grand_candidates = 0
-    grand_hired = 0
+    grand_hired      = 0
 
     INTERNAL_COMPANY = "zentreelabs pvt ltd"
 
-    # ── Internal employees (unchanged) ──────────────────────────────────────
+    # ── CHANGE 1: Internal employees — monthly figures, active-only ──────────
     internal_employees = []
-    internal_billing = 0.0
-    internal_salary  = 0.0
+    internal_billing   = 0.0
+    internal_salary    = 0.0
 
+    
     for e in all_employees:
         if (e.get("current_client") or "").lower().strip() != INTERNAL_COMPANY:
             continue
+        if (e.get("status") or "").lower() not in ("active", ""):
+            continue
+    
+        annual_billing  = e.get("current_billing_rate", 0) or 0
+        annual_salary   = e.get("salary", 0) or 0
+        monthly_billing = round(annual_billing / 12, 2)
+        monthly_salary  = round(annual_salary  / 12, 2)
+    
+        # ── NEW: pull start_date + billing_history from their active engagement ──
+        active_eng_internal = next(
+            (eng for eng in e.get("client_history", []) if not eng.get("end_date")),
+            None
+        )
+        start_dt = active_eng_internal.get("start_date") if active_eng_internal else None
+        if isinstance(start_dt, str):
+            try:
+                start_dt = datetime.fromisoformat(start_dt.replace("Z", "+00:00"))
+            except Exception:
+                start_dt = None
+    
         internal_employees.append({
             "employee_id":         str(e["_id"]),
             "emp_id":              e.get("emp_id", ""),
@@ -255,39 +340,37 @@ def all_clients_analytics():
             "designation":         e.get("designation", ""),
             "department":          e.get("department", ""),
             "project_name":        e.get("current_project", ""),
-            "client_billing_rate": e.get("current_billing_rate", 0),
+            "client_billing_rate": monthly_billing,
             "billing_currency":    e.get("billing_currency", "INR"),
-            "employee_salary":     e.get("salary", 0),
+            "employee_salary":     monthly_salary,
             "status":              e.get("status", ""),
+            # ── NEW fields ──
+            "start_date":          start_dt.isoformat() if start_dt else None,
+            "end_date":            None,
+            "billing_history":     active_eng_internal.get("billing_history", []) if active_eng_internal else [],
         })
-        internal_billing += e.get("current_billing_rate", 0) or 0
-        internal_salary  += e.get("salary", 0) or 0
+        internal_billing += monthly_billing
+        internal_salary  += monthly_salary
+ 
 
-    # ── Build a set of portal client names (lowercase) for dedup ────────────
+
+    # ── Build portal client name set for dedup ───────────────────────────────
     portal_client_names_lower = {
         c["company_name"].lower().strip() for c in clients
     }
 
-    # ── Process existing portal clients (unchanged logic) ───────────────────
+    # ── Shared logic: compute engagements + financials for a company ─────────
     def _process_client_entry(company_name, client_meta, client_id_str):
-        """
-        Shared logic to compute engagements + financials for any company name.
-        client_meta: the portal client doc (or None for RB-only clients).
-        client_id_str: str(_id) or a synthetic id string.
-        """
         client_jobs = [
             j for j in all_jobs
             if j.get("client_id") == client_id_str
             or (client_meta and j.get("client_id") == client_meta.get("client_id"))
         ]
-
-
-        # Build job ID sets covering both possible link formats
         client_job_ids_str   = {str(j["_id"]) for j in client_jobs}
         client_job_ids_field = {j.get("job_id", "") for j in client_jobs}
         client_job_ids_all   = client_job_ids_str | client_job_ids_field
 
-        # ── ZentreePortal candidates (existing) ──────────────────────────────────
+        # ZentreePortal candidates
         client_resumes = [
             r for r in all_resumes
             if r.get("linked_job_id") and str(r["linked_job_id"]) in client_job_ids_all
@@ -297,17 +380,8 @@ def all_clients_analytics():
             if (r.get("status") or "").lower() in ("hired", "offer accepted", "joined", "placed")
         )
 
-        # ── ResourcingBot candidates — look up by companyName in jd_details ──────
-        # For RB-only clients, client_jobs is empty so client_job_ids_all is empty.
-        # Instead, fetch JD IDs from jd_details by companyName, then count candidates.
+        # ResourcingBot candidates
         try:
-            rb_jd_ids = [
-                str(d["_id"])
-                for d in resourcing_db["jd_details"].find(
-                    {"companyName": {"$regex": f"^{re.escape(company_name.strip())}$", "$options": "i"}},
-                    {"_id": 1, "jdID": 1}
-                )
-            ]
             rb_jd_id_strings = set()
             for d in resourcing_db["jd_details"].find(
                 {"companyName": {"$regex": f"^{re.escape(company_name.strip())}$", "$options": "i"}},
@@ -326,38 +400,46 @@ def all_clients_analytics():
                 )
                 rb_hired = sum(
                     1 for c in rb_candidates
-                    if (c.get("overallStatus") or "").lower() in ("hired", "offer accepted", "joined", "placed", "selected")
+                    if (c.get("overallStatus") or "").lower() in
+                       ("hired", "offer accepted", "joined", "placed", "selected")
                 )
-                # Merge into totals — avoid double-counting if same candidate
-                # is in both systems (edge case)
                 client_resumes = list(client_resumes) + rb_candidates
                 hired_count   += rb_hired
         except Exception as rb_err:
-            # Never crash the main analytics for a ResourcingBot lookup failure
             print(f"[analytics] RB candidate lookup failed for {company_name}: {rb_err}")
 
-        engagements = []
+        engagements   = []
         total_billing = 0.0
         total_salary  = 0.0
         active_count  = 0
         seen_active   = set()
 
+        # ──  Active engagements — monthly, strict end_date check ────
         for e in all_employees:
             if (e.get("current_client") or "").lower().strip() != company_name.lower().strip():
                 continue
             if str(e["_id"]) in seen_active:
                 continue
-            seen_active.add(str(e["_id"]))
-
             active_eng = next(
                 (eng for eng in e.get("client_history", [])
-                 if eng.get("client_name", "").lower().strip() == company_name.lower().strip()
-                 and not eng.get("end_date")),
+                if eng.get("client_name", "").lower().strip() == company_name.lower().strip()
+                and _is_active_now(eng)),
                 None
             )
-            billing_rate     = active_eng.get("billing_rate", 0) if active_eng else e.get("current_billing_rate", 0)
-            billing_currency = active_eng.get("billing_currency", "INR") if active_eng else e.get("billing_currency", "INR")
-            start_date       = active_eng.get("start_date") if active_eng else None
+          
+            # (stale current_client field or engagement has ended)
+            if active_eng is None:
+                continue
+
+            annual_billing   = (active_eng.get("billing_rate", 0) or 0)
+            billing_currency = active_eng.get("billing_currency", "INR")
+            annual_salary    = (e.get("salary", 0) or 0)
+
+            # Convert annual → monthly
+            monthly_billing = round(annual_billing / 12, 2)
+            monthly_salary  = round(annual_salary  / 12, 2)
+
+            start_date = active_eng.get("start_date")
             years = None
             if start_date:
                 if isinstance(start_date, str):
@@ -366,6 +448,7 @@ def all_clients_analytics():
                 if start_date:
                     years = round((datetime.utcnow() - start_date).days / 365.25, 2)
 
+            seen_active.add(str(e["_id"]))
             engagements.append({
                 "employee_id":         str(e["_id"]),
                 "emp_id":              e.get("emp_id", ""),
@@ -373,19 +456,22 @@ def all_clients_analytics():
                 "designation":         e.get("designation", ""),
                 "department":          e.get("department", ""),
                 "project_name":        e.get("current_project", ""),
-                "role":                active_eng.get("role", "") if active_eng else "",
-                "client_billing_rate": billing_rate,
+                "role":                active_eng.get("role", ""),
+                "client_billing_rate": monthly_billing,   # monthly
                 "billing_currency":    billing_currency,
-                "employee_salary":     e.get("salary", 0),
+                "employee_salary":     monthly_salary,    # monthly
                 "years_on_client":     years,
                 "is_active":           True,
                 "start_date":          start_date.isoformat() if start_date and not isinstance(start_date, str) else start_date,
                 "end_date":            None,
+                "billing_history": active_eng.get("billing_history", []),
             })
             active_count  += 1
-            total_billing += billing_rate or 0
-            total_salary  += e.get("salary", 0) or 0
+            total_billing += monthly_billing
+            total_salary  += monthly_salary
 
+        # ──  Historical (inactive) engagements — monthly for display,
+        #              but do NOT add to total_billing / total_salary ──────────
         for e in all_employees:
             for eng in e.get("client_history", []):
                 if eng.get("client_name", "").lower().strip() != company_name.lower().strip():
@@ -404,6 +490,9 @@ def all_clients_analytics():
                     except: end_date = datetime.utcnow()
                 years = round((end_date - start_date).days / 365.25, 2) if start_date else None
 
+                annual_eng_billing = (eng.get("billing_rate", 0) or 0)
+                annual_emp_salary  = (e.get("salary", 0) or 0)
+
                 engagements.append({
                     "employee_id":         str(e["_id"]),
                     "emp_id":              e.get("emp_id", ""),
@@ -412,69 +501,105 @@ def all_clients_analytics():
                     "department":          e.get("department", ""),
                     "project_name":        eng.get("project_name", ""),
                     "role":                eng.get("role", ""),
-                    "client_billing_rate": eng.get("billing_rate", 0),
+                    "client_billing_rate": round(annual_eng_billing / 12, 2),  # monthly
                     "billing_currency":    eng.get("billing_currency", "INR"),
-                    "employee_salary":     e.get("salary", 0),
+                    "employee_salary":     round(annual_emp_salary  / 12, 2),  # monthly
                     "years_on_client":     years,
                     "is_active":           False,
                     "start_date":          start_date.isoformat() if start_date else None,
                     "end_date":            end_date.isoformat() if isinstance(end_date, datetime) else None,
+                    "billing_history": eng.get("billing_history", []),
                 })
-                if is_active:
-                    active_count  += 1
-                    total_billing += eng.get("billing_rate", 0) or 0
-                    total_salary  += e.get("salary", 0) or 0
+      
+# ── Historical revenue AND salary (past ended engagements) ──
+        historical_billing = 0.0
+        historical_salary  = 0.0
+        seen_historical    = set()
+
+        for e in all_employees:
+            for eng in e.get("client_history", []):
+                if eng.get("client_name", "").lower().strip() != company_name.lower().strip():
+                    continue
+                if _is_active_now(eng):
+                    continue  # active ones already counted
+
+                eng_start = _to_dt(eng.get("start_date"))
+                eng_end   = _to_dt(eng.get("end_date"))
+                if not eng_start or not eng_end:
+                    continue
+
+                months = max((eng_end - eng_start).days / 30.44, 0)
+
+                # billing: annual rate → monthly → × actual months worked
+                monthly_billing_rate = (eng.get("billing_rate", 0) or 0) / 12
+                historical_billing  += round(monthly_billing_rate * months, 2)
+
+                # salary: avoid double-counting same employee
+                emp_key = str(e["_id"])
+                if emp_key not in seen_historical:
+                    seen_historical.add(emp_key)
+                    monthly_salary_rate  = (e.get("salary", 0) or 0) / 12
+                    historical_salary   += round(monthly_salary_rate * months, 2)
 
         return {
-            "engagements":    engagements,
-            "total_billing":  total_billing,
-            "total_salary":   total_salary,
-            "active_count":   active_count,
-            "client_jobs":    client_jobs,
-            "client_resumes": client_resumes,
-            "hired_count":    hired_count,
+            "engagements":        engagements,
+            "total_billing":      total_billing,
+            "total_salary":       total_salary,
+            "historical_billing": historical_billing,  # actual revenue earned
+            "historical_salary":  historical_salary,   # actual salary paid
+            "active_count":       active_count,
+            "client_jobs":        client_jobs,
+            "client_resumes":     client_resumes,
+            "hired_count":        hired_count,
         }
 
-    # ── Portal clients ───────────────────────────────────────────────────────
+
+    # ── Portal clients ────────────────────────────────────────────────────────
     for client in clients:
         company_name  = client["company_name"]
         client_id_str = str(client["_id"])
 
         r = _process_client_entry(company_name, client, client_id_str)
-        
-        # ── Count RB JDs for this portal client too ──────────────────────────
+        if custom_period:
+            pt = _compute_period_totals(company_name, all_employees, period_start, period_end)
+            total_billing, total_salary = pt["total_billing"], pt["total_salary"]
+            active_count, engagements   = pt["active_count"], pt["engagements"]
+        else:
+            total_billing, total_salary = r["total_billing"], r["total_salary"]
+            active_count, engagements   = r["active_count"], r["engagements"]
+
         rb_jd_count_for_portal = resourcing_db["jd_details"].count_documents(
             {"companyName": {"$regex": f"^{re.escape(company_name.strip())}$", "$options": "i"}}
         )
         total_jds_combined = len(r["client_jobs"]) + rb_jd_count_for_portal
-    
-    
-        grand_billing    += r["total_billing"]
-        grand_salary     += r["total_salary"]
-        grand_active_emp += r["active_count"]
-        grand_jds        += total_jds_combined
-        grand_candidates += len(r["client_resumes"])
-        grand_hired      += r["hired_count"]
+
+        # ── Use effective billing (active if exists, else historical) ──
+        eff_billing = r["total_billing"] if r["total_billing"] > 0 else r.get("historical_billing", 0)
+        eff_salary  = r["total_salary"]  if r["total_salary"]  > 0 else r.get("historical_salary",  0)
+        net_margin  = eff_billing - eff_salary
 
         result.append({
-            "client_id":             client_id_str,
-            "client_ref_id":         client.get("client_id", ""),
-            "company_name":          company_name,
-            "industry":              client.get("industry", ""),
-            "relationship_status":   client.get("relationship_status", ""),
-            "source":                "portal",          # ← tag so UI can distinguish
-            "agreement_start":       client.get("agreement_start").isoformat() if isinstance(client.get("agreement_start"), datetime) else None,
-            "agreement_end":         client.get("agreement_end").isoformat() if isinstance(client.get("agreement_end"), datetime) else None,
+            "client_id":              client_id_str,
+            "client_ref_id":          client.get("client_id", ""),
+            "company_name":           company_name,
+            "industry":               client.get("industry", ""),
+            "relationship_status":    client.get("relationship_status", ""),
+            "source":                 "portal",
+            "agreement_start":        client.get("agreement_start").isoformat() if isinstance(client.get("agreement_start"), datetime) else None,
+            "agreement_end":          client.get("agreement_end").isoformat() if isinstance(client.get("agreement_end"), datetime) else None,
             "total_active_employees": r["active_count"],
-            "total_jds":             total_jds_combined,
-            "total_candidates":      len(r["client_resumes"]),
-            "total_hired":           r["hired_count"],
-            "conversion_rate":       round((r["hired_count"] / len(r["client_resumes"]) * 100), 1) if r["client_resumes"] else 0,
-            "total_billing_revenue": r["total_billing"],
-            "total_salary_cost":     r["total_salary"],
-            "net_margin":            r["total_billing"] - r["total_salary"],
-            "margin_pct":            round(((r["total_billing"] - r["total_salary"]) / r["total_billing"] * 100), 1) if r["total_billing"] else 0,
-            "engagements":           r["engagements"],
+            "total_jds":              total_jds_combined,
+            "total_candidates":       len(r["client_resumes"]),
+            "total_hired":            r["hired_count"],
+            "conversion_rate":        round((r["hired_count"] / len(r["client_resumes"]) * 100), 1) if r["client_resumes"] else 0,
+            "total_billing_revenue":  eff_billing,   # monthly active OR historical total
+            "total_salary_cost":      eff_salary,
+            "historical_billing":     r.get("historical_billing", 0),
+            "historical_salary":      r.get("historical_salary",  0),
+            "is_historical_only":     r["total_billing"] == 0 and r.get("historical_billing", 0) > 0,
+            "net_margin":             net_margin,
+            "margin_pct":             round((net_margin / eff_billing * 100), 1) if eff_billing else 0,
+            "engagements":            engagements,
             "jobs": [
                 {
                     "job_id":     j.get("job_id"),
@@ -486,20 +611,14 @@ def all_clients_analytics():
             ],
         })
 
-    # ── NEW: ResourcingBot-only clients ──────────────────────────────────────
-    # Pull all distinct companyName values from jd_details (case-insensitive dedup)
+    # ── ResourcingBot-only clients ────────────────────────────────────────────
     rb_company_names_raw = resourcing_db["jd_details"].distinct("companyName")
-
-    seen_rb_lower = set()   # track which RB names we've already added
+    seen_rb_lower = set()
 
     for raw_name in rb_company_names_raw:
         if not raw_name or not raw_name.strip():
             continue
-
         name_lower = raw_name.strip().lower()
-
-        # Skip if already in portal clients or already processed (handles
-        # duplicate casing like "Acme" vs "ACME" in the RB collection itself)
         if name_lower in portal_client_names_lower:
             continue
         if name_lower == INTERNAL_COMPANY:
@@ -508,29 +627,23 @@ def all_clients_analytics():
             continue
         seen_rb_lower.add(name_lower)
 
-        # Count JDs for this company from ResourcingBot jd_details
         rb_jd_count = resourcing_db["jd_details"].count_documents(
             {"companyName": {"$regex": f"^{raw_name.strip()}$", "$options": "i"}}
         )
 
-        # Process employee engagements using the same shared logic
-        # Pass None for client_meta and a fake id so job lookup skips portal jobs
         r = _process_client_entry(raw_name.strip(), None, "__rb_only__")
 
-        grand_billing    += r["total_billing"]
-        grand_salary     += r["total_salary"]
-        grand_active_emp += r["active_count"]
-        grand_jds        += rb_jd_count          # use RB JD count, not portal jobs
-        grand_candidates += len(r["client_resumes"])
-        grand_hired      += r["hired_count"]
+        eff_billing = r["total_billing"] if r["total_billing"] > 0 else r.get("historical_billing", 0)
+        eff_salary  = r["total_salary"]  if r["total_salary"]  > 0 else r.get("historical_salary",  0)
+        net_margin  = eff_billing - eff_salary
 
         result.append({
-            "client_id":              f"rb_{name_lower.replace(' ', '_')}",  # synthetic id
+            "client_id":              f"rb_{name_lower.replace(' ', '_')}",
             "client_ref_id":          "",
             "company_name":           raw_name.strip(),
             "industry":               "",
-            "relationship_status":    "ResourcingBot",   # visual tag in UI
-            "source":                 "resourcing_bot",  # ← tag so UI can style differently
+            "relationship_status":    "ResourcingBot",
+            "source":                 "resourcing_bot",
             "agreement_start":        None,
             "agreement_end":          None,
             "total_active_employees": r["active_count"],
@@ -538,13 +651,42 @@ def all_clients_analytics():
             "total_candidates":       len(r["client_resumes"]),
             "total_hired":            r["hired_count"],
             "conversion_rate":        round((r["hired_count"] / len(r["client_resumes"]) * 100), 1) if r["client_resumes"] else 0,
-            "total_billing_revenue":  r["total_billing"],
-            "total_salary_cost":      r["total_salary"],
-            "net_margin":             r["total_billing"] - r["total_salary"],
-            "margin_pct":             round(((r["total_billing"] - r["total_salary"]) / r["total_billing"] * 100), 1) if r["total_billing"] else 0,
+            "total_billing_revenue":  eff_billing,
+            "total_salary_cost":      eff_salary,
+            "historical_billing":     r.get("historical_billing", 0),
+            "historical_salary":      r.get("historical_salary",  0),
+            "is_historical_only":     r["total_billing"] == 0 and r.get("historical_billing", 0) > 0,
+            "net_margin":             net_margin,
+            "margin_pct":             round((net_margin / eff_billing * 100), 1) if eff_billing else 0,
             "engagements":            r["engagements"],
-            "jobs":                   [],   # portal jobs list empty; RB JDs tracked by rb_jd_count
+            "jobs":                   [],
         })
+
+    # ── Deduplicate by company name (case-insensitive) ────────────────────────
+    seen_companies = set()
+    deduped = []
+    for entry in result:
+        key = entry["company_name"].lower().strip()
+        if key not in seen_companies:
+            seen_companies.add(key)
+            deduped.append(entry)
+    result = deduped
+
+    # ── Compute grand totals ONLY from active billing (not historical) ────────
+    # Historical = past engagements, should NOT inflate current period totals
+    grand_billing    = sum(
+        r["total_billing_revenue"] for r in result
+        if not r.get("is_historical_only", False)
+    )
+    grand_salary     = sum(
+        r["total_salary_cost"] for r in result
+        if not r.get("is_historical_only", False)
+    )
+    grand_active_emp = sum(r["total_active_employees"] for r in result)
+    grand_jds        = sum(r["total_jds"]              for r in result)
+    grand_candidates = sum(r["total_candidates"]        for r in result)
+    grand_hired      = sum(r["total_hired"]             for r in result)
+    grand_net        = grand_billing - grand_salary
 
     return jsonify(
         success=True,
@@ -558,19 +700,17 @@ def all_clients_analytics():
                 "net_margin":    internal_billing - internal_salary,
             },
             "summary": {
-                "total_clients":          len(result),          # now includes RB clients
-                "active_clients":         sum(1 for c in clients if c.get("relationship_status") == "Active"),
-                "total_active_employees": grand_active_emp,
-                "total_jds":              grand_jds,
-                "total_candidates":       grand_candidates,
-                "total_hired":            grand_hired,
+                "total_clients":           len(result),
+                "active_clients":          sum(1 for c in clients if c.get("relationship_status") == "Active"),
+                "total_active_employees":  grand_active_emp,
+                "total_jds":               grand_jds,
+                "total_candidates":        grand_candidates,
+                "total_hired":             grand_hired,
                 "overall_conversion_rate": round((grand_hired / grand_candidates * 100), 1) if grand_candidates else 0,
-                "total_billing_revenue":  grand_billing,
-                "total_salary_cost":      grand_salary,
-                "net_margin":             grand_billing - grand_salary,
-                "margin_pct":             round(((grand_billing - grand_salary) / grand_billing * 100), 1) if grand_billing else 0,
+                "total_billing_revenue":   grand_billing,
+                "total_salary_cost":       grand_salary,
+                "net_margin":              grand_net,
+                "margin_pct":              round((grand_net / grand_billing * 100), 1) if grand_billing else 0,
             }
         }
-    ), 200    
-    
-    
+    ), 200

@@ -29,7 +29,7 @@ def employee_schema(
     current_billing_rate: float = 0,
     billing_currency: str = "INR",
     salary: float = 0,
-    notes: str = "",
+    notes: str = "",salary_history=None, **kwargs
 ) -> dict:
     if status not in EMPLOYEE_STATUSES:
         raise ValueError(f"status must be one of {EMPLOYEE_STATUSES}")
@@ -52,6 +52,7 @@ def employee_schema(
         "current_billing_rate": float(current_billing_rate),
         "billing_currency":     billing_currency,
         "salary":               float(salary),
+        "salary_history":       salary_history or [],
         "client_history":       [],
         "notes":                notes,
         "created_at":           datetime.utcnow(),

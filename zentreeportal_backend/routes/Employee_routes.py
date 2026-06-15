@@ -27,6 +27,163 @@ def _find(eid: str):
 def _next_emp_id() -> str:
     count = mongo.db.employees.count_documents({})
     return f"EMP{str(count + 1).zfill(3)}"
+def _serialize_with_contract(doc):
+    data = serialize_employee(doc)
+    current_client = (doc.get("current_client") or "").strip().lower()
+    active_eng = next(
+        (e for e in doc.get("client_history", [])
+         if _is_engagement_active_now(e)
+         and (e.get("client_name", "") or "").strip().lower() == current_client),
+        None
+    )
+    end = _to_dt(active_eng.get("end_date")) if active_eng else None
+    data["current_engagement_end_date"] = end.isoformat() if end else None
+    return data
+def _to_dt(value):
+    """Coerce a Mongo value (datetime, ISO string, or None) into a naive datetime, or None."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return dt.replace(tzinfo=None) if dt.tzinfo else dt
+    except Exception:
+        return None
+
+
+def _is_engagement_active_now(eng):
+    """Active = started in past/now AND (no end_date OR end_date is in the future)."""
+    now = datetime.utcnow()
+
+    end = _to_dt(eng.get("end_date"))
+    if end and end <= now:
+        return False  # ended
+
+    start = _to_dt(eng.get("start_date"))
+    if start and start > now:
+        return False  # not started yet
+
+    return True
+
+
+def _recompute_employee_current_state(employee_doc):
+    """
+    Re-derive current_client / current_project / current_billing_rate / status
+    from client_history, based on whichever engagement (if any) is active *now*.
+
+    - Active engagement exists  -> employee is "Active", current_* mirrors it.
+    - No active engagement      -> employee goes "On Bench" ONLY once the
+      previously-active engagement's end_date has actually passed.
+    - Statuses other than "Active"/"On Bench" (e.g. "Resigned", "On Leave")
+      are left untouched.
+    """
+    now = datetime.utcnow()
+    history = employee_doc.get("client_history", [])
+    current_status = employee_doc.get("status", "")
+
+    active_engs = [e for e in history if _is_engagement_active_now(e)]
+    active_eng = None
+    if active_engs:
+        active_eng = max(active_engs, key=lambda e: _to_dt(e.get("start_date")) or datetime.min)
+
+    update = {}
+
+    if active_eng:
+        update["current_client"]       = active_eng.get("client_name", "")
+        update["current_project"]      = active_eng.get("project_name", "")
+        update["current_billing_rate"] = active_eng.get("billing_rate", 0) or 0
+        update["billing_currency"]     = active_eng.get("billing_currency", "INR")
+        if current_status == "On Bench":
+            update["status"] = "Active"
+    else:
+        if current_status == "Active":
+            update["current_client"]       = ""
+            update["current_project"]      = ""
+            update["current_billing_rate"] = 0
+            update["status"]               = "On Bench"
+
+    if update:
+        update["updated_at"] = now
+        mongo.db.employees.update_one({"_id": employee_doc["_id"]}, {"$set": update})
+
+def _months_between(start, end):
+    if not start or not end or end <= start:
+        return 0.0
+    return (end - start).days / 30.0
+
+
+def _prorated_total(history, default_rate, period_start, period_end):
+    """
+    Sum of monthly_rate * months_active over [period_start, period_end],
+    using a billing_history/salary_history list of {rate, effective_from}.
+    Falls back to default_rate if history is empty.
+    """
+    if period_end <= period_start:
+        return 0.0
+    if not history:
+        return round((default_rate or 0) * _months_between(period_start, period_end), 2)
+
+    sorted_hist = sorted(history, key=lambda h: _to_dt(h.get("effective_from")) or datetime.min)
+    total = 0.0
+
+    # Time before the first recorded rate change — use that rate retroactively
+    first_start = _to_dt(sorted_hist[0].get("effective_from"))
+    if first_start and first_start > period_start:
+        total += (sorted_hist[0].get("rate", default_rate) or default_rate or 0) \
+                 * _months_between(period_start, first_start)
+
+    for i, h in enumerate(sorted_hist):
+        seg_start = _to_dt(h.get("effective_from")) or period_start
+        seg_end   = _to_dt(sorted_hist[i + 1].get("effective_from")) if i + 1 < len(sorted_hist) else None
+        lo = max(seg_start, period_start)
+        hi = min(seg_end, period_end) if seg_end else period_end
+        if hi > lo:
+            total += (h.get("rate", 0) or 0) * _months_between(lo, hi)
+
+    return round(total, 2)
+
+
+def _merge_intervals(intervals):
+    """intervals: list of (start, end) datetimes; end=None means open-ended (now)."""
+    now = datetime.utcnow()
+    norm = [(s, e or now) for s, e in intervals if s]
+    norm.sort(key=lambda x: x[0])
+
+    merged = []
+    for s, e in norm:
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+    return merged
+
+
+def _compute_bench_periods(doc):
+    """Gaps in client_history coverage between date_of_joining and now."""
+    now = datetime.utcnow()
+    doj = _to_dt(doc.get("date_of_joining")) or now
+
+    intervals = [
+        (_to_dt(eng.get("start_date")), _to_dt(eng.get("end_date")))
+        for eng in doc.get("client_history", [])
+        if _to_dt(eng.get("start_date"))
+    ]
+    merged = _merge_intervals(intervals)
+
+    bench_periods = []
+    cursor = doj
+    for s, e in merged:
+        if s > cursor:
+            bench_periods.append({"start": cursor.isoformat(), "end": s.isoformat(),
+                                   "days": (s - cursor).days, "ongoing": False})
+        cursor = max(cursor, e)
+    if cursor < now:
+        bench_periods.append({"start": cursor.isoformat(), "end": now.isoformat(),
+                               "days": (now - cursor).days, "ongoing": True})
+
+    return bench_periods, sum(p["days"] for p in bench_periods)
+
 
 
 @employee_bp.route("/meta/options", methods=["GET"])
@@ -90,7 +247,7 @@ def get_all():
         .skip((page - 1) * per_page)
         .limit(per_page)
     )
-    return jsonify(success=True, data=[serialize_employee(d) for d in docs],
+    return jsonify(success=True, data=[_serialize_with_contract(d) for d in docs],
                    total=total, page=page, per_page=per_page), 200
 
 
@@ -166,12 +323,53 @@ def create():
                 {"$push": {"client_history": eng}}
             )
             doc = mongo.db.employees.find_one({"_id": result.inserted_id})
+        # ── Seed salary history with the initial salary ──
+        if data.get("salary"):
+            mongo.db.employees.update_one(
+                {"_id": result.inserted_id},
+                {"$push": {"salary_history": {
+                    "rate":           float(data.get("salary", 0)),
+                    "effective_from": doj or datetime.utcnow(),
+                    "note":           "Initial salary",
+                }}}
+            )
+            doc = mongo.db.employees.find_one({"_id": result.inserted_id})
 
         return jsonify(success=True, message="Employee created", data=serialize_employee(doc)), 201
     except ValueError as e:
         return jsonify(success=False, message=str(e)), 400
     except Exception as e:
         return jsonify(success=False, message=str(e)), 500
+
+@employee_bp.route("/<eid>/salary", methods=["POST"])
+@jwt_required()
+def update_salary(eid):
+    """Record a salary change (increment/decrement) with history."""
+    doc, err = _find(eid)
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    new_salary = float(data.get("salary", 0))
+    note = data.get("note", "")
+    effective_from = datetime.utcnow()
+    if data.get("effective_from"):
+        try:
+            effective_from = datetime.fromisoformat(data["effective_from"].replace("Z", "+00:00"))
+        except Exception:
+            pass
+
+    mongo.db.employees.update_one(
+        {"_id": doc["_id"]},
+        {
+            "$set":  {"salary": new_salary, "updated_at": datetime.utcnow()},
+            "$push": {"salary_history": {
+                "rate": new_salary, "effective_from": effective_from, "note": note,
+            }},
+        }
+    )
+    updated = mongo.db.employees.find_one({"_id": doc["_id"]})
+    return jsonify(success=True, message="Salary updated", data=_serialize_with_contract(updated)), 200
+
 
 
 @employee_bp.route("/<eid>", methods=["GET"])
@@ -180,7 +378,7 @@ def get_one(eid):
     doc, err = _find(eid)
     if err:
         return err
-    return jsonify(success=True, data=serialize_employee(doc)), 200
+    return jsonify(success=True, data=_serialize_with_contract(doc)), 200
 
 
 @employee_bp.route("/<eid>", methods=["PUT"])
@@ -208,7 +406,19 @@ def update(eid):
             upd.pop("date_of_joining", None)
 
     upd["updated_at"] = datetime.utcnow()
-
+    # ── Auto-track salary changes made via the edit form ──
+    if "salary" in upd:
+        old_salary = float(doc.get("salary", 0) or 0)
+        new_salary = float(upd["salary"] or 0)
+        if new_salary != old_salary:
+            mongo.db.employees.update_one(
+                {"_id": doc["_id"]},
+                {"$push": {"salary_history": {
+                    "rate": new_salary,
+                    "effective_from": datetime.utcnow(),
+                    "note": "Updated via employee edit",
+                }}}
+            )
     # ── Auto-create engagement if client changed ──
     new_client = upd.get("current_client", "").strip()
     old_client = doc.get("current_client", "").strip()
@@ -307,6 +517,9 @@ def add_engagement(eid):
              }},
         )
         updated = mongo.db.employees.find_one({"_id": doc["_id"]})
+        _recompute_employee_current_state(updated)
+
+        updated = mongo.db.employees.find_one({"_id": doc["_id"]})
         return jsonify(success=True, message="Engagement added", data=serialize_employee(updated)), 200
     except Exception as e:
         return jsonify(success=False, message=str(e)), 500
@@ -332,6 +545,10 @@ def end_engagement(eid, idx):
         {"_id": doc["_id"]},
         {"$set": {f"client_history.{idx}.end_date": end_date, "updated_at": datetime.utcnow()}},
     )
+
+    updated = mongo.db.employees.find_one({"_id": doc["_id"]})
+    _recompute_employee_current_state(updated)
+    
     updated = mongo.db.employees.find_one({"_id": doc["_id"]})
     return jsonify(success=True, message="Engagement ended", data=serialize_employee(updated)), 200
 
@@ -433,5 +650,136 @@ def update_engagement(eid, idx):
         if "project_name"     in data: upd["current_project"]      = data["project_name"]
 
     mongo.db.employees.update_one({"_id": doc["_id"]}, {"$set": upd})
+
+    updated = mongo.db.employees.find_one({"_id": doc["_id"]})
+    _recompute_employee_current_state(updated)
+
     updated = mongo.db.employees.find_one({"_id": doc["_id"]})
     return jsonify(success=True, message="Engagement updated", data=serialize_employee(updated)), 200
+
+
+
+# ------------------------employee lifecycle endpoint---------------------------
+def _fmt_tenure(days):
+    total_months = round(days / 30.44)
+    yrs = total_months // 12
+    mos = total_months % 12
+    if yrs == 0:   return f"{mos} mo"
+    if mos == 0:   return f"{yrs} yr"
+    return f"{yrs} yr {mos} mo"
+@employee_bp.route("/<eid>/lifecycle", methods=["GET"])
+@jwt_required()
+def get_lifecycle(eid):
+    doc, err = _find(eid)
+    if err:
+        return err
+
+    now = datetime.utcnow()
+    doj = _to_dt(doc.get("date_of_joining")) or _to_dt(doc.get("created_at")) or now
+    tenure_days = max((now - doj).days, 0)
+
+    # ── Bench periods ──
+    bench_periods, total_bench_days = _compute_bench_periods(doc)
+
+    # ── Client engagements + revenue (per-engagement, prorated via billing_history) ──
+    engagements, revenue_by_client = [], {}
+    total_revenue = 0.0
+
+    for eng in doc.get("client_history", []):
+        start = _to_dt(eng.get("start_date")) or now
+        end   = _to_dt(eng.get("end_date")) or now
+
+        raw_billing_hist = eng.get("billing_history", [])
+        
+        # ── FIX: only keep billing history entries within the engagement period ──
+        # If effective_from is outside [start, end], it corrupts _prorated_total
+        clipped_billing_hist = [
+            bh for bh in raw_billing_hist
+            if _to_dt(bh.get("effective_from")) and
+            start <= _to_dt(bh.get("effective_from")) <= end
+        ]
+        
+        # Normalize annual → monthly
+        monthly_billing_hist = [
+            {**bh, "rate": (bh.get("rate", 0) or 0) / 12}
+            for bh in clipped_billing_hist
+        ]
+        monthly_rate = (eng.get("billing_rate", 0) or 0) / 12
+        revenue = _prorated_total(monthly_billing_hist, monthly_rate, start, end)        
+        
+        total_revenue += revenue
+        client = eng.get("client_name", "Unknown")
+        revenue_by_client[client] = revenue_by_client.get(client, 0) + revenue
+
+        engagements.append({
+            "client_name":       client,
+            "project_name":      eng.get("project_name", ""),
+            "role":              eng.get("role", ""),
+            "start_date":        start.isoformat(),
+            "end_date":          end.isoformat() if eng.get("end_date") else None,
+            "is_active":         _is_engagement_active_now(eng),
+            "billing_rate":      eng.get("billing_rate", 0) or 0,
+            "billing_currency":  eng.get("billing_currency", "INR"),
+            "billing_history":   eng.get("billing_history", []),
+            "revenue_generated": round(revenue, 2),
+        })
+
+    revenue_by_client = [
+        {"client_name": k, "total_revenue": round(v, 2)}
+        for k, v in sorted(revenue_by_client.items(), key=lambda x: -x[1])
+    ]
+
+    # # ── Salary history + increments ──
+
+    salary_history = sorted(
+        doc.get("salary_history", []),
+        key=lambda h: _to_dt(h.get("effective_from")) or datetime.min
+    )
+    if not salary_history:
+        salary_history = [{"rate": doc.get("salary", 0) or 0,
+                            "effective_from": doj.isoformat(), "note": "Initial salary"}]
+
+    increments = []
+    for i in range(1, len(salary_history)):
+        prev, curr = salary_history[i - 1], salary_history[i]
+        diff = (curr.get("rate", 0) or 0) - (prev.get("rate", 0) or 0)
+        pct  = round((diff / prev["rate"] * 100), 2) if prev.get("rate") else 0
+        increments.append({
+            "effective_from":  curr.get("effective_from"),
+            "from_rate":       prev.get("rate", 0),
+            "to_rate":         curr.get("rate", 0),
+            "increase_amount": round(diff, 2),
+            "increase_pct":    pct,
+            "note":            curr.get("note", ""),
+        })
+
+    # ── FIX: normalize annual → monthly before prorating ──
+    monthly_salary_hist = [
+        {**s, "rate": (s.get("rate", 0) or 0) / 12}
+        for s in salary_history
+    ]
+    monthly_salary_default = (doc.get("salary", 0) or 0) / 12
+
+    # This now correctly accounts for increments too
+    total_salary_paid = _prorated_total(
+        monthly_salary_hist,        # ← monthly rates with correct effective_from dates
+        monthly_salary_default,     # ← fallback monthly rate
+        doj,
+        now
+    )
+
+    return jsonify(success=True, data={
+        "date_of_joining":         doj.isoformat(),
+        "tenure_days":             tenure_days,
+        "tenure_years":            round(tenure_days / 365.25, 2),
+        "tenure_readable":   _fmt_tenure(tenure_days),
+        "bench_periods":           bench_periods,
+        "total_bench_days":        total_bench_days,
+        "engagements":             engagements,
+        "revenue_by_client":       revenue_by_client,
+        "total_revenue_generated": round(total_revenue, 2),
+        "salary_history":          salary_history,
+        "salary_increments":       increments,
+        "total_salary_paid":       total_salary_paid,
+        "net_contribution":        round(total_revenue - total_salary_paid, 2),
+    }), 200

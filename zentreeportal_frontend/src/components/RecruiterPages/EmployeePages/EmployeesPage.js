@@ -341,7 +341,7 @@ function EmployeeTable({ employees, filtered, onView, onEdit, onDelete, onAdd })
         <Table>
           <TableHead>
             <TableRow sx={{ bgcolor: "#f8fafc" }}>
-              {["Employee", "Designation", "Department", "Current Client","Salary", "Client Billing", "DOJ", "Exp.", "Status", "Actions"].map(h => (
+              {["Employee", "Designation", "Department", "Current Client","Contract Until","Salary", "Client Billing", "DOJ", "Exp.", "Status", "Actions"].map(h => (
                 <TableCell key={h} sx={{ fontWeight: 700, fontSize: 12, color: "#64748b" }}>{h}</TableCell>
               ))}
             </TableRow>
@@ -349,7 +349,7 @@ function EmployeeTable({ employees, filtered, onView, onEdit, onDelete, onAdd })
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} align="center" sx={{ py: 6, color: "text.secondary" }}>
+                <TableCell colSpan={11} align="center" sx={{ py: 6, color: "text.secondary" }}>
                   No employees match your filters
                 </TableCell>
               </TableRow>
@@ -383,6 +383,18 @@ function EmployeeTable({ employees, filtered, onView, onEdit, onDelete, onAdd })
                           <Typography fontSize={11} color="text.secondary">{emp.current_project}</Typography>
                         )}
                       </Box>
+                    ) : <Typography fontSize={12} color="text.disabled">—</Typography>}
+                  </TableCell>
+                  <TableCell>
+                    {emp.current_client ? (
+                      emp.current_engagement_end_date ? (
+                        <Typography fontSize={12} fontWeight={600}
+                          color={new Date(emp.current_engagement_end_date) < new Date() ? "#dc2626" : "#c2410c"}>
+                          {fmtDate(emp.current_engagement_end_date)}
+                        </Typography>
+                      ) : (
+                        <Typography fontSize={11} color="text.disabled">Open</Typography>
+                      )
                     ) : <Typography fontSize={12} color="text.disabled">—</Typography>}
                   </TableCell>
                   <TableCell>

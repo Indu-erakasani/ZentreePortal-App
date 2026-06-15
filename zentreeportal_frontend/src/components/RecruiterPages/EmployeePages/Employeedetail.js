@@ -42,6 +42,10 @@ const api = {
   addDocument:      (id, pl)      => fetch(`${ONBOARDING_BASE}/${id}/document`,          { method: "POST",   headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
   updateDocument:   (id, idx, pl) => fetch(`${ONBOARDING_BASE}/${id}/document/${idx}`,  { method: "PUT",    headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
   deleteDocument:   (id, idx)     => fetch(`${ONBOARDING_BASE}/${id}/document/${idx}`,  { method: "DELETE", headers: hdrs() }).then(ok),
+ 
+  getLifecycle: (id)     => fetch(`${EMPLOYEE_BASE}/${id}/lifecycle`, { headers: hdrs() }).then(ok),
+  updateSalary: (id, pl) => fetch(`${EMPLOYEE_BASE}/${id}/salary`,    { method: "POST", headers: hdrs(), body: JSON.stringify(pl) }).then(ok),
+ 
   // File upload — FormData, no Content-Type (browser sets multipart boundary)
   uploadFile: (id, idx, file) => {
     const fd = new FormData();
@@ -816,9 +820,7 @@ function DocumentsTab({ employee, onboarding, onRefresh }) {
 }
 
 
-// ────────────────────────────────────────────────────────────────────────────
 // TAB 3 — Client History / Engagements
-// ────────────────────────────────────────────────────────────────────────────
 
 function EngagementTab({ employee, onRefresh }) {
   const [open,          setOpen]          = useState(false);
@@ -1242,10 +1244,328 @@ function EngagementTab({ employee, onRefresh }) {
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+// TAB 4 — Finanicial Summary 
+
+
+function LifecycleTab({ employee, onRefresh }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [salaryOpen, setSalaryOpen] = useState(false);
+  const [salaryForm, setSalaryForm] = useState({ salary: "", effective_from: "", note: "" });
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try { setData((await api.getLifecycle(employee._id)).data); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [employee._id]);
+
+  const openSalaryUpdate = () => setSalaryForm({
+    salary: employee.salary || "",
+    effective_from: new Date().toISOString().split("T")[0],
+    note: "",
+  }) || setSalaryOpen(true);
+
+  const handleSalarySave = async () => {
+    if (!salaryForm.salary) return;
+    setSaving(true);
+    try {
+      await api.updateSalary(employee._id, { ...salaryForm, salary: Number(salaryForm.salary) });
+      setSalaryOpen(false); load(); onRefresh();
+    } finally { setSaving(false); }
+  };
+  const fmtTenure = (years) => {
+    const totalMonths = Math.round(years * 12);
+    const yrs = Math.floor(totalMonths / 12);
+    const mos = totalMonths % 12;
+    if (yrs === 0) return `${mos} mo`;
+    if (mos === 0) return `${yrs} yr`;
+    return `${yrs} yr ${mos} mo`;
+  };
+  if (loading || !data) return <Box p={4} display="flex" justifyContent="center"><CircularProgress /></Box>;
+
+  return (
+    <Box p={3}>
+      <Grid container spacing={2} mb={3}>
+        <Grid item xs={6} sm={3}>
+          <Box p={2} borderRadius={2} border="1px solid #e2e8f0">
+            <Typography fontSize={11} color="text.secondary" fontWeight={600} 
+              textTransform="uppercase">Joined</Typography>
+            <Typography fontWeight={800} fontSize={16}>
+              {fmtDate(data.date_of_joining)}
+            </Typography>
+            {/* Change this line: */}
+            <Typography fontSize={11} color="text.secondary">
+              {fmtTenure(data.tenure_years)} tenure
+            </Typography>
+          </Box>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Box p={2} borderRadius={2} border="1px solid #fed7aa" bgcolor="#fff7ed">
+            <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase">Total Bench Time</Typography>
+            <Typography fontWeight={800} fontSize={16} color="#c2410c">{data.total_bench_days} days</Typography>
+          </Box>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Box p={2} borderRadius={2} border="1px solid #bbf7d0" bgcolor="#f0fdf4">
+            <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase">Revenue Generated</Typography>
+            <Typography fontWeight={800} fontSize={16} color="#15803d">{fmtMoney(data.total_revenue_generated)}</Typography>
+          </Box>
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <Box p={2} borderRadius={2} border="1px solid #fecaca" bgcolor="#fef2f2">
+            <Typography fontSize={11} color="text.secondary" fontWeight={600} textTransform="uppercase">Total Salary Paid</Typography>
+            <Typography fontWeight={800} fontSize={16} color="#dc2626">{fmtMoney(data.total_salary_paid)}</Typography>
+          </Box>
+        </Grid>
+      </Grid>
+
+      <SectionLabel>Revenue by Client</SectionLabel>
+      <Table size="small" sx={{ mb: 3 }}>
+        <TableHead><TableRow>
+          <TableCell>Client</TableCell><TableCell>Project / Role</TableCell>
+          <TableCell>Period</TableCell><TableCell align="right">Revenue</TableCell>
+        </TableRow></TableHead>
+        <TableBody>
+          {data.engagements.map((e, i) => (
+            <TableRow key={i}>
+              <TableCell>{e.client_name}</TableCell>
+              <TableCell>{e.project_name}{e.role && ` · ${e.role}`}</TableCell>
+              <TableCell>{fmtDate(e.start_date)} → {e.end_date ? fmtDate(e.end_date) : "Present"}</TableCell>
+              <TableCell align="right">{fmtMoney(e.revenue_generated)}</TableCell>
+            </TableRow>
+          ))}
+          {data.revenue_by_client.map((c, i) => (
+            <TableRow key={`tot-${i}`} sx={{ bgcolor: "#f8fafc" }}>
+              <TableCell colSpan={3}><Typography fontWeight={700}>{c.client_name} — Total</Typography></TableCell>
+              <TableCell align="right"><Typography fontWeight={700} color="#15803d">{fmtMoney(c.total_revenue)}</Typography></TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+
+      <SectionLabel>Bench Periods</SectionLabel>
+      {data.bench_periods.length === 0 ? (
+        <Typography fontSize={13} color="text.secondary" mb={3}>No bench gaps — continuously deployed since joining.</Typography>
+      ) : (
+        <Table size="small" sx={{ mb: 3 }}>
+          <TableHead><TableRow><TableCell>From</TableCell><TableCell>To</TableCell><TableCell align="right">Days</TableCell></TableRow></TableHead>
+          <TableBody>
+            {data.bench_periods.map((p, i) => (
+              <TableRow key={i}>
+                <TableCell>{fmtDate(p.start)}</TableCell>
+                <TableCell>{p.ongoing ? "Present" : fmtDate(p.end)}</TableCell>
+                <TableCell align="right">{p.days}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+{/* ── Salary History ── */}
+<Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5}>
+  <SectionLabel>Salary History</SectionLabel>
+  <Button
+    size="small" variant="outlined"
+    onClick={openSalaryUpdate}
+    sx={{ textTransform: "none", fontWeight: 700, mb: 1.5 }}>
+    Record Salary Change
+  </Button>
+</Box>
+
+<Box sx={{ border: "1px solid #e2e8f0", borderRadius: 2, overflow: "hidden", mb: 3 }}>
+  <Table size="small">
+    <TableHead>
+      <TableRow sx={{ bgcolor: "#f8fafc" }}>
+        <TableCell sx={{ fontWeight: 700, fontSize: 11, color: "#64748b" }}>
+          Effective From
+        </TableCell>
+        <TableCell align="right" sx={{ fontWeight: 700, fontSize: 11, color: "#64748b" }}>
+          Annual Salary
+        </TableCell>
+        <TableCell align="right" sx={{ fontWeight: 700, fontSize: 11, color: "#64748b" }}>
+          Monthly
+        </TableCell>
+        <TableCell align="right" sx={{ fontWeight: 700, fontSize: 11, color: "#64748b" }}>
+          Increase
+        </TableCell>
+        <TableCell align="right" sx={{ fontWeight: 700, fontSize: 11, color: "#64748b" }}>
+          Hike %
+        </TableCell>
+        <TableCell sx={{ fontWeight: 700, fontSize: 11, color: "#64748b" }}>
+          Note
+        </TableCell>
+      </TableRow>
+    </TableHead>
+    <TableBody>
+      {data.salary_history.map((s, i) => {
+        const inc = data.salary_increments.find(
+          x => x.effective_from === s.effective_from
+        );
+        const isLatest = i === data.salary_history.length - 1;
+        const isFirst  = i === 0;
+
+        return (
+          <TableRow key={i}
+            sx={{ bgcolor: isLatest ? "#f0fdf4" : "inherit" }}>
+
+            {/* Effective From */}
+            <TableCell>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Typography fontSize={13} fontWeight={600}>
+                  {fmtDate(s.effective_from)}
+                </Typography>
+                {isFirst && (
+                  <Chip label="Joining" size="small"
+                    sx={{ fontSize: 9, height: 16, bgcolor: "#dbeafe", color: "#1e40af", fontWeight: 700 }} />
+                )}
+                {isLatest && !isFirst && (
+                  <Chip label="Current" size="small"
+                    sx={{ fontSize: 9, height: 16, bgcolor: "#d1fae5", color: "#15803d", fontWeight: 700 }} />
+                )}
+              </Box>
+            </TableCell>
+
+            {/* Annual Salary */}
+            <TableCell align="right">
+              <Typography fontSize={13} fontWeight={700}
+                color={isLatest ? "#15803d" : "#0f172a"}>
+                {fmtMoney(s.rate)}
+              </Typography>
+            </TableCell>
+
+            {/* Monthly */}
+            <TableCell align="right">
+              <Typography fontSize={12} color="#64748b">
+                {fmtMoney(Math.round((s.rate || 0) / 12))}
+                <Typography component="span" fontSize={10} color="#9ca3af">/mo</Typography>
+              </Typography>
+            </TableCell>
+
+            {/* Increase Amount */}
+            <TableCell align="right">
+              {inc ? (
+                <Typography fontSize={12} fontWeight={700}
+                  color={inc.increase_amount >= 0 ? "#15803d" : "#dc2626"}>
+                  {inc.increase_amount >= 0 ? "+" : ""}
+                  {fmtMoney(inc.increase_amount)}
+                </Typography>
+              ) : (
+                <Typography fontSize={12} color="#9ca3af">—</Typography>
+              )}
+            </TableCell>
+
+            {/* Hike % */}
+            <TableCell align="right">
+              {inc ? (
+                <Chip
+                  label={`${inc.increase_amount >= 0 ? "+" : ""}${inc.increase_pct}%`}
+                  size="small"
+                  sx={{
+                    fontWeight: 700, fontSize: 11,
+                    bgcolor: inc.increase_pct >= 10 ? "#d1fae5"
+                           : inc.increase_pct >= 0  ? "#fef3c7" : "#fee2e2",
+                    color:   inc.increase_pct >= 10 ? "#15803d"
+                           : inc.increase_pct >= 0  ? "#d97706" : "#dc2626",
+                  }}
+                />
+              ) : (
+                <Typography fontSize={12} color="#9ca3af">—</Typography>
+              )}
+            </TableCell>
+
+            {/* Note */}
+            <TableCell>
+              <Typography fontSize={12} color="#64748b">
+                {s.note || "—"}
+              </Typography>
+            </TableCell>
+          </TableRow>
+        );
+      })}
+    </TableBody>
+
+    {/* ── Summary footer row ── */}
+    <TableRow sx={{ bgcolor: "#eff6ff", borderTop: "2px solid #e2e8f0" }}>
+      <TableCell colSpan={2}>
+        <Typography fontSize={12} fontWeight={800} color="#0f172a">
+          Total Salary Paid (prorated)
+        </Typography>
+      </TableCell>
+      <TableCell colSpan={3} />
+      <TableCell align="right" colSpan={1}>
+        <Typography fontSize={13} fontWeight={800} color="#dc2626">
+          {fmtMoney(data.total_salary_paid)}
+        </Typography>
+      </TableCell>
+    </TableRow>
+  </Table>
+</Box>
+
+{/* ── Net Contribution box ── */}
+<Box p={2} borderRadius={2} mb={3}
+  sx={{
+    border: `1px solid ${data.net_contribution >= 0 ? "#bbf7d0" : "#fecaca"}`,
+    bgcolor: data.net_contribution >= 0 ? "#f0fdf4" : "#fef2f2",
+  }}>
+  <Box display="flex" justifyContent="space-between" alignItems="center">
+    <Box>
+      <Typography fontSize={11} fontWeight={700} color="#64748b"
+        textTransform="uppercase" letterSpacing={0.5}>
+        Net Contribution (Revenue − Salary)
+      </Typography>
+      <Typography fontSize={11} color="#9ca3af" mt={0.3}>
+        What this employee has contributed net of their cost
+      </Typography>
+    </Box>
+    <Typography fontSize={22} fontWeight={800}
+      color={data.net_contribution >= 0 ? "#15803d" : "#dc2626"}>
+      {data.net_contribution >= 0 ? "+" : ""}
+      {fmtMoney(data.net_contribution)}
+    </Typography>
+  </Box>
+</Box>
+
+      <Dialog open={salaryOpen} onClose={() => setSalaryOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle fontWeight={700}>Record Salary Change</DialogTitle>
+        <DialogContent sx={{ pt: 2.5 }}>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField fullWidth size="small" type="number" label="New Annual Salary (₹)"
+                value={salaryForm.salary} onChange={e => setSalaryForm(p => ({ ...p, salary: e.target.value }))} />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField fullWidth size="small" type="date" label="Effective From" InputLabelProps={{ shrink: true }}
+                value={salaryForm.effective_from} onChange={e => setSalaryForm(p => ({ ...p, effective_from: e.target.value }))} />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField fullWidth size="small" label="Note (e.g. Annual increment)"
+                value={salaryForm.note} onChange={e => setSalaryForm(p => ({ ...p, note: e.target.value }))} />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button onClick={() => setSalaryOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleSalarySave} disabled={saving || !salaryForm.salary} sx={{ bgcolor: "#15803d" }}>
+            {saving && <CircularProgress size={16} sx={{ mr: 1, color: "#fff" }} />}
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
+
+
 // Main EmployeeDetail dialog — assembles all tabs
-// ────────────────────────────────────────────────────────────────────────────
-const TABS = ["Profile", "Onboarding", "Documents", "Client History"];
+const TABS = ["Profile", "Onboarding", "Documents", "Client History","Financial Summary"];
 
 export default function EmployeeDetail({ open, employee, onClose, onEdit, onEmployeeUpdate }) {
   const [tab,        setTab]        = useState(0);
@@ -1359,6 +1679,7 @@ export default function EmployeeDetail({ open, employee, onClose, onEdit, onEmpl
             {tab === 1 && <OnboardingTab employee={employee} onboarding={onboarding} onRefresh={loadOnboarding} />}
             {tab === 2 && <DocumentsTab  employee={employee} onboarding={onboarding} onRefresh={loadOnboarding} />}
             {tab === 3 && <EngagementTab employee={employee} onRefresh={onEmployeeUpdate} />}
+            {tab === 4 && <LifecycleTab employee={employee} onRefresh={onEmployeeUpdate} />}
           </>
         )}
       </DialogContent>
