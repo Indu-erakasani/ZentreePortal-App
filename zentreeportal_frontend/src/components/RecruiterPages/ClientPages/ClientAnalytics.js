@@ -372,38 +372,41 @@ export default function AllClientsAnalytics() {
   // ── Chart data (scaled by period) ────────────────────────────────────────
 
   const revenueByClient = [...clients]
-  .filter(c =>
-    // only show clients with some revenue (active or historical)
-    (c.total_billing_revenue || 0) > 0 || (c.historical_billing || 0) > 0
-  )
-  .sort((a, b) => {
-    const aVal = (a.total_billing_revenue || 0) + (a.historical_billing || 0);
-    const bVal = (b.total_billing_revenue || 0) + (b.historical_billing || 0);
-    return bVal - aVal;
-  })
-  .slice(0, 10)
-  .map(c => {
-    const isHistOnly = c.is_historical_only === true;
-    if (isHistOnly) {
-      // Historical lump sum — DO NOT scale, show actual total earned
-      const hBill = c.historical_billing || 0;
-      const hSal  = c.historical_salary  || 0;
+    .filter(c => (c.total_billing_revenue || 0) > 0 || (c.historical_billing || 0) > 0)
+    .sort((a, b) => {
+      const aVal = (a.total_billing_revenue || 0) + (a.historical_billing || 0);
+      const bVal = (b.total_billing_revenue || 0) + (b.historical_billing || 0);
+      return bVal - aVal;
+    })
+    .slice(0, 10)
+    .map(c => {
+      const isHistOnly = c.is_historical_only === true;
+
+      // ── For custom period: historical clients had no overlap → show 0 ──
+      if (isHistOnly && period === "custom") {
+        return null; // filter out — no activity in this custom range
+      }
+
+      if (isHistOnly) {
+        const hBill = c.historical_billing || 0;
+        const hSal  = c.historical_salary  || 0;
+        return {
+          name:    c.company_name,
+          revenue: hBill,
+          cost:    hSal,
+          margin:  hBill - hSal,
+        };
+      }
+
+      // Active client — scale monthly rate by period multiplier
       return {
         name:    c.company_name,
-        revenue: hBill,
-        cost:    hSal,
-        margin:  hBill - hSal,
+        revenue: scale(c.total_billing_revenue || 0),
+        cost:    scale(c.total_salary_cost     || 0),
+        margin:  scale(c.net_margin            || 0),
       };
-    }
-    // Active client — scale monthly rate by period multiplier
-    return {
-      name:    c.company_name,
-      revenue: scale(c.total_billing_revenue || 0),
-      cost:    scale(c.total_salary_cost     || 0),
-      margin:  scale(c.net_margin            || 0),
-    };
-  });
-
+    })
+    .filter(Boolean); // remove nulls
 
   const headcountByClient = [...clients]
     .filter(c => c.total_active_employees > 0)

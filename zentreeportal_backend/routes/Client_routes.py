@@ -558,25 +558,32 @@ def all_clients_analytics():
     for client in clients:
         company_name  = client["company_name"]
         client_id_str = str(client["_id"])
-
+        
+        
         r = _process_client_entry(company_name, client, client_id_str)
-        if custom_period:
-            pt = _compute_period_totals(company_name, all_employees, period_start, period_end)
-            total_billing, total_salary = pt["total_billing"], pt["total_salary"]
-            active_count, engagements   = pt["active_count"], pt["engagements"]
-        else:
-            total_billing, total_salary = r["total_billing"], r["total_salary"]
-            active_count, engagements   = r["active_count"], r["engagements"]
 
+        # ── Always compute JD count (needed regardless of period) ──
         rb_jd_count_for_portal = resourcing_db["jd_details"].count_documents(
             {"companyName": {"$regex": f"^{re.escape(company_name.strip())}$", "$options": "i"}}
         )
         total_jds_combined = len(r["client_jobs"]) + rb_jd_count_for_portal
 
-        # ── Use effective billing (active if exists, else historical) ──
-        eff_billing = r["total_billing"] if r["total_billing"] > 0 else r.get("historical_billing", 0)
-        eff_salary  = r["total_salary"]  if r["total_salary"]  > 0 else r.get("historical_salary",  0)
-        net_margin  = eff_billing - eff_salary
+        if custom_period:
+            pt = _compute_period_totals(company_name, all_employees, period_start, period_end)
+            total_billing, total_salary = pt["total_billing"], pt["total_salary"]
+            active_count, engagements   = pt["active_count"], pt["engagements"]
+            # Custom period: use ONLY what overlapped the date range
+            # Never fall back to historical — if 0, no activity in range
+            eff_billing = total_billing
+            eff_salary  = total_salary
+        else:
+            total_billing, total_salary = r["total_billing"], r["total_salary"]
+            active_count, engagements   = r["active_count"], r["engagements"]
+            # Preset period: active billing, or fall back to historical
+            eff_billing = r["total_billing"] if r["total_billing"] > 0 else r.get("historical_billing", 0)
+            eff_salary  = r["total_salary"]  if r["total_salary"]  > 0 else r.get("historical_salary",  0)
+
+        net_margin = eff_billing - eff_salary
 
         result.append({
             "client_id":              client_id_str,
@@ -632,10 +639,14 @@ def all_clients_analytics():
         )
 
         r = _process_client_entry(raw_name.strip(), None, "__rb_only__")
-
-        eff_billing = r["total_billing"] if r["total_billing"] > 0 else r.get("historical_billing", 0)
-        eff_salary  = r["total_salary"]  if r["total_salary"]  > 0 else r.get("historical_salary",  0)
-        net_margin  = eff_billing - eff_salary
+        if custom_period:
+            pt = _compute_period_totals(raw_name.strip(), all_employees, period_start, period_end)
+            eff_billing = pt["total_billing"]
+            eff_salary  = pt["total_salary"]
+        else:
+            eff_billing = r["total_billing"] if r["total_billing"] > 0 else r.get("historical_billing", 0)
+            eff_salary  = r["total_salary"]  if r["total_salary"]  > 0 else r.get("historical_salary",  0)
+        net_margin = eff_billing - eff_salary
 
         result.append({
             "client_id":              f"rb_{name_lower.replace(' ', '_')}",
